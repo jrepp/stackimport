@@ -34,7 +34,7 @@ public:
 	void			memcpy( size_t toOffs, const char* fromPtr, size_t fromOffs, size_t amount );
 	void			memcpy( size_t toOffs, const CBuf& fromPtr, size_t fromOffs = 0, size_t amount = SIZE_MAX );
 	
-	const char		operator [] ( int idx ) const;
+	char			operator [] ( int idx ) const;
 	char&			operator [] ( int idx );
 	
 	char*			buf( size_t offs = 0, size_t amount = SIZE_MAX );
@@ -47,11 +47,11 @@ public:
 	
 	size_t			size() const					{ return mShared->mSize; };
 	
-	int16_t			int16at( size_t offs ) const	{ int16_t* theBuf = (int16_t*) buf(offs,sizeof(int16_t)); return *theBuf; };
-	int32_t			int32at( size_t offs ) const	{ int32_t* theBuf = (int32_t*) buf(offs,sizeof(int32_t)); return *theBuf; };
+	int16_t			int16at( size_t offs ) const	{ int16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
+	int32_t			int32at( size_t offs ) const	{ int32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
 
-	uint16_t		uint16at( size_t offs ) const	{ uint16_t* theBuf = (uint16_t*) buf(offs,sizeof(uint16_t)); return *theBuf; };
-	uint32_t		uint32at( size_t offs ) const	{ uint32_t* theBuf = (uint32_t*) buf(offs,sizeof(uint32_t)); return *theBuf; };
+	uint16_t		uint16at( size_t offs ) const	{ uint16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
+	uint32_t		uint32at( size_t offs ) const	{ uint32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
 	
 	bool			hasdata( size_t offs, size_t amount )	{ return (mShared->mBuffer != NULL) && (amount +offs) <= mShared->mSize; };
 	

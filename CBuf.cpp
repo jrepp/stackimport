@@ -122,7 +122,7 @@ void	CBuf::memcpy( size_t toOffs, const CBuf& fromPtr, size_t fromOffs, size_t a
 }
 
 
-const char CBuf::operator [] ( int idx ) const
+char CBuf::operator [] ( int idx ) const
 {
 	if( idx >= mShared->mSize )
 		return 0;
@@ -214,4 +214,3 @@ CBuf&	CBuf::operator = ( const CBuf& inTemplate )
 	
 	return *this;
 }
-

@@ -9,7 +9,9 @@
 
 // If you're not compiling for a platform where the Mac resource manager is
 //	available, set the following to 0 to remove that code from compilation:
+#ifndef MAC_CODE
 #define MAC_CODE		1
+#endif
 
 // If you're compiling for 64 bit, you don't have access to QuickTime, which
 //	we use to create AIFF files from 'snd ' resources. So turn this off.
@@ -132,9 +134,13 @@ public:
 protected:
 	bool	LoadStackBlock( int32_t stackID, CBuf& blockData );
 	bool	LoadListBlock( CBuf& blockData );
-	bool	LoadPageTable( int32_t blockID, CBuf& blockData );
+	bool	LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEntryCount );
 	bool	LoadFontTable( int32_t blockID, CBuf& blockData );
 	bool	LoadStyleTable( int32_t blockID, CBuf& blockData );
+	bool	LoadMasterBlock( int32_t blockID, CBuf& blockData );
+	bool	LoadPrintBlock( int32_t blockID, CBuf& blockData );
+	bool	LoadPageSetupBlock( int32_t blockID, CBuf& blockData );
+	bool	LoadReportTemplateBlock( int32_t blockID, CBuf& blockData );
 	bool	LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& blockData, uint8_t inFlags );	// Card or Bkgd.
 	
 #if MAC_CODE

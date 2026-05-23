@@ -29,11 +29,65 @@
 
 #include <cstring>
 #include <fstream>
+#include <algorithm>
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"
 
 using namespace std;
+
+static void bounded_copy_in(char * dest, int destLength, int destStart, const char * src, int count)
+{
+	if( !dest || !src || count <= 0 || destLength <= 0 )
+		return;
+	int srcStart = 0;
+	if( destStart < 0 )
+	{
+		srcStart = -destStart;
+		count -= srcStart;
+		destStart = 0;
+	}
+	if( count <= 0 || destStart >= destLength )
+		return;
+	count = std::min( count, destLength -destStart );
+	memcpy( dest +destStart, src +srcStart, count );
+}
+
+static void bounded_copy_out(char * dest, int destLength, const char * src, int srcLength, int srcStart, int count)
+{
+	if( !dest || count <= 0 || destLength <= 0 )
+		return;
+	memset( dest, 0, std::min( count, destLength ) );
+	if( !src || srcLength <= 0 )
+		return;
+	int destStart = 0;
+	if( srcStart < 0 )
+	{
+		destStart = -srcStart;
+		count -= destStart;
+		srcStart = 0;
+	}
+	if( count <= 0 || srcStart >= srcLength || destStart >= destLength )
+		return;
+	count = std::min( count, srcLength -srcStart );
+	count = std::min( count, destLength -destStart );
+	memcpy( dest +destStart, src +srcStart, count );
+}
+
+static void bounded_fill(char * dest, int destLength, int destStart, char ch, int count)
+{
+	if( !dest || count <= 0 || destLength <= 0 )
+		return;
+	if( destStart < 0 )
+	{
+		count += destStart;
+		destStart = 0;
+	}
+	if( count <= 0 || destStart >= destLength )
+		return;
+	count = std::min( count, destLength -destStart );
+	memset( dest +destStart, ch, count );
+}
 
 int __bitmap_row_width(int width, int height, int depth)
 {
@@ -183,88 +237,88 @@ unsigned int picture::maskcoordbitmask(int x, int y)
 
 void picture::memcopyin(const char * src, int start, int count)
 {
-	memcpy(bitmap + start, src, count);
+	bounded_copy_in(bitmap, bitmaplength, start, src, count);
 }
 
 void picture::memcopyin(const char * src, int x, int y, int count)
 {
-	memcpy(bitmap + coordbyteoffset(x,y), src, count);
+	bounded_copy_in(bitmap, bitmaplength, coordbyteoffset(x,y), src, count);
 }
 
 void picture::maskmemcopyin(const char * src, int start, int count)
 {
-	memcpy(mask + start, src, count);
+	bounded_copy_in(mask, masklength, start, src, count);
 }
 
 void picture::maskmemcopyin(const char * src, int x, int y, int count)
 {
-	memcpy(mask + maskcoordbyteoffset(x,y), src, count);
+	bounded_copy_in(mask, masklength, maskcoordbyteoffset(x,y), src, count);
 }
 
 
 
 void picture::memcopyout(char * dest, int start, int count)
 {
-	memcpy(dest, bitmap + start, count);
+	bounded_copy_out(dest, count, bitmap, bitmaplength, start, count);
 }
 
 void picture::memcopyout(char * dest, int x, int y, int count)
 {
-	memcpy(dest, bitmap + coordbyteoffset(x,y), count);
+	bounded_copy_out(dest, count, bitmap, bitmaplength, coordbyteoffset(x,y), count);
 }
 
 void picture::maskmemcopyout(char * dest, int start, int count)
 {
-	memcpy(dest, mask + start, count);
+	bounded_copy_out(dest, count, mask, masklength, start, count);
 }
 
 void picture::maskmemcopyout(char * dest, int x, int y, int count)
 {
-	memcpy(dest, mask + maskcoordbyteoffset(x,y), count);
+	bounded_copy_out(dest, count, mask, masklength, maskcoordbyteoffset(x,y), count);
 }
 
 
 
 void picture::memcopyout(CBuf& dest, int start, int count)
 {
-	memcpy(dest.buf(0,count), bitmap + start, count);
+	bounded_copy_out(dest.buf(0,count), count, bitmap, bitmaplength, start, count);
 }
 
 void picture::memcopyout(CBuf& dest, int x, int y, int count)
 {
-	memcpy(dest.buf(0,count), bitmap + coordbyteoffset(x,y), count);
+	bounded_copy_out(dest.buf(0,count), count, bitmap, bitmaplength, coordbyteoffset(x,y), count);
 }
 
 void picture::maskmemcopyout(CBuf& dest, int start, int count)
 {
-	memcpy(dest.buf(0,count), mask + start, count);
+	bounded_copy_out(dest.buf(0,count), count, mask, masklength, start, count);
 }
 
 void picture::maskmemcopyout(CBuf& dest, int x, int y, int count)
 {
-	memcpy(dest.buf(0,count), mask + maskcoordbyteoffset(x,y), count);
+	bounded_copy_out(dest.buf(0,count), count, mask, masklength, maskcoordbyteoffset(x,y), count);
 }
 
 
 
 void picture::memfill(char ch, int start, int count)
 {
-	memset(bitmap + start, ch, count);
+	bounded_fill(bitmap, bitmaplength, start, ch, count);
 }
 
 void picture::memfill(char ch, int x, int y, int count)
 {
-	memset(bitmap + coordbyteoffset(x,y), ch, count);
+	bounded_fill(bitmap, bitmaplength, coordbyteoffset(x,y), ch, count);
 }
 
 void picture::maskmemfill(char ch, int start, int count)
 {
-	memset(mask + start, ch, count);
+	bounded_fill(mask, masklength, start, ch, count);
 }
 
 void picture::maskmemfill(char ch, int x, int y, int count)
 {
-	memset(mask + maskcoordbyteoffset(x,y), ch, count);
+	bounded_fill(mask, masklength, maskcoordbyteoffset(x,y), ch, count);
 }
 
 

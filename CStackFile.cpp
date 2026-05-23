@@ -76,6 +76,46 @@ const unsigned char*	UniCharFromMacRoman( unsigned char c )
 	}
 }
 
+void	WriteMacRomanXML( FILE* outFile, const CBuf& data, size_t startOffs, size_t endOffs )
+{
+	for( size_t x = startOffs; x < endOffs && data[static_cast<int>(x)] != 0; x++ )
+	{
+		char currCh = data[static_cast<int>(x)];
+		if( currCh == '<' )
+			fprintf( outFile, "&lt;" );
+		else if( currCh == '>' )
+			fprintf( outFile, "&gt;" );
+		else if( currCh == '&' )
+			fprintf( outFile, "&amp;" );
+		else
+			fprintf( outFile, "%s", UniCharFromMacRoman(currCh) );
+	}
+}
+
+size_t	MacRomanStringEnd( const CBuf& data, size_t startOffs )
+{
+	size_t x = startOffs;
+	for( ; x < data.size() && data[static_cast<int>(x)] != 0; x++ )
+	{
+	}
+	return x;
+}
+
+size_t	EvenAlign( size_t offs )
+{
+	return offs + (offs % 2);
+}
+
+int16_t	ReadBEInt16( const CBuf& data, size_t offs )
+{
+	return static_cast<int16_t>( ntohs(data.uint16at( offs )) );
+}
+
+int32_t	ReadBEInt32( const CBuf& data, size_t offs )
+{
+	return static_cast<int32_t>( ntohl(data.uint32at( offs )) );
+}
+
 
 void	NumVersionToStr( unsigned char numVersion[4], char outStr[16] )
 {
@@ -391,6 +431,304 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
+	return true;
+}
+
+bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
+{
+	if( mStatusMessages )
+		fprintf( stdout, "Status: Processing 'MAST' #%d (%lu bytes)\n", blockID, blockData.size() );
+
+	if( mDumpRawBlockData )
+	{
+		char sfn[256] = { 0 };
+		snprintf( sfn, sizeof(sfn), "MAST_%d.data", blockID );
+		blockData.tofile( sfn );
+	}
+
+	std::string	filePath = mBasePath;
+	filePath.append( "/master_-1.xml" );
+	FILE* vFile = fopen( filePath.c_str(), "w" );
+	if( !vFile )
+	{
+		fprintf( stderr, "Error: Couldn't create master reference XML at '%s'\n", filePath.c_str() );
+		return false;
+	}
+
+	fprintf( mXmlFile, "\t<master file=\"master_-1.xml\" />\n" );
+	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<master>\n" );
+	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+
+	for( size_t currOffs = 20; blockData.hasdata( currOffs, sizeof(uint32_t)); currOffs += sizeof(uint32_t) )
+	{
+		uint32_t	entry = ntohl(blockData.uint32at( currOffs ));
+		if( entry == 0 )
+			continue;
+		uint32_t	fileOffset = (entry >> 8) << 5;
+		uint8_t		idLowByte = entry & 0xff;
+		fprintf( vFile, "\t<reference>\n" );
+		fprintf( vFile, "\t\t<fileOffset>%u</fileOffset>\n", fileOffset );
+		fprintf( vFile, "\t\t<idLowByte>%u</idLowByte>\n", idLowByte );
+		fprintf( vFile, "\t\t<raw>0x%08x</raw>\n", entry );
+		fprintf( vFile, "\t</reference>\n" );
+	}
+
+	fprintf( vFile, "</master>\n" );
+	fclose( vFile );
+
+	if( mProgressMessages )
+		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+
+	return true;
+}
+
+bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
+{
+	if( mStatusMessages )
+		fprintf( stdout, "Status: Processing 'PRNT' #%d (%lu bytes)\n", blockID, blockData.size() );
+
+	if( mDumpRawBlockData )
+	{
+		char sfn[256] = { 0 };
+		snprintf( sfn, sizeof(sfn), "PRNT_%d.data", blockID );
+		blockData.tofile( sfn );
+	}
+
+	std::string	filePath = mBasePath;
+	filePath.append( "/printsettings.xml" );
+	FILE* vFile = fopen( filePath.c_str(), "w" );
+	if( !vFile )
+	{
+		fprintf( stderr, "Error: Couldn't create print settings XML at '%s'\n", filePath.c_str() );
+		return false;
+	}
+
+	fprintf( mXmlFile, "\t<printSettings id=\"%d\" file=\"printsettings.xml\" />\n", blockID );
+	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<printSettings>\n" );
+	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+
+	if( blockData.hasdata( 0x24, sizeof(int16_t) ) )
+		fprintf( vFile, "\t<pageSetupID>%d</pageSetupID>\n", ReadBEInt16( blockData, 0x24 ) );
+
+	if( blockData.hasdata( 0x128, sizeof(int16_t) ) )
+	{
+		int16_t	templateCount = ReadBEInt16( blockData, 0x128 );
+		fprintf( vFile, "\t<reportTemplateCount>%d</reportTemplateCount>\n", templateCount );
+		size_t	currOffs = 0x12a;
+		for( int n = 0; n < templateCount && blockData.hasdata( currOffs, 36 ); n++, currOffs += 36 )
+		{
+			int32_t	templateID = ReadBEInt32( blockData, currOffs );
+			uint8_t	nameLen = blockData[static_cast<int>(currOffs +4)];
+			if( nameLen > 31 )
+				nameLen = 31;
+			fprintf( vFile, "\t<reportTemplate>\n" );
+			fprintf( vFile, "\t\t<id>%d</id>\n", templateID );
+			fprintf( vFile, "\t\t<name>" );
+			WriteMacRomanXML( vFile, blockData, currOffs +5, currOffs +5 +nameLen );
+			fprintf( vFile, "</name>\n" );
+			fprintf( vFile, "\t</reportTemplate>\n" );
+		}
+	}
+
+	fprintf( vFile, "</printSettings>\n" );
+	fclose( vFile );
+
+	if( mProgressMessages )
+		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+
+	return true;
+}
+
+bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
+{
+	if( mStatusMessages )
+		fprintf( stdout, "Status: Processing 'PRST' #%d (%lu bytes)\n", blockID, blockData.size() );
+
+	if( mDumpRawBlockData )
+	{
+		char sfn[256] = { 0 };
+		snprintf( sfn, sizeof(sfn), "PRST_%d.data", blockID );
+		blockData.tofile( sfn );
+	}
+
+	char		fileName[256] = { 0 };
+	snprintf( fileName, sizeof(fileName), "pagesetup_%d.xml", blockID );
+	std::string	filePath = mBasePath;
+	filePath.append( "/" );
+	filePath.append( fileName );
+	FILE* vFile = fopen( filePath.c_str(), "w" );
+	if( !vFile )
+	{
+		fprintf( stderr, "Error: Couldn't create page setup XML at '%s'\n", filePath.c_str() );
+		return false;
+	}
+
+	fprintf( mXmlFile, "\t<pageSetup id=\"%d\" file=\"%s\" />\n", blockID, fileName );
+	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<pageSetup>\n" );
+	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+
+	size_t	currOffs = 4;
+	const char*	shortNames[] = {
+		"printerDriverVersion", "iDev", "vertResol", "horizResol",
+		"pageTop", "pageLeft", "pageBottom", "pageRight",
+		"paperTop", "paperLeft", "paperBottom", "paperRight",
+		"printerDeviceNumber", "pageV", "pageH"
+	};
+	for( size_t n = 0; n < sizeof(shortNames) / sizeof(shortNames[0]) && blockData.hasdata( currOffs, 2 ); n++, currOffs += 2 )
+		fprintf( vFile, "\t<%s>%d</%s>\n", shortNames[n], ReadBEInt16( blockData, currOffs ), shortNames[n] );
+
+	if( blockData.hasdata( currOffs, 2 ) )
+	{
+		fprintf( vFile, "\t<port>%u</port>\n", (uint8_t) blockData[static_cast<int>(currOffs++)] );
+		fprintf( vFile, "\t<feedType>%u</feedType>\n", (uint8_t) blockData[static_cast<int>(currOffs++)] );
+	}
+
+	const char*	printRecordNames[] = {
+		"iDev2", "vertResol2", "horizResol2", "pageTop2",
+		"pageLeft2", "pageBottom2", "pageRight2"
+	};
+	for( size_t n = 0; n < sizeof(printRecordNames) / sizeof(printRecordNames[0]) && blockData.hasdata( currOffs, 2 ); n++, currOffs += 2 )
+		fprintf( vFile, "\t<%s>%d</%s>\n", printRecordNames[n], ReadBEInt16( blockData, currOffs ), printRecordNames[n] );
+
+	currOffs += 16;	// Reserved.
+	if( blockData.hasdata( currOffs, 8 ) )
+	{
+		fprintf( vFile, "\t<firstPage>%d</firstPage>\n", ReadBEInt16( blockData, currOffs ) );
+		currOffs += 2;
+		fprintf( vFile, "\t<lastPage>%d</lastPage>\n", ReadBEInt16( blockData, currOffs ) );
+		currOffs += 2;
+		fprintf( vFile, "\t<numCopies>%d</numCopies>\n", ReadBEInt16( blockData, currOffs ) );
+		currOffs += 2;
+		uint8_t	printingMethod = blockData[static_cast<int>(currOffs++)];
+		fprintf( vFile, "\t<printingMethod>%s</printingMethod>\n", printingMethod == 0 ? "draft" : (printingMethod == 1 ? "deferred" : "unknown") );
+		currOffs++;	// Reserved.
+	}
+
+	fprintf( vFile, "</pageSetup>\n" );
+	fclose( vFile );
+
+	if( mProgressMessages )
+		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+
+	return true;
+}
+
+bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
+{
+	if( mStatusMessages )
+		fprintf( stdout, "Status: Processing 'PRFT' #%d (%lu bytes)\n", blockID, blockData.size() );
+
+	if( mDumpRawBlockData )
+	{
+		char sfn[256] = { 0 };
+		snprintf( sfn, sizeof(sfn), "PRFT_%d.data", blockID );
+		blockData.tofile( sfn );
+	}
+
+	char		fileName[256] = { 0 };
+	snprintf( fileName, sizeof(fileName), "reporttemplate_%d.xml", blockID );
+	std::string	filePath = mBasePath;
+	filePath.append( "/" );
+	filePath.append( fileName );
+	FILE* vFile = fopen( filePath.c_str(), "w" );
+	if( !vFile )
+	{
+		fprintf( stderr, "Error: Couldn't create report template XML at '%s'\n", filePath.c_str() );
+		return false;
+	}
+
+	fprintf( mXmlFile, "\t<reportTemplate id=\"%d\" file=\"%s\" />\n", blockID, fileName );
+	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<reportTemplate>\n" );
+	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+
+	if( blockData.hasdata( 24, 1 ) )
+	{
+		const char* units = "unknown";
+		switch( (uint8_t) blockData[4] )
+		{
+			case 0: units = "centimeters"; break;
+			case 1: units = "millimeters"; break;
+			case 2: units = "inches"; break;
+			case 3: units = "points"; break;
+		}
+		fprintf( vFile, "\t<units>%s</units>\n", units );
+		fprintf( vFile, "\t<margins>\n" );
+		fprintf( vFile, "\t\t<top>%d</top>\n", ReadBEInt16( blockData, 6 ) );
+		fprintf( vFile, "\t\t<left>%d</left>\n", ReadBEInt16( blockData, 8 ) );
+		fprintf( vFile, "\t\t<bottom>%d</bottom>\n", ReadBEInt16( blockData, 10 ) );
+		fprintf( vFile, "\t\t<right>%d</right>\n", ReadBEInt16( blockData, 12 ) );
+		fprintf( vFile, "\t</margins>\n" );
+		fprintf( vFile, "\t<spacing>\n\t\t<height>%d</height>\n\t\t<width>%d</width>\n\t</spacing>\n", ReadBEInt16( blockData, 14 ), ReadBEInt16( blockData, 16 ) );
+		fprintf( vFile, "\t<cellSize>\n\t\t<height>%d</height>\n\t\t<width>%d</width>\n\t</cellSize>\n", ReadBEInt16( blockData, 18 ), ReadBEInt16( blockData, 20 ) );
+		int16_t	flags = ReadBEInt16( blockData, 22 );
+		fprintf( vFile, "\t<leftToRight>%s</leftToRight>\n", (flags & (1 << 8)) ? "<true />" : "<false />" );
+		fprintf( vFile, "\t<dynamicHeight>%s</dynamicHeight>\n", (flags & (1 << 0)) ? "<true />" : "<false />" );
+		uint8_t	headerLen = blockData[24];
+		fprintf( vFile, "\t<header>" );
+		WriteMacRomanXML( vFile, blockData, 25, 25 +headerLen );
+		fprintf( vFile, "</header>\n" );
+	}
+
+	if( blockData.hasdata( 0x118, sizeof(int16_t) ) )
+	{
+		int16_t	itemCount = ntohs(blockData.int16at( 0x118 ));
+		fprintf( vFile, "\t<itemCount>%d</itemCount>\n", itemCount );
+		size_t	currOffs = 0x11a;
+		for( int n = 0; n < itemCount && blockData.hasdata( currOffs, 22 ); n++ )
+		{
+			int16_t	itemSize = ReadBEInt16( blockData, currOffs );
+			if( itemSize <= 0 || !blockData.hasdata( currOffs, itemSize ) )
+				break;
+
+			fprintf( vFile, "\t<item>\n" );
+			fprintf( vFile, "\t\t<rect>\n" );
+			fprintf( vFile, "\t\t\t<top>%d</top>\n", ReadBEInt16( blockData, currOffs +2 ) );
+			fprintf( vFile, "\t\t\t<left>%d</left>\n", ReadBEInt16( blockData, currOffs +4 ) );
+			fprintf( vFile, "\t\t\t<bottom>%d</bottom>\n", ReadBEInt16( blockData, currOffs +6 ) );
+			fprintf( vFile, "\t\t\t<right>%d</right>\n", ReadBEInt16( blockData, currOffs +8 ) );
+			fprintf( vFile, "\t\t</rect>\n" );
+			fprintf( vFile, "\t\t<columns>%d</columns>\n", ReadBEInt16( blockData, currOffs +10 ) );
+			int16_t	flags = ReadBEInt16( blockData, currOffs +12 );
+			fprintf( vFile, "\t\t<changeHeight>%s</changeHeight>\n", (flags & (1 << 13)) ? "<true />" : "<false />" );
+			fprintf( vFile, "\t\t<changeStyle>%s</changeStyle>\n", (flags & (1 << 12)) ? "<true />" : "<false />" );
+			fprintf( vFile, "\t\t<changeSize>%s</changeSize>\n", (flags & (1 << 11)) ? "<true />" : "<false />" );
+			fprintf( vFile, "\t\t<changeFont>%s</changeFont>\n", (flags & (1 << 10)) ? "<true />" : "<false />" );
+			fprintf( vFile, "\t\t<invert>%s</invert>\n", (flags & (1 << 4)) ? "<true />" : "<false />" );
+			fprintf( vFile, "\t\t<frame top=\"%s\" left=\"%s\" bottom=\"%s\" right=\"%s\" />\n",
+						(flags & (1 << 0)) ? "true" : "false",
+						(flags & (1 << 1)) ? "true" : "false",
+						(flags & (1 << 2)) ? "true" : "false",
+						(flags & (1 << 3)) ? "true" : "false" );
+			fprintf( vFile, "\t\t<textSize>%d</textSize>\n", ReadBEInt16( blockData, currOffs +14 ) );
+			fprintf( vFile, "\t\t<textHeight>%d</textHeight>\n", ReadBEInt16( blockData, currOffs +16 ) );
+			fprintf( vFile, "\t\t<textStyle>%u</textStyle>\n", (uint8_t) blockData[static_cast<int>(currOffs +18)] );
+			int16_t	textAlign = ReadBEInt16( blockData, currOffs +20 );
+			fprintf( vFile, "\t\t<textAlign>%d</textAlign>\n", textAlign );
+
+			size_t	contentStart = currOffs +22;
+			size_t	contentEnd = MacRomanStringEnd( blockData, contentStart );
+			fprintf( vFile, "\t\t<contents>" );
+			WriteMacRomanXML( vFile, blockData, contentStart, contentEnd );
+			fprintf( vFile, "</contents>\n" );
+
+			size_t	fontStart = contentEnd +1;
+			size_t	fontEnd = MacRomanStringEnd( blockData, fontStart );
+			fprintf( vFile, "\t\t<font>" );
+			WriteMacRomanXML( vFile, blockData, fontStart, fontEnd );
+			fprintf( vFile, "</font>\n" );
+			fprintf( vFile, "\t</item>\n" );
+
+			currOffs += itemSize;
+			currOffs = EvenAlign( currOffs );
+		}
+	}
+
+	fprintf( vFile, "</reportTemplate>\n" );
+	fclose( vFile );
+
+	if( mProgressMessages )
+		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+
 	return true;
 }
 
@@ -1057,6 +1395,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 				case 0x05:	// Picture file
 				{
 					fprintf( vFile, "\t\t<type>picture</type>\n" );
+					fprintf( vFile, "\t\t<source>%s</source>\n", currType == 0x05 ? "file" : "resource" );
 					int16_t		l, t, r, b;
 					fprintf( vFile, "\t\t<rect>\n" );
 					t = ntohs(theData.int16at( currOffs ));
@@ -1100,7 +1439,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 						fprintf( vFile, "</file>\n" );
 					else
 						fprintf( vFile, "</name>\n" );
-					currOffs++;	// Skip filler byte.
+					currOffs = EvenAlign( currOffs );
 					break;
 				}
 				
@@ -1130,7 +1469,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 }
 
 
-bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData )
+bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEntryCount )
 {
 	bool	success = true;
 	
@@ -1147,7 +1486,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData )
 	if( mCardBlockSize != -1 )
 	{
 		size_t		currDataOffs = 12;
-		while( true )
+		for( int16_t entryIndex = 0; entryIndex < pageEntryCount; entryIndex++ )
 		{
 			if( !blockData.hasdata( currDataOffs, sizeof(int32_t) ) )
 			{
@@ -1202,8 +1541,11 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 		}
 		
 		int32_t		currPagetableID = ntohl( blockData.int32at( currDataOffs ) );
+		int16_t		pageEntryCount = 0;
+		if( blockData.hasdata( currDataOffs +4, sizeof(int16_t) ) )
+			pageEntryCount = ntohs( blockData.int16at( currDataOffs +4 ) );
 		
-		LoadPageTable( currPagetableID, mBlockMap[CStackBlockIdentifier("PAGE",currPagetableID)] );
+		LoadPageTable( currPagetableID, mBlockMap[CStackBlockIdentifier("PAGE",currPagetableID)], pageEntryCount );
 		
 		currDataOffs += 4;
 	}
@@ -1809,7 +2151,10 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 	// Load some "table of contents"-style blocks other blocks need to refer to:
 	CBlockMap::iterator		stackItty = mBlockMap.find(CStackBlockIdentifier("STAK"));
 	if( stackItty == mBlockMap.end() )
-		fprintf( stderr, "Error: Couldn't find stack block." );
+	{
+		fprintf( stderr, "Error: Couldn't find stack block.\n" );
+		return false;
+	}
 	bool	success = LoadStackBlock( -1, stackItty->second );	// It's always -1 in HC, but in the XML format, we may want to support other IDs.
 	if( success )
 		success = LoadFontTable( mFontTableBlockID, mBlockMap[CStackBlockIdentifier("FTBL",mFontTableBlockID)] );
@@ -1869,6 +2214,22 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 			  #else
 				success = LoadBackgroundBlock( currBlockItty->first.mID, currBlockItty->second );
 			  #endif
+			}
+			else if( currBlockItty->first == CStackBlockIdentifier("MAST") )
+			{
+				success = LoadMasterBlock( currBlockItty->first.mID, currBlockItty->second );
+			}
+			else if( currBlockItty->first == CStackBlockIdentifier("PRNT") )
+			{
+				success = LoadPrintBlock( currBlockItty->first.mID, currBlockItty->second );
+			}
+			else if( currBlockItty->first == CStackBlockIdentifier("PRST") )
+			{
+				success = LoadPageSetupBlock( currBlockItty->first.mID, currBlockItty->second );
+			}
+			else if( currBlockItty->first == CStackBlockIdentifier("PRFT") )
+			{
+				success = LoadReportTemplateBlock( currBlockItty->first.mID, currBlockItty->second );
 			}
 			else if( currBlockItty->first != CStackBlockIdentifier("CARD")
 					&& currBlockItty->first != CStackBlockIdentifier("LIST")
