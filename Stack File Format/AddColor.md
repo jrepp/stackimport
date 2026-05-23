@@ -128,6 +128,7 @@ white areas, or opaque relative to other AddColor objects.
 
 ## Implementation
 
-`CStackFile::LoadLayerBlock` reads `HCbg`/`HCcd` resources after writing the
-native card/background XML. It decodes object types `0x01`, `0x02`, `0x03`,
-`0x04`, and `0x05`, and emits `<addcolorobject>` XML elements.
+`CStackFile::LoadLayerBlock` writes native card/background JSON. The old
+Mac-only AddColor reader decoded object types `0x01`, `0x02`, `0x03`, `0x04`,
+and `0x05`; that path needs to be reintroduced as RapidJSON metadata when the
+portable resource reader is wired in.

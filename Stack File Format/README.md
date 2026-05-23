@@ -63,10 +63,10 @@ parser reads resources through Carbon when `MAC_CODE` is enabled.
 | `snd ` | Implemented | Exported/converted through QuickTime or `snd2wav`, depending on build flags. | `CStackFile::LoadSounds` |
 | `HCbg` | Implemented partially | AddColor data for backgrounds. Known object types are decoded. | `AddColor.md`, `CStackFile::LoadLayerBlock` |
 | `HCcd` | Implemented partially | AddColor data for cards. Known object types are decoded. | `AddColor.md`, `CStackFile::LoadLayerBlock` |
-| `XCMD` | Exported, not decoded | 68K external command code resource; written as raw `.data` with XML metadata. | `CStackFile::Load68000Resources` |
-| `XFCN` | Exported, not decoded | 68K external function code resource; written as raw `.data` with XML metadata. | `CStackFile::Load68000Resources` |
-| `xcmd` | Exported, not decoded | PowerPC external command code resource; written as raw `.data` with XML metadata. | `CStackFile::LoadPowerPCResources` |
-| `xfcn` | Exported, not decoded | PowerPC external function code resource; written as raw `.data` with XML metadata. | `CStackFile::LoadPowerPCResources` |
+| `XCMD` | Exported, not decoded | 68K external command code resource; written as raw `.data` with JSON metadata. | `CStackFile::Load68000Resources` |
+| `XFCN` | Exported, not decoded | 68K external function code resource; written as raw `.data` with JSON metadata. | `CStackFile::Load68000Resources` |
+| `xcmd` | Exported, not decoded | PowerPC external command code resource; written as raw `.data` with JSON metadata. | `CStackFile::LoadPowerPCResources` |
+| `xfcn` | Exported, not decoded | PowerPC external function code resource; written as raw `.data` with JSON metadata. | `CStackFile::LoadPowerPCResources` |
 
 ## Implementation Status
 
@@ -75,7 +75,7 @@ data:
 
 | Status | Types |
 | --- | --- |
-| Parsed to XML/media | `STAK`, `MAST`, `LIST`, `PAGE`, `BKGD`, `CARD`, `BMAP`, `STBL`, `FTBL`, `PRNT`, `PRST`, `PRFT` |
+| Parsed to JSON/media | `STAK`, `MAST`, `LIST`, `PAGE`, `BKGD`, `CARD`, `BMAP`, `STBL`, `FTBL`, `PRNT`, `PRST`, `PRFT` |
 | Structural handling only | `FREE`, `TAIL` |
 | Resource-fork parsed/exported | `ICON`, `PICT`, `CURS`, `snd `, `HCbg`, `HCcd`, `XCMD`, `XFCN`, `xcmd`, `xfcn` |
 
@@ -85,7 +85,7 @@ Known limits:
   template index.
 - `PRST` is emitted as selected QuickDraw page setup fields, not a byte-for-byte
   semantic model of every reserved field.
-- External command/function code resources are exported as raw data and XML
+- External command/function code resources are exported as raw data and JSON
   metadata. They are not decoded or executed.
 - AddColor supports documented object types `0x01` through `0x05`; unknown
   object types stop AddColor parsing for that resource.
@@ -156,7 +156,7 @@ block:
 stackimport --dumprawblocks /path/to/Stack
 ```
 
-This writes raw `.data` files next to the generated XML and media output. Compare
+This writes raw `.data` files next to the generated JSON and media output. Compare
 those dumps against the offset notes in this directory, then add a parser in
 `CStackFile.cpp` and an entry in the coverage tables above.
 
