@@ -1,0 +1,1630 @@
+Deark -- Information about supported formats
+
+
+=== Image format modules ===
+
+(Images that are not "extracted" will be converted to PNG, except as noted.)
+
+* ACiDDraw COM file (module="aciddraw_com")
+  Executable character graphics format made by ACiDDraw v1.2+.
+
+* ADEX .IMG (module="adex") (experimental)
+
+* Alias PIX, a.k.a. Vivid ray tracer bitmap (module="alias_pix")
+  - Not all files can be autodetected. You may need "-m alias_pix".
+  - Grayscale/matte images are not autodetected. Support is experimental.
+
+* Alpha Microsystems BMP (module="alphabmp") (experimental)
+
+* Amiga Workbench Icon (module="amigaicon")
+  - Original format: Mostly supported, but the format is not portable, and
+    there is not just one correct way to render the images.
+  - NewIcons: Fully supported.
+  - GlowIcons / OS3.5: Fully supported.
+
+* AMOS Picture Bank (module="abk")
+  Options
+   -opt abk:allownopal - Try to decode images lacking a palette
+
+* AMOS Sprite Bank (AmSp) / AMOS Icon Bank (AmIc) (module="abk")
+
+* ANI (Windows Animated Cursor) (part of module "riff")
+  - Extract individual CUR and ICO files.
+
+* ANIM (Amiga IFF-ANIM) (module="anim")
+  - Supports most common formats.
+  - Extract the individual frames.
+  Options
+   -opt anim:includedups - Do not suppress duplicate frames.
+   - Some options for ILBM may also apply to ANIM.
+
+* Animatic Film (module="animatic")
+  - Extract the individual frames.
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+
+* Animator PIC/CEL (module="animator_pic")
+  Format used by the original Autodesk Animator.
+
+* ANSI Art (module="ansiart")
+  - Autodetection usually works, but not always. You may have to use
+     "-m ansiart" or "-m ansi".
+  - Supports only the most common escape codes, which is usually good enough.
+  - Some features depend on the output format. "Blink" is not supported with
+     image output, for example.
+  Options
+   -opt char:output=image - Output to a bitmap instead of HTML
+   -opt char:width=<n> - Number of characters per row
+   -opt ansiart:no24bitcolor - Disable support for 24-bit color definitions
+   -opt ansiart:noblink - Disable blinking characters, enabling high-intensity
+     background colors. This is usually unnecessary, as well-formed files will
+     explicitly disable blink.
+   -opt ansiart:vt100 - Use VT100 mode
+
+* Apple II icons archive (module="apple2icons") (experimental)
+  - Not autodetected. Use "-m apple2icons".
+
+* Apple volume label image (module="applevol")
+
+* ART - PFS: 1st Publisher clip art (module="fp_art")
+  - Supports the common format, and the compressed hi-res format.
+  - In some cases, you may have to use "-m fp_art".
+
+* ArtWorx Data Format (ADF) (module="artworx_adf")
+
+* AutoCAD Slide Library (.slb) (module="autocad_slb")
+  - Extracts the component AutoCAD Slide (.sld) files.
+
+* Award BIOS logo (EPA, AWBM) (module="awbm")
+  - Supports version 1
+  - Supports 4-bit and 8-bit version 2
+  Options
+   -opt awbm:rgb=0 - (v2) Assume BGR sample order (default for 4-bit)
+   -opt awbm:rgb=1 - (v2) Assume RGB sample order (default for 8-bit)
+
+* Binary Text (.BIN character graphics format) (module="bintext")
+  - Must use "-m bintext", unless the file has a SAUCE record.
+  Options
+   -opt char:width=<n> - Number of characters per row
+
+* BLD (MegaPaint BLD) (module="bld")
+
+* BMG - Bert's Coloring Programs (module="berts_bmg")
+  This format looks like PCX, but in most cases it must be interpreted in a
+  special way.
+  - Files are converted to standard PCX.
+  - File must have extension ".bmg" or ".ibg" (or use "-m berts_bmg").
+  - Only the distribution files are handled automatically. Otherwise, you must
+    use the "defpal" option.
+  Options
+   -opt berts_bmg:defpal=<name> - The predefined palette to use, if it can't be
+     determined.
+     Options are "1", "2", "3" for standard palettes, "outline" to remove the
+     coloring, "gray" for grayscale, "fail" (default) to give up and not write
+     a file.
+   -opt berts_bmg:forcepal=<name> - The palette to use, even if the correct
+     palette is known.
+
+* BMI (Zoner bitmap) (module="bmi") (experimental)
+
+* BMP (Windows bitmap) (module="bmp")
+
+* Bob ray tracer bitmap (module="bob")
+
+* BPG (module="bpg") (experimental)
+  - Extract Exif, XMP, ICC Profiles, thumbnails
+
+* BSAVE/BLOAD image (module="bsave")
+  Support (some) PC-style BSAVE files.
+  Options
+   -file2 <file.pal> - Use this palette file (BSAVE format)
+   -opt palfile=<file.pal> - Use this palette file (BSAVE format)
+   -opt bsave:width=<n>
+   -opt bsave:height=<n>
+   -opt bsave:fmt=char  - Character graphics
+   -opt bsave:fmt=cga2  - 640x200 2-color
+   -opt bsave:fmt=cga4  - 320x200 4-color
+   -opt bsave:fmt=cga16 - Very low (160x100) resolution
+   -opt bsave:fmt=mcga  - 320x200 256-color
+   -opt bsave:fmt=wh2   - 2-color, header includes width & height
+   -opt bsave:fmt=wh4   - 4-color, header includes width & height
+   -opt bsave:fmt=wh16  - 16-color, 4-plane, header includes width & height
+   -opt bsave:fmt=wh256 - 256-color, header includes width & height
+   -opt bsave:fmt=b265  - Special
+   -opt bsave:fmt=2col  - 2-color noninterlaced (experimental)
+   -opt bsave:fmt=4col  - 4-color noninterlaced (experimental)
+
+* Calamus Raster Graphic (module="crg") (experimental)
+
+* Cardfile (module="cardfile")
+  - Supports MGC and RRG formats.
+  - Extracts bitmaps.
+  - Extracts text (use -a).
+  - Extracts OLE objects.
+  Options
+   -opt ole1:extractall - Extract unidentified OLE objects
+
+* CD-I IFF-IMAG (module="cdi_imag") (experimental/incomplete)
+  A format used on some CD-i discs.
+
+* COKE (Atari Falcon) (*.tg1) (module="coke")
+
+* ColoRIX (*.sc?, etc.) (module="colorix")
+  - Supports most formats, including compressed files.
+
+* Compface intermediate format (module="compfacei")
+  This is an obscure text-based format related to X-Face, used by the Compface
+  software.
+  - Cannot be autodetected. You must use "-m compfacei".
+
+* CompuServe RLE (module="cserve_rle")
+  - Supports high resolution, medium resolution (experimental), and a
+    nonstandard 4-color format (experimental).
+
+* Corel CCX (module="corel_ccx")
+  - Decompresses and converts to CMX format.
+
+* CorelDRAW CDR, old "WL" format (module="cdr_wl") (experimental)
+  - Extracts preview image.
+
+* Corel Gallery BMF (module="corel_bmf") (experimental)
+  - Extracts preview image.
+
+* CorelMOSAIC CLB (module="corel_clb") (experimental)
+  A thumbnail image library, companion to a CLH file.
+
+* DIB (module="dib")
+  - Adds a BMP file header to a raw Windows DIB file.
+
+* DIV Games Studio .fpg (module="div_fpg") (experimental)
+  - Supports "fpg" and "f16" formats.
+
+* DIV Games Studio .map (module="div_map") (experimental)
+
+* DCX (module="dcx")
+  Multi-image PCX format.
+  - Extracts individual PCX files.
+
+* DEGAS and DEGAS Elite (module="degas")
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+   -opt atari:respectpal - Don't ignore a seemingly bad 2-color palette
+
+* DEEP / IFF-DEEP (module="deep")
+  - Supports most of the common image types.
+
+* DeskMate Paint .PNT (module="deskmate_pnt")
+
+* DGI (Digi-Pic) (module="dgi")
+
+* DL animation (DL MAKER) (module="dlmaker")
+  - Extracts all images and audio clips, in the order they appear in the file.
+  - File extension must be ".dl".
+
+* Doodle (Atari) (module="doodle")
+  - Supports high resolution (640x400) only
+
+* Dr. Halo .CUT (module="drhalocut")
+  Options
+   -file2 <file.pal> - Read the palette from this file.
+   -opt drhalocut:pal=pc16 - Use standard 16-color palette if possible.
+
+* Dr. Halo .PIC (module="drhalopic")
+  - Most of the common image types are supported.
+  Options
+   -file2 <file.pal> - Read the palette from this file.
+
+* DXP image (module="dxp_image")
+  An image format possibly associated with software named Dexter, by Paul
+  Burkey.
+
+* EggPaint (*.trp) (module="eggpaint")
+
+* Enhanced Windows Metafile (module="emf")
+  - Extract BMP and other images from some records.
+
+* EPOC MBM/Sketch/AIF (module="epocimage")
+  - Supports most image types
+  - Supports most compression schemes
+
+* EPS (Encapsulated PostScript) (module="eps")
+  - Extract EPS, TIFF, and WMF from "EPS DOS Binary" format.
+  - Supports preview images in EPSI format (1-, 2-, 4-, 8-bit grayscale)
+
+* Esm Software PIX (module="esm_pix")
+  - Extract embedded JPEG file.
+
+* Falcon True Color (module="ftc")
+
+* farbfeld (module="farbfeld")
+
+* FLI/FLC (Autodesk Animator) (module="fli")
+  - Extract the (non-repeated) frames.
+
+* FM Towns HEL (module="fmtowns_hel")
+  This is a simple animation format.
+
+* FM Towns ICN (module="fmtowns_icn")
+  - A standard palette is used, which isn't ideal in all cases.
+
+* GEM VDI Bit Image (GEM Raster) (module="gemras")
+  - Supports original bilevel format
+  - Supports paletted XIMG format
+  - Supports some non-XIMG 16-color images
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+
+* GIF (module="gif")
+  - Extract the image, or every frame from an animated or multi-image GIF.
+  - Plain text extensions are supported.
+  - Extract comments (use -a).
+  Options
+   -opt gif:raw - Extract the individual component images, instead of rendering
+     the frame in full. Plain text extensions might be extracted as text files,
+     instead of images of text.
+   -opt gif:dumpplaintext - Extract plain text extensions to text files (in
+     addition to rendering them to the image).
+   -opt gif:dumpscreen - Save a copy of the "screen" after the last image in
+     the file has been disposed of. Incompatible with gif:raw.
+
+* GodPaint (Atari Falcon) (module="godpaint")
+
+* GRABBER (module="grabber")
+  Self-displaying DOS screen capture.
+  - Most COM-based formats are supported (made by GRABBER up to v3.35).
+  - Most EXE-based formats are supported, except some early ones. Supported
+    versions are 3.70-3.98, 5.50-5.60, 6.30-6.60. Some modes are also supported
+    for v3.60, 6.01-6.20.
+
+* Graphic Workshop self-displaying picture (module="gws_exepic")
+  - Supports the DOS EXE-based format.
+
+* Graphic Workshop thumbnail (.thn) (module="gws_thn")
+
+* GRASP GL animation (module="graspgl")
+  - Extracts all files.
+
+* GROB (HP calculator) (module="grob")
+  - Supports binary and text encodings.
+  - Some text GROB files can't be autodetected, and need "-m grob".
+  Options
+   -opt grob:planes=<n> - Treat image as grayscale. <n> should usually be 2.
+   -opt grob:planeorder=l - For grayscale, assume the least-significant
+     bitplane comes first.
+
+* Hemera Photo-Object image (module="hpi")
+  - Extracts the color components to a JPEG file, and the alpha component (if
+   present) to a PNG file.
+
+* Hemera thumbnails (module="hta")
+
+* HP 100LX / HP 200LX .ICN icon format (module="hpicn")
+
+* HR (TRS-80 High Resolution graphics file) (module="hr")
+
+* HS2 (module="hs2")
+  Obscure format associated with a program called "POSTERING"
+
+* HSI Raw (module="hsiraw")
+
+* ICA (Icon Manager Archive) (module="iconmgr_ica") (experimental)
+  Related to Icon Manager by Impact Software and L. Gray.
+
+* icns (Apple Icon) (module="icns")
+  - Supports most icon types.
+  - Embedded JP2 and PNG files are extracted as-is.
+  Options
+   -opt icns:getmasks - Only extract the transparency masks.
+
+* ICO/CUR (Windows icon/cursor) (module="ico")
+  - Supports most but not all formats.
+  - PNG-formatted icons will be extracted as-is, not decoded.
+  - Extract images of the (otherwise unused) masks for 32-bit images (use -a).
+
+* ILBM and related IFF-based images (module="ilbm")
+  - Supports ILBM, ACBM, PBM, RGBN, RGB8
+  - Supports 1-8 bit paletted, 24-bit truecolor
+  - Supports HAM6, HAM8, Halfbrite
+  - Supports color-keyed and bitmask transparency
+  - Extract thumbnails from TINY chunks
+  - Extract text from ANNO chunks (use -a)
+  Options
+   -opt ilbm:trans=<0|1|auto> - Remove (0) or respect (1) transparency. The
+     default, "auto", is to remove transparency only if it seems bad.
+   -opt ilbm:fixpal=<0|1> - Don't/Do try to correct palettes that seem to have
+     fewer than 8 bits of precision.
+   -opt ilbm:allowspecial - Don't stop after certain errors.
+
+* Image Gallery GAL (module="imggal_alch")
+  Image catalog file from Image Gallery by Alchemy Mindworks.
+
+* IndyPaint (*.tru) (module="indypaint")
+
+* Inset PIX (module="insetpix") (experimental)
+  - In rare cases, format detection may fail (need "-m insetpix").
+
+* InShape IIM (module="iim")
+
+* Jigsaw (.jig) (module="jigsaw_wk")
+  A Windows 3.x program by Walter A. Kuhn.
+  - Extract the main image.
+
+* Jovian Logic VI bitmap (module="jovianvi") (experimental)
+
+* JPEG and JPEG-LS (module="jpeg")
+  - Extract ICC profiles.
+  - Extract JFXX JPEG-formatted thumbnails (rare).
+  - Extract JFIF uncompressed thumbnails (rare).
+  - Extract XMP data, including "extended XMP".
+  - Extract JPEG-HDR residual images.
+  - Process Exif data (or extract it: use -a)
+  - Process Photoshop-related data.
+  - Extract Multi-Picture Format (MPF/MPO) thumbnails and other images.
+  - Extract comments (use -a). Comment bytes are extracted as-is, or
+     interpreted based on the "-inenc" option.
+  - Extract Exif FPXR streams (use -a).
+
+* JPEG 2000 (module="jpeg2000")
+  - Extract JPEG 2000 codestream from JP2/JPX/JPM formats.
+  - Extract XML data.
+  - Extract GeoTIFF data.
+  - Extract XMP data.
+  - Extract Exif data (use -a) (nonstandard; partial support)
+  - Process Photoshop-related data.
+
+* JPEG 2000 codestream (module="j2c")
+  - Extract comments (use -a).
+
+* JPEG XR (HD Photo) (part of module "tiff")
+  - Minimal support.
+
+* Laughing Dog COM file (module="ldog_com")
+  Executable character graphics format made by Laughing Dog Screen Maker.
+
+* Lotus Manuscript graphics (.bit, .rle) (module="lotus_mscr") (experimental)
+  - Not always autodetected. You may have to use "-m lotus_mscr".
+
+* LSS16 (SYSLINUX image) (module="lss16")
+
+* Lumena CEL (module="lumena_cel")
+  - Single-image files only
+
+* MacPaint (module="macpaint")
+  - Can also decode brush patterns (use -a)
+  Options
+   -opt macpaint:macbinary=<0|1>
+
+* Magic Desk or ToyBox icon (module="mdesk_icn")
+  Options
+   -opt mdesk_icn:pal=<1|2|3|4> - 1=Use ToyBox palette, 2=Use Magic Desk
+     palette, 3=Prefer ToyBox palette, 4=Prefer Magic Desk palette (default)
+
+* Mah Jongg tile set (.TIL) (module="mahj_na_til")
+  Graphics used with Nels Anderson's Mah Jongg solitaire game.
+  - Format is difficult to autodetect. In some cases, you must use
+    "-m mahj_na_til". If the file extension is not ".til", you always need the
+    -m option.
+  Options
+   -opt mahj_na_til:nf=<0|1> - A hint as to whether the file starts with a
+     "name" field, and what to do about that. 0 means the name field is not
+     present.
+   -padpix - Reveal the top-left and bottom-right corner pixels.
+
+* Mah Jongg -V-G-A- tile set (.tis) (module="mjvga")
+  Graphics used with Mah Jongg -V-G-A- and Mah Jongg for Windows, by Ron
+  Balewski.
+  - Also supports the single-tile format with extension .icn or .til. This
+    format uses a separate palette file usually named pal.cfg.
+  Options
+   -file2 <pal.cfg> - Read the palette from this file. Not expected to be used
+    with TIS format, but allowed.
+
+* Mindjongg tileset (.ipg) (module="mindjongg")
+  - Extracts the embedded image files.
+
+* MAKIchan graphics (module="makichan")
+  - Supports most 16- and 256-color .MAG images
+  - Supports most 16-color .MKI images
+  - Does not support .MAX
+
+* MegaPaint Symbol Library (.lib) (module="megapaint_lib") (experimental)
+
+* MegaPaint Patterns (.pat) (module="megapaint_pat") (experimental)
+
+* Microsoft Comic Chat (.avb, .bgb) (module="comicchat")
+  Options
+   -opt comicchat:tobmp - Write icons and backgrounds to BMP format
+   -opt comicchat:applymasks=0 - Write masks to separate files
+
+* MMFW Pictures (part of module="mmfw") (experimental/incomplete)
+  See also the section on "MMFW resource file".
+  Some picture formats are supported; others are not.
+  Caution: These files can contain a huge number of images, and Deark's
+  decoder is not well optimized. Expect it to be slow. You may have to use
+  an option like "-maxfiles" or "-zip" to get everything.
+
+* MMM (MacroMind Movie) (module="mmm") (experimental)
+  - Can extract images, but cannot always get the colors right.
+  - Audio conversion to WAV is attempted.
+  Options
+   -file2 <file.mmm> - File to read the palette from
+   -opt mmm:palid=<id> - Use this palette
+   -opt mmm:allowbad - Keep going after certain errors
+
+* MRW (Minolta RAW) (module="mrw")
+  - Process Exif data (or extract it: use -a)
+
+* MSP (Microsoft Paint graphics) (module="msp")
+  - Version 1 and 2
+
+* MS Word for DOS Screen Capture (module="mswordscr")
+  Supports the same options as the pcx module.
+
+* NEOchrome (.NEO) (module="neochrome")
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+
+* NEOchrome Animation (module="neochrome_ani") (experimental)
+
+* New Print Shop .POG format (module="newprintshop")
+  Options
+   -file2 <file.pnm> - Use this "name" file
+   -opt namefile=<file.pnm> - Use this "name" file
+
+* NIE/NII/NIA (module="nie") (experimental)
+  The "Naive Image Formats" associated with the Wuffs project.
+
+* NGG (Nokia Group Graphic) (module="ngg")
+
+* NLM (Nokia Logo Manager bitmap) (module="nlm")
+
+* NOL (Nokia Operator Logo) (module="nol")
+
+* NPM (Nokia Picture Message) (module="npm")
+
+* NSL (Nokia Startup Logo) (module="nsl")
+
+* OLPC .565 firmware icon (module="olpc565")
+
+* OS/2 boot logo (module="os2bootlogo")
+  - You may have to use "-m os2bootlogo" in some cases.
+
+* OS/2 Icon, Pointer, Bitmap Array formats (module="os2bmp")
+  - Converts icons & pointers to individual PNG files.
+  - Icon, pointer, and BMP image files are extracted from Bitmap Array files.
+    Reprocess icon and pointer files to convert to PNG.
+
+* PaintShop Pro Browser Cache (module="jbf")
+  - Format v1.x: BMP files are reconstructed and extracted.
+  - Format v2.x: JPEG files are extracted.
+
+* Palm BitmapType (module="palmbitmap")
+  - Cannot easily be autodetected. You must use "-m palmbitmap", except in most
+    cases when the file extension is ".palm".
+  - May be found inside some Palm files. See also the notes for the "Palm PRC"
+    and "Palm PDB/PQA" modules.
+  Options
+   -opt palm:le - Assume little-endian byte order
+
+* Palm Database (PDB) ImageViewer/FireViewer (part of module "palmdb")
+
+* PCPaint / Pictor (module="pcpaint")
+  - Supports PIC and CLP formats. Some files are not portable, because they use
+    a nonstandard palette that is not contained in the file.
+  - Supports most images with 8 or fewer bits/pixel.
+  - Supports character graphics (experimental).
+  Options
+   -opt pcpaint:fmt=pic
+   -opt pcpaint:fmt=clp
+   -file2 <file.pic> - PIC file to read the palette from
+   -opt palfile=<file.pic> - PIC file to read the palette from
+
+* PCPaint compressed BSAVE (module="bsave_cmpr") (experimental)
+  - Decompresses to BSAVE format.
+
+* PCX (module="pcx")
+  - Supports most of the common varieties of PCX.
+  Options
+   -opt pcx:pal=<0|1> - The predefined palette to use, if there is no palette
+     in the file. Default is 0.
+   -opt pcx:resmode=<ignore|dpi|screen|auto> - How to interpret the
+     "resolution" field. "screen" means as the target screen mode's pixel
+     dimensions (assumes 4:3 screen). The default is "auto", which means to
+     guess.
+   -file2 <file.p13> - Read the palette from a separate file. Each entry is 3
+     bytes (R,G,B); samples range from 0-63.
+
+* PCX2COM (module="pcx2com")
+  - Convert to PCX.
+
+* Pegasus JPEG and KQP (Konica) (module="picjpeg") (experimental)
+  - Convert to JPEG.
+
+* PGC (Portfolio graphics compressed) (module="pgc")
+
+* PGF (Portfolio graphics) (module="pf_pgf")
+
+* PGX (Portfolio graphics animation) (module="pgx")
+  - Extract embedded PGC images.
+
+* PI4 (Atari Falcon 320x240) (module="fpaint_pi4")
+
+* PI7 (Atari Falcon 640x480) (module="atari_pi7")
+
+* PI9 (Atari Falcon 320x200) (module="fpaint_pi9")
+
+* PICT (Macintosh image) (module="pict")
+  - Extracts embedded bitmap images, etc. Does not properly convert PICT to
+    another format, though it may often seem like that's what it does.
+  Options
+   -opt pict:decodeqt - Try to decode embedded "QuickTime" images directly,
+    instead of always extracting to .qtif format.
+
+* PixFolio catalog (.cat) (module="pixfolio") (experimental)
+  - Supports the format used by Win3.x versions of the software.
+  Options
+   -opt pixfolio:undelete - Also extract deleted images.
+
+* Picture Catalog (.cat) (Spinnaker) (module="pic_cat_sp")
+  An obscure IFF-like format used by some Spinnaker Windows apps.
+
+* PIXIT/pix320 (module="pixit")
+  A simple executable graphics format, in a DOS COM file.
+  - The intermediate .PIX format is also supported.
+
+* PKM (GrafX2 image) (module="pkm")
+
+* PM image (module="pm_xv") (experimental)
+  Obscure image format supported by XV viewer.
+
+* PNG / MNG / JNG (module="png")
+  - Extract XMP data.
+  - Extract ICC profiles.
+  - Extract or process various other metadata formats.
+  - Extract frame images (may be image fragments) from APNG files.
+  Options
+   -opt png:extractapng=0 - Do not extract APNG frames
+   -opt png:extractzlib - Extract the zlib stream to a file
+
+* PNM/PBM/PGM/PPM/PAM (module="pnm")
+
+* PrintMaster .SHP format (module="printmaster")
+  Options
+   -file2 <file.sdr> - Use this "name" file
+   -opt namefile=<file.sdr> - Use this "name" file
+
+* PrintPartner .GPH (module="pp_gph")
+
+* Print Shop .DAT format (module="printshop")
+  - Not all files can be autodetected. You may need "-m printshop".
+  Options
+   -file2 <file.sdr> - Use this "name" file
+   -opt namefile=<file.nam> - Use this "name" file
+
+* Print Shop - Apple IIgs format (module="printshop_gs")
+  Format is 88x52 pixels, file size 1716 bytes.
+  - Not autodetected. Use "-m printshop_gs".
+
+* Prism Paint (module="prismpaint")
+  - Supports 1-, 2-, 4-, 8-, and 16-bits per pixel
+
+* PSD / PSB (Photoshop) (module="psd")
+  - Basic support for RGB/grayscale/paletted 8/16-bit images
+  - Extract JPEG thumbnails. Some thumbnail images have the red and blue
+    channels swapped -- Deark warns about this, but does not correct it.
+  - Extract XMP data.
+  - Extract ICC profiles.
+  - Extract linked layer image data (could be PNG/JPG/PSD/etc. format).
+  - Process Exif data (or extract it: use -a)
+  - Extract IPTC-IIM data (use -a).
+  - Extract "text engine data" (use -a)
+
+* Psion PIC (module="psionpic")
+  A Psion PIC file contains one or more 1-bpp bitmaps, some of which can be
+  combined to make grayscale images. Deark will try to guess which images
+  should be combined, but it may not always get it right.
+  - Supports 1- and 2-bit grayscale.
+  Options
+   -opt psionpic:bw - Do not try to detect grayscale images. Write each bitmap
+     as a separate image.
+
+* Puma Street Soccer PPM (module="pss_ppm")
+  An encrypted variant of PPM, with signature "PX" instead of "P6".
+  - Also supports the vertically flipped "P6" files that may be included with
+    the game (must use "-m pss_ppm").
+
+* QDV (Giffer) (module="qdv")
+
+* QTIF (QuickTime image) (module="qtif")
+  - Extract embedded JPEG, TIFF, and other image files.
+  - Decode some "raw" (uncompressed) images.
+
+* REKO cardset (module="reko")
+  Options
+   -opt reko:combine=0 : Write each card to its own file, even if a montage is
+     possible.
+
+* RIPscrip icon (.ICN) or BGI image (module="ripicon") (experimental)
+  - Not all files are autodetected. You may need "-m ripicon".
+  - Only 16-color images are supported.
+
+* RISC OS / Acorn Sprite (module="rosprite")
+  - Autodetection may not always work. May need "-m rosprite".
+  - "Old" format is pretty well supported.
+  - "New" format is mostly supported, but not well-tested.
+
+* RISC OS / Acorn Draw (module="rodraw") (experimental)
+  - Extract sprite image files.
+
+* RSC (GEM resource) (module="rsc") (experimental)
+  - Supports both "old" and "new" formats.
+  - Extracts icons and bitmaps.
+  Options
+   -opt rsc:fmt=<atari|pc> - Use this byte order. Default is to autodetect.
+
+* SGI image (module="sgiimage") (incomplete)
+
+* SHG and MRB (module="shg")
+  Segmented Hypergraphics and Multi-Resolution Bitmap formats are used in
+  Windows .HLP files.
+  - Converts bitmap graphics to BMP format.
+  - Extracts WMF files.
+
+* Spectrum 512 Compressed (.spc) (module="spectrum512c")
+  Options
+   -opt spectrum512:tospu - Output to an .spu file
+
+* Spectrum 512 Smooshed (.sps) (module="spectrum512s")
+  Options
+   -opt spectrum512:tospu - Output to an .spu file
+
+* Spectrum 512 uncompressed (.spu) (module="spectrum512u")
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+
+* Storyboard PIC/CAP (module="storyboard") (experimental)
+  - Old ("EP_CAP") and new formats are mostly supported.
+
+* STOS Memory Bank and related formats (.mbk) (module="stos", ...)
+  Includes support for "Picture Packer" format. Helper modules such as
+  "stos_pp1" may exist.
+  - Decode "sprite bank" images
+  - Decode "icon bank" images
+  - Decode "packed screen" images
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+   -opt stos:res0=<l|m> : Assume res 0 pics are low(standard)/med(DAJ) res.
+   -opt stos:res1=<l|m|h> : Assume res 1 pics are low(PP1)/med(standard)/
+     high(PP3) res.
+
+* Sun Raster (module="sunras") (incomplete)
+  - Supports most common image types
+  Options
+   -opt sunras:fmt32=<xbgr|abgr|xrgb|argb|bgrx|bgra|rgbx|rgba> - Specify the
+     interpretation of a 32-bit pixel
+
+* Syberia texture (.syj) (module="syberia_syj")
+  - Convert abbreviated JPEG file to JPEG.
+
+* Template Catalog (.tct) (Spinnaker) (module="tplt_cat_sp")
+  Similar format to Spinnaker Picture Catalog.
+
+* TGA (Targa) (module="tga")
+  Options
+   -opt tga:trans=<0|1|2|auto> - 0 = Ignore any potential transparency.
+    1 = Respect transparency when possible. 2 = Assume alpha is premultiplied.
+    auto = Autodetect (default).
+
+* TheDraw COM (module="thedraw_com")
+  Executable character graphics format made by TheDraw.
+
+* Thumbs.db (Windows thumbnail) (part of module "cfb")
+  - Extract thumbnail files (embedded JPEG or PNG files)
+  - Some thumbnails use a nonstandard RGBA format. These are not converted to
+    a portable format.
+
+* ThumbsPlus database (.tud) (module="thumbsplus")
+  - Thumbnail database format used by ThumbsUp! 1.x and ThumbsPlus 2.x.
+
+* TI calculator "variable" files (module="tivariable")
+  - TI73/TI82/TI83 pictures
+  - TI85/TI86 pictures
+  - TI89/TI92/TI92+ pictures
+
+* TIFF and Exif (module="tiff")
+  - Decode most images, excluding lossy-compressed images.
+  - Extract JPEG-formatted Exif thumbnails, and some types of JPEG-compressed
+    images.
+  - Extract ICC profiles.
+  - Process Photoshop-related data.
+  - Extract IPTC-IIM data (use -a).
+  Options
+   -opt tiff:decode=0 - Do not decode images
+   -opt tiff:dexxa[=0] - Hint about whether file was made by PaintShow or
+     related software.
+   -opt tiff:fillorderstrategy=<0|1|...> - Hint about what to do with an
+     ambiguous FillOrder tag:
+      0 = Default.
+      1 = If in doubt, ignore.
+      2 = If in doubt, decompress, then reverse order of pixels within a byte.
+
+* TIM (Playstation graphics) (module="tim") (experimental/incomplete)
+
+* Tiny Stuff (.TNY, .TN1, .TN2, .TN3) (module="tinystuff")
+  Options
+   -opt atari:palbits=<n> (refer to readme.md)
+   -opt atari:respectpal - Don't ignore a seemingly bad 2-color palette
+
+* VBM (VDC BitMap) (module="vbm")
+  - Version 2 only
+
+* Video Master (.flm/.vid/.vsq) (module="videomaster") (experimental)
+  - Minimal support. Extracts the video frames.
+
+* VITec image format (module="vitec) (experimental/incomplete)
+
+* VORT ray tracer .pix image (module="vort") (experimental/incomplete)
+
+* Windows 1.0 ICO/CUR (module="win1ico")
+
+* Windows Metafile (module="wmf")
+  - Extract BMP images from some records.
+  - Extract embedded EMF documents.
+
+* Winzle (module="winzle")
+  - Convert Winzle obfuscated BMP (.wzl) to BMP.
+
+* Wiz Solitaire deck (module="wizsolitaire")
+
+* WordPerfect Graphics (module="wpg")
+  - Extract bitmaps
+
+* X11 puzzle (module="xpuzzle")
+  Format used by the "puzzle" program, from some versions of the X Window
+  System.
+  Generated by Netpbm's ppmtopuzz utility.
+
+* XBIN (module="xbin")
+  Renders XBIN character graphics to a bitmap (default) or HTML.
+  - Extract embedded fonts (use -a).
+  Options
+   -opt char:output=html - Use HTML output format
+
+* X-Face (icon/avatar format) (module="xface")
+  - You may have to use "-m xface".
+
+* XGA (Atari Falcon image) (module="falcon_xga")
+
+* XWD (module="xwd")
+  Screen capture format associated with the X Window System, mainly the "xwd"
+  (X Window Dump) utility.
+
+* YBM (Bennet Yee face format) (module="ybm")
+
+* Young Picasso (.YP) (module="young_picasso")
+  An old paint program by Blueview Software.
+
+* ZBR ((Zoner) Zebra Metafile) (module="zbr")
+  - Extract the preview image.
+
+=== Font formats ===
+
+(Some fonts are converted to a PNG file displaying the characters. Others are
+converted to a standard font file format. Refer to the "-opt font:..." options
+in the readme file.)
+
+* CPI (DOS Code Page font) (module="cpi") (experimental)
+  - Also supports the DRFONT variant.
+
+* EVAfont COM format (module="evafont")
+
+* FNT (Windows font) (module="fnt")
+  Most FNT files have an extra "absolute space" character, which Deark
+  arbitrarily places at code point 256, or U+2002 (EN SPACE).
+
+* Font Mania COM format (module="fontmania")
+
+* FONTEDIT font (module="fontedit")
+  An old DOS .COM-based format.
+  Options
+   -opt fontedit:template - Also extract the template font, if different.
+
+* GEM bitmap font (module="gemfont") (experimental)
+  - Autodetection may not always work. May need "-m gemfont".
+
+* GRASP font (module="graspfont") (experimental)
+  .set/.fnt; may be found inside GRASP .gl files.
+
+* PCF font (module="pcf") (experimental/incomplete)
+
+* PCR font (module="pcrfont") (experimental)
+
+* PC Screen Font (PSF) (module="psf")
+  Options
+   -opt font:noaliases - Restrict to one Unicode codepoint per glyph
+
+* PFF2 font (module="pff2")
+
+* PK font (Packed Font) (module="pkfont") (partial support)
+
+* Unifont HEX (module="unifont_hex")
+  - Cannot be autodetected. Use "-m unifont_hex".
+
+* VGA font (module="vgafont")
+  Raw 8xN bitmapped font with 256 characters.
+  - Cannot be autodetected. Use "-m vgafont".
+
+=== Compression, archive, installer, disk image modules ===
+
+* ADF (Amiga disk image) (module="amiga_adf") (experimental)
+
+* Aldus LZW and PKZP (module="aldus_inst") (experimental, incomplete)
+  An installer compressed file format.
+
+* AmBs (AMOS "Banks" aggregate format) (module="abk")
+  - Extract AmSp, AmIc, AmBk files.
+
+* Apple II disk image (module="apple2_dsk") (experimental)
+  - Limited support. Only Apple DOS 16-sector.
+
+* Apple Partition Map (module="apm") (experimental)
+
+* AppleSingle/AppleDouble (module="applesd")
+  AppleDouble files often have names beginning with "._".
+  - Extract data fork.
+  - Extract (default for AppleSingle) or decode (default for AppleDouble)
+    resource fork.
+  Options
+   -opt applesd:extractrsrc=<0|1> - Specify whether the resource fork is
+     decoded (0), or extracted (1).
+
+* ar (.a archive/library format) (module="ar") (experimental/incomplete)
+  - Supports System V long filenames
+
+* ar001 (module="ar001")
+  "ar" archiver by Haruhiko Okumura, first version.
+
+* ARC archive (module="arc")
+  - Essentially all compression methods are supported, except for the PAK
+    (NoGate) extensions.
+
+* ArcFS (module="arcfs")
+
+* ArcMac (module="arcmac") (experimental)
+  Variant of ARC.
+
+* ARJ (module="arj")
+  - Multi-volume archives are supported; use "-mp" (experimental). All volumes
+    must be listed on the command line, in the correct order.
+  Options
+   -opt arj:entrypoint=<n> : Specify the offset of ARJ data.
+   -opt arj:scan=0 : Disable scanning for the ARJ data.
+   -opt arj:reloc[=<n>] : Move the ARJ data, and disable some types of
+     security/protection. Use with "-m arj" to convert most any self-extracting
+     ARJ archive to plain ARJ.
+
+* ARX (module="arx")
+  Variant of LHA. Deark tries to convert it to LHA.
+
+* ATR (Atari disk image) (module="atr") (experimental/incomplete)
+
+* Binary II (module="binary_ii") (experimental/incomplete)
+
+* CAB (Microsoft Cabinet) (module="cab")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* CAR (module="car_lha")
+  Variant of LHA by MylesHi! Software. Deark tries to convert it to LHA.
+  - File extension must be ".car" (or use "-m car_lha").
+
+* CAZIP (module="cazip") (experimental)
+  A compressed file format for software installation.
+
+* CD/raw (module="cd_raw")
+  - Extract .ISO and other filesystem data from some raw CD images, such as
+    the .BIN file in CUE/BIN format.
+
+* CMZ (module="cmz") (experimental)
+  An old installer archive format used by Lotus.
+
+* compress (legacy Unix .Z format) (module="compress")
+
+* Compressor, The (module="tc_trs80")
+  TRS-80 software by John Lauro.
+
+* cpio (module="cpio")
+
+* CP Shrink (.cpz) (module="cpshrink")
+  - File extension must be ".cpz" (or use "-m cpshrink").
+
+* CRLZH (module="crlzh")
+  An old compressed file format used mainly on CP/M.
+
+* Crunch (module="crunch") (incomplete)
+  An old compressed file format used mainly on CP/M.
+  - The header can be parsed, but only the rare v1.x format can be
+    decompressed.
+
+* CRUSH (.cru) (module="crush")
+  CRUSH is a DOS archive utility by PocketWare.
+
+* D64 (Commodore 64 disk format) (module="d64") (experimental)
+
+* DCL Implode (module="dclimplode")
+  Raw PKWARE DCL Implode compressed file. Also known as TTCOMP.
+
+* Deflate (module="deflate")
+  Raw Deflate-compressed (not zlib) data.
+  - Not autodetected; must use "-m deflate".
+  Options
+   -opt deflate:deflate64 - Decode as Deflate64 format.
+
+* DIET (module="diet") (experimental/incomplete)
+  Decompress a DIET-compressed DOS EXE or COM or data file.
+  Options
+   -opt diet:raw - For EXE, write raw decompressed data.
+
+* Disk Express (module="dskexp")
+  Floppy disk image format.
+  - Supports self-extracting EXE format, and non-executable (.DXP) format.
+  - Extracts to raw IMA (FAT) format.
+
+* DMS (Amiga disk image) (module="amiga_dms") (experimental)
+  - Decompresses to ADF format.
+
+* Doom WAD (module="wad")
+  - The extracted files are usually in specialized formats.
+
+* EA/PEA archive (module="ea_arch") (experimental)
+  An installer format used by Electronic Arts.
+
+* EDI Pack (module="edi_pack")
+  Compressed file, used by EDI Install [Pro] from Eschalon Development.
+  - Supports "LZSS1" and "LZSS2" formats, and the LZSSLib format.
+
+* EXEPACK (module="exepack")
+  Decompress an EXEPACK-compressed DOS EXE file.
+  - Not automatic; must use "-m exepack" or "-opt execomp".
+  Options
+   -opt execomp:align=<16|512> - Preferred code image segment alignment
+     (ignored if it can be determined from the source file).
+
+* FAT (module="fat") (experimental/incomplete)
+  - Limited support, mainly for floppy disk images.
+
+* GX Library (module="gxlib")
+  Aggregate format by Genus Microprogramming.
+
+* Gzip (module="gzip")
+
+* HFS filesystem image (module="hfs") (experimental/incomplete)
+  - Incomplete support, but should be enough for most CD-ROM images.
+
+* InstallShield IBT archive (module="is_ibt")
+  This is usually a file named "setup.ibt".
+
+* InstallShield installer archive (module="is_instarch")
+  This is usually a file named "_inst32i.ex_" or "_inst16.ex_".
+
+* InstallShield SFX EXE-NE (via module="exe") (experimental/incomplete)
+  InstallShield self-extracting installers for Windows 3.x.
+  - You must use "-opt exe:sfx".
+  - Extracted files will have placeholder names like "ishield000.dat".
+
+* InstallShield Z archive (module="is_z")
+  - Mult-volume archives aren't supported.
+
+* ISO 9660 or High Sierra CD-ROM image (module="iso9660")
+  Options
+   -opt iso9660:tolower - Convert filenames to lowercase. Does not affect Rock
+     Ridge or Joliet filenames.
+   -opt iso9660:voldesc=<n> - Use the volume descriptor at sector <n>. A
+     typical use is to set n=16 to ignore Joliet extensions.
+
+* LBR (module="lbr")
+  LBR is an uncompressed CP/M archive format.
+  - These often contain files in compressed formats known as Squeeze, Crunch,
+  and CrLZH. Deark doesn't necessarily support all of those formats.
+
+* LHA/LHarc/LZH/PMA (module="lha")
+  - All common compression methods are supported.
+  Options
+   -opt lha:lhark=<0|1> - Specify whether "lh7" compression should be assumed
+     to be standard lh7 format, or LHARK format. The default is to autodetect,
+     which can be slow for large files.
+
+* LHarc/LArc self-extracting archive - COM format (module="lharc_sfx_com")
+
+* LIF (Knowledge Dynamics) (module="lif_kdc") (incomplete)
+
+* LoadDskF/SaveDskF (module="loaddskf")
+  An OS/2 floppy disk image format.
+  - By default, non-compressed files are interpreted (as with FAT).
+  - Compressed files are decompressed.
+  Options
+   -opt loaddskf:toraw - Convert to raw FAT/IMA format.
+
+* Logitech Compress v2.0 (module="lgcompress")
+
+* LZEXE (module="lzexe")
+  Decompress an LZEXE-compressed DOS EXE file.
+  - Not automatic; must use "-m lzexe" or "-opt execomp".
+  Options
+   -opt lzexe:raw - Instead of an EXE file, write raw decompressed data.
+   -opt execomp:align=<16|512> - Preferred code image segment alignment. This
+     may help make the decompressed file more similar to the original.
+   -opt lzexe:toexe - There's an LZEXE derivative named CEBE that can compress
+     COM files directly to LZEXE format. Deark detects such files, and
+     decompresses them to COM. This option disables that feature.
+
+* LZHUF (module="lzhuf")
+  Compression software by Haruyasu Yoshizaki. A bare-bones container for
+  LHarc's "lh1" compression.
+  - Not autodetected; you must use "-m lzhuf".
+
+* LZS(Stac) (module="lzstac")
+  Raw LZ-Stac compressed data.
+  - Not autodetected; must use "-m lzstac".
+
+* LZS221 (module="lzs221")
+  Compressed file format by Stac.
+
+* LZSS(Okumura) (module="lzss_oku")
+  LZSS.C compression software by Haruhiko Okumura.
+  - Not autodetected; you must use "-m lzss_oku".
+
+* LZWCOM (module="lzwcom")
+  LZWCOM/LZWUNC is an old file compression utility.
+  - Not autodetected; you must use "-m lzwcom". In rare cases, you must also
+    specify the version.
+  Options
+  -opt lzwcom:version=<1|2> : The format version.
+
+* MacBinary (module="macbinary")
+  - You may have to use "-m macbinary".
+
+* MDCD archive (module="mdcd")
+
+* Microsoft Compound File Binary (module="cfb")
+  - Streams are not extracted by default, but some streams contain images and
+    other objects that can be extracted.
+  Options
+   -opt cfb:extractstreams - Extract raw streams, instead of decoding.
+   -opt cfb:fmt=raw - Do not try to detect the document type.
+   -opt cfb:fmt=auto - Autodetect the document type (default).
+   -opt cfb:fmt=thumbsdb - Treat the file as a Thumbs.db file.
+
+* Microsoft Installation Compression (module="mscompress")
+  - Supports "SZDD" variant, mode "A".
+  - Supports "KWAJ" variant, all known compression methods.
+  - Supports "SZ" variant.
+  - "SZ" format supports multi-part archives (use -mp).
+
+* MMFW resource file (module="mmfw") (experimental)
+  See also the section on "MMFW Pictures".
+  Options
+   -opt mmfw:extractall - Also extract undecoded resources, in raw form.
+   -opt mmfw:extractallraw - Extract all resources in raw form.
+
+* MOOF (module="moof") (incomplete)
+  Macintosh floppy disk image format.
+  - Some metadata is parsed, but the disk contents are not extracted or listed.
+
+* MRNZ (module="mrnz")
+  Installer format used by PC DOS.
+
+* MS-DOS v2.0-3.2 BACKUP (module="dosbackup20") (experimental)
+  - If the file was split onto multiple volumes, you must use the "-mp" option,
+    and list all the file fragments (in any order).
+
+* MS-DOS v3.3-5.x BACKUP (module="dosbackup33") (experimental)
+  This is a multi-file format that uses CONTROL.* and BACKUP.* files.
+  - This module is very picky, partly because it doesn't rely on the input
+    filenames.
+  - You must use the "-mp" option, and list all the CONTROL files in the
+    correct order, and all the BACKUP files in the correct order. Preferably,
+    list all the CONTROL files before any BACKUP files.
+
+* MSA (Magic Shadow Archiver) (module="msa") (experimental)
+  - Atari ST disk image format.
+  Options
+   -opt msa:toraw - Instead of decoding, extract to raw ".ST" format (this is
+     usually a FAT format).
+   -opt msa:touncmsa - Instead of decoding, convert to uncompressed MSA.
+
+* NPack (module="npack")
+  Compressed file format by Symantec / Stac.
+
+* NRG (module="nrg") (experimental)
+  Nero CD image format.
+  - Depending on the file structure, operates like the iso9660 module, or the
+    cd_raw module.
+
+* NuFX / ShrinkIt (module="nufx") (incomplete)
+  Apple II compressed archive format.
+
+* OS/2 PACK archive (module="os2pack") (experimental)
+  - Supports the versions with signatures 0xa5961400, 0xa596140a, 0xa596ffff,
+    0xa596feff.
+
+* Pack (module="pack")
+  Old Unix compressed file format (.z).
+
+* PackDir (module="packdir") (experimental)
+
+* PackIt (.pit) (module="packit")
+  An old Macintosh format.
+  - Supports most files.
+
+* PAKLEO (module="pakleo") (experimental)
+
+* Palm PDB/PRC/PQA (module="palmdb")
+  - You may have to use "-m palmdb".
+  - Use -a to extract the record blocks, but note that they are usually not in
+    well-known formats.
+  - Extracted ".palm" files are in Palm BitmapType format. Reprocess them to
+    convert to PNG.
+  Options
+   -opt palm:timestampfmt=<macbe|unixbe|macle> - The timestamp format to assume.
+
+* Pasti (.stx) (module="pasti") (experimental)
+  - Atari ST disk image format.
+  Options
+   -opt pasti:toraw - Instead of decoding, extract to raw ".ST" format (this is
+     usually a FAT format).
+
+* PC-Shrink (module="pcshrink") (experimental)
+  PC-Install .SHR compressed archive format.
+
+* PCX Library (module="pcxlib")
+  Aggregate format by Genus Microprogramming.
+
+* PKLITE (module="pklite")
+  Decompress a PKLITE-compressed DOS EXE file or DOS COM file.
+  - For EXE format, you must use "-m pklite" or "-opt execomp".
+  Options
+   -opt pklite:raw - Instead of an EXE file, write raw decompressed data
+   -opt execomp:align=<16|512> - Preferred code image segment alignment
+     (ignored if it can be determined from the source file).
+
+* RAR (module="rar")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* RPM (package manager) (module="rpm")
+  - Extract compressed cpio file.
+
+* QIP (Quarterdeck) (module="qip") (experimental)
+  An obscure installer format.
+
+* SCO compress LZH (module="compress_lzh")
+  Variant of 'compress'.
+
+* SIS (EPOC/Symbian archive) (module="sis")
+  - EPOC release 3/4/5/6
+
+* SOF/RESOF (part of module "zip")
+
+* Spark archive (module="spark")
+  Options
+   -opt spark:recurse=0 - Extract subdirectories as Spark files
+
+* Squash (module="squash")
+  A variant of "compress", used on RISC OS.
+
+* Squeeze (module="squeeze")
+  An old compressed file format used mainly on CP/M.
+  - SQ2 variant is also supported (experimental).
+
+* Stirling Compressor, The (module="tscomp")
+
+* StuffIt (.sit) (module="stuffit")
+  - Limited support. Old format only.
+
+* T64 (Commodore 64 tape format) (module="t64")
+
+* tar (module="tar")
+  - Rare files may need "-m tar", as tar is difficult to autodetect.
+
+* TPK (module="tpk") (experimental)
+  An obscure LHA-like archive format.
+
+* WOZ (module="woz") (incomplete)
+  Apple II disk image format.
+  - Some metadata is parsed, but the disk contents are not extracted or listed.
+
+* ZIP (module="zip")
+  - Supports most compression methods.
+  - Extract main ZIP file comment (use -a).
+  - Extract comments for individual files (use -a).
+  - Only the special "combine" mode supports multi-segment archives.
+  Options
+   -opt zip:scanmode - Attempt to read the file without using the ZIP "central
+     directory". Not recommended, but allows some damaged ZIP files to be read.
+   -opt zip:reloc[=<new_offset>] - Instead of decoding, move the ZIP data to
+     the start of the file (or to new_offset).
+   -opt zip:combine - Instead of decoding, combine the files of a multi-segment
+     archive into a single ZIP file. Use with "-mp". (experimental)
+   -opt zip:implodebug[=0] - Enable/disable workaround of the Implode "MML" bug
+     present in early versions of PKZIP. Default is to autodetect.
+
+* zlib (module="zlib")
+  - Raw zlib files are uncompressed.
+
+* Zoo (module="zoo")
+  - Extract comments (use -a).
+  Options
+   -opt zoo:undelete - Also extract deleted files.
+
+* Zoo filter format (module="zoo_filter")
+  Format created by "zoo fc".
+
+* Zoo Z format (module="zoo_z")
+  Format created by "zoo xz <foo.zoo> [...]". Not all Zoo programs support it.
+  - Will be translated to Zoo format.
+
+* zpk2 (ZSoft installer archive) (module="zpk2") (experimental)
+
+* ZSQ (module="zsq")
+  Compressed file format related to LZWCOM.
+
+=== Text modules ===
+
+(Formats whose main content is plain text, or something similar. Not listed
+here are most "character graphics" formats, which are in the "Image" section.)
+
+* Asc2Com (moule="asc2com")
+  Executable text (.COM) files made by MorganSoft's Asc2Com utility.
+  - Supports files that use compression.
+  - Some files contain special codes to change colors, etc. Some of these
+    codes can be different in every file. If encoding translation is enabled,
+    such codes will be identified, and converted to... something.
+  Options
+   -opt text:fmtconv=0 - Minimal processing. Keep special codes.
+   -opt text:encconv=0 - Suppress character encoding translation. Special
+    codes may be deleted.
+
+* ASCOM (moule="ascom")
+  An executable text (.COM) format.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* CP437 (module="cp437")
+  Convert DOS Code Page 437 text to UTF-8.
+  - Not autodetected. Use "-m cp437".
+  - Note that code points below 0x20 are ambiguous. Deark tries to guess which
+    ones are control characters.
+  - See also the "plaintext" module.
+
+* DOC2COM (moule="doc2com")
+  Executable text (.COM) files made by G. DePyper's DOC2COM utility.
+  - Supports files that use encryption.
+  - Partially processes the source text, at least to identify special codes
+    that change the colors.
+  Options
+   -opt text:fmtconv=0 - Minimal processing. Keep special codes.
+   -opt text:encconv=0 - Suppress character encoding translation. Special
+    codes may be deleted.
+
+* DOC2COM (moule="doc2com_dkn")
+  Executable text (.COM) files made by D. Nelson's DOC2COM utility.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* GTXT (module="gtxt")
+  Executable text (.COM) files made by E. Gans' GTXT utility (also called
+  MakeScroll). DOS version only.
+  Options
+   -opt text:fmtconv=0 - Extract the raw source code, instead of interpreting
+    special characters.
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* Plain text (module="plaintext")
+  Read a plain text file, and write it as UTF-8.
+  - Not autodetected. Use "-m plaintext".
+  - It is almost always necessary to use the "-inenc" option, to specify the
+    input encoding.
+  - See also the "cp437" module, which works better on some files.
+
+* Read-A-Matic (moule="readamatic")
+  Executable text (.EXE) files made by Read-A-Matic, by M. L. Wester.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* READMAKE (module="readmake")
+  Executable text (.EXE) files made by READMAKE, by Wayne Software.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* SHOW (module="show_gmr")
+  Executable text (.COM) files made by Gary M. Raymond's SHOW utility.
+  - Extracts the source text.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* TEXE (module="texe")
+  Executable text (.EXE) files made by TEXE, by R. Payette.
+  - The first byte of the original file is usually unrecoverable, due to an
+    apparent bug in TEXE.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* TextLife (module="textlife")
+  Executable text (.EXE) files made by TextLife or Breeze, by K. Solway.
+  - Some files contain control character sequences used for things like italics
+    or key definitions. They will be left as-is.
+  - The first character of the file may be a special code ("f", "p", or "#").
+    It will be left as-is.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+* TXT2COM (module="txt2com")
+  Executable text (.COM) files made by Graham's TXT2COM utility.
+  - Extracts the source text. Does not necessarily render the document (e.g.
+    colors) like running the COM file would.
+  Options
+   -opt text:encconv=0 - Suppress character encoding translation.
+
+=== Transfer encoding modules ===
+
+* Ascii85 (module="ascii85") (incomplete)
+  - Supports old and new btoa formats
+  - Supports data with "<~" / "~>" delimiters
+
+* Base16 (module="base16" or "hex")
+  - Decode "hex encoded" data.
+  - Not autodetected; use "-m base16".
+  - Only supports raw data, such as that produced by "xxd -p". Does not
+    support full hex dumps.
+
+* Base64 (module="base64")
+  - Not autodetected; use "-m base64".
+
+* BinHex (.hqx) (module="binhex")
+  - Extract data and resource forks to separate files.
+
+* BinSCII (.bsc) (module="binscii")
+  - May need to use "-m binscii" in some cases.
+
+* Uuencoded (module="uuencode")
+
+* Xxencoded (module="xxencode")
+
+=== Other modules ===
+
+* AMOS source code (module="amos_source")
+  - Extract AmBs resource file.
+
+* ASF multimedia (module="asf")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* C64 BASIC (module="basic_c64") (experimental)
+  Detokenize C64 BASIC programs.
+  This module is unfinished, and doesn't work very well. Reprocessing the
+  output with "-m plaintext -inenc petscii" may make it more readable.
+
+* CLP - Saved Windows clipboard (module="clp") (experimental)
+  Options
+   -opt clp:extractall - Extract all data items
+   -opt oemenc=<...> - The encoding for OEM Text items. Same options as -inenc.
+
+* DS_Store (module="dsstore") (experimental)
+  Metadata format associated with MacOS Finder.
+
+* EA datafile (module="ea_data")
+  The hidden "EA DATA. SF" attributes file on some floppy disks used by OS/2.
+  This module is mainly for internal use by the "fat" module. It can be used
+  directly, though possibly with reduced functionality.
+
+* EBML/Matroska/MKV/WebM (module="ebml")
+  Options
+   -opt ebml:encodedid - Also print element ID numbers in raw (encoded) form.
+
+* EXE/PE/NE/etc. (module="exe")
+  EXE format can be complex. Not all varieties are correctly supported.
+  - Extract bitmaps, icons, and cursors from NE and PE (Windows .exe) files.
+  - Extract fonts.
+  - Extract embedded manifests (use -a).
+  - Extract code-signing certificates (use -a).
+  - Extract bitmaps from LX (Linear Executable) files. Note that some of these
+    may be in "Bitmap Array" format. Reprocess them with Deark to extract the
+    actual BMP file(s).
+  - Extract icons and cursors from LX files. Note that these will use OS/2
+    format. Reprocess them with Deark to convert to PNG.
+  - In some cases, extract the archive from a self-extracting archive.
+  Options
+   -opt execomp - Decompress supported executable compression formats.
+   -opt exe:sfx - A hint to decode as a self-extracting archive, and not
+    extract the usual icons, etc.
+   -opt exe:checksum - Report the correct checksum in the debug info.
+
+* FLAC audio (module="flac")
+
+* HLP (Windows Help) (module="hlp")
+  Options
+   -opt hlp:extracttext - Write the file's text (unformatted) to a file. This
+     feature is experimental and incomplete.
+   -opt hlp:extractstreams - Extract raw files, instead of decoding.
+
+* ICC profile (module="iccprofile")
+  - Debug info only.
+
+* IFF (Interchange File Format) (module="iff")
+  - IFF can be parsed, but in many cases nothing can be extracted from it.
+  Options
+   -opt iff:decode=1 - Prefer to decode nested items, instead of extracting
+     them.
+   -opt iff:align=<n> - Assume chunks are padded to an n-byte boundary.
+
+* IPTC-IIM metadata (module="iptc")
+  - Extract captions/abstracts (use -a).
+  - Extract raster caption bitmaps.
+
+* ISO-BMFF (module="bmff") (incomplete)
+  - MP4, QuickTime .mov, HEIF, etc.
+  Options
+   -opt bmff:maxentries=<n> - Maximum number of sample table entries to print
+     when using -d. This applies to several boxes, such as 'stsz'.
+
+* Macintosh Resource Manager (module="macrsrc") (experimental/incomplete)
+  This is the format generally used by Mac resource forks.
+  Options
+   -opt macrsrc:extractraw - Extract all resources directly to files.
+   -opt macrsrc:combinesicn - Put 'small icon' (SICN) sets in a single image.
+
+* MIDI (module="midi")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Monkey's Audio (.ape) (module="monkeys_audio")
+  - Minimal support. Decodes APE tag metadata.
+
+* MP3 / MPEG audio (module="mpegaudio" or "mp3")
+  - Not all files can be autodetected.
+  - Mainly for ID3 and APE metadata. The audio data is not converted.
+
+* Ogg (Vorbis, Theora, etc.) (module="ogg")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+  Options
+   -opt ogg:hexdump - With -d, include a hex dump of more data than usual.
+
+* Photoshop Action format (.atn) (module="ps_action")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Photoshop Brush format (.abr) (module="ps_brush")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Photoshop Custom Shapes format (.csh) (module="ps_csh")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Photoshop Gradient format (.grd) (module="ps_gradient")
+  - Supports file version 5 only (Photoshop 6+)
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Photoshop Patterns format (.pat) (module="ps_pattern")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Photoshop Styles format (.asl) (module="ps_styles")
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* PIF (Windows Program Information File) (module="pif") (incomplete)
+  - Some files contain a config file or an icon that can be extracted, but in
+    most cases, there is nothing that can be extracted.
+  - Some older files must have extension ".pif" (or use "-m pif").
+  Options
+   -opt oemenc=<...> - The encoding for OEM Text items. Same options as -inenc.
+
+* PIF/DESQview (module="desqview_dvp") (incomplete)
+  - Similar to PIF (Windows).
+
+* .plist Property List (module="plist")
+  - Supports binary .plist format only
+  - Files can be parsed, but there is usually nothing that can be extracted
+    from them.
+
+* Psion APP/IMG and OPA/OPO (module="psionapp")
+  - Extract Psion PIC icons.
+  - Extract other contents (use -a).
+
+* RIFF (module="riff")
+  Metaformat used by WAV, AVI, WebP, etc.
+  - RIFF can be parsed, but in many cases nothing can be extracted from it.
+
+* WRI - Microsoft Write (module="wri") (incomplete)
+  - Extract raw text to an HTML file. Very little formatting, etc.
+  - Extract most pictures.
+  Options
+   -opt wri:extracttext=0 - Do not extract text
+   -opt ole1:extractall - Extract unidentified OLE objects
+
+=== Special modules ===
+
+* Byte frequency analysis (module="bytefreq")
+  Print a table showing how many times each byte value occurs.
+  - Use "-m bytefreq".
+
+* Copy (module="copy")
+  "Extract" the entire file. Use with -start and -size to extract part of the
+  file.
+  - Use "-m copy".
+
+* CRC (module="crc")
+  Print various CRC hashes and checksums of the file, including IEEE CRC-32.
+  - Use "-m crc".
+  Options
+   -a, -opt crc:all - Also compute uncommon CRCs and checksums.
+
+* Hex dump (module="hexdump")
+  Print a hex dump of the file.
+  - Use "-m hexdump".
+
+* Join (module="join")
+  Concatenate multiple input files.
+  - You must use "-m join" to select this module, and "-mp" to allow multiple
+    input files.
+
+* JPEG scan (module="jpegscan")
+  This module tries to find and extract embedded JPEG and JPEG-LS files from
+    otherwise-unsupported formats. Use "-m jpegscan".
+
+* NULL (module="null")
+  Do nothing.
+  - Use "-m null".
+
+* Split (module="split")
+  Split the file into equal-sized chunks.
+  - Use "-m split".
+  Options
+   -opt split:size=<n> - The size of each chunk, in bytes.
+   -opt split:stride=<n> - The distance between the start of one chunk and the
+    start of the next chunk, in bytes.
+
+* XOR (module="xor")
+  Apply an XOR key to the file. By default, invert all the bits.
+  - Use "-m xor".
+  Options
+   -opt xor:key=<aabbcc...> - The key, expressed as one or more hex bytes.
+
+=== "Undocumented" modules ===
+
+(In the interest of disclosure, listed here are modules that haven't been fully
+documented, for one reason or another. They may not work well enough, or at
+all, or may be for internal use only; though some may just need to be reviewed
+and documented.)
+
+afcp - AFCP metadata.
+ain - AIN compressed archive.
+apetag - APE tag metadata.
+arcv - Eschalon Setup / EDI Install installer-archive.
+cas - Atari CAS tape image
+datetime - Interpret bytes as various date/time formats.
+ddb - Windows DDB bitmap, for internal use.
+dwc - DWC compressed archive.
+fastgraph_ppr - Fastgraph Pixel Run Format.
+fastgraph_spr - Fastgraph Packed Pixel Run Format.
+flif - FLIF image.
+hit - HIT compressed archive.
+icedraw - iCEDraw IDF. Not implemented; helps to ID related formats.
+id3 - ID3 metadata.
+is_sfx - Helper module for InstallShield SFX EXE.
+officeart - Microsoft Office Art, etc., for internal use.
+ole1 - Windows OLE1, for internal use.
+olepropset - OLE Property Sets.
+os2pack2 - OS/2 PACK2 ("FTCOMP") compressed archive.
+pegasus_pic2 - Pegasus PIC2/ePIC image.
+red - Knowledge Dynamics installer-archive.
+rgfx - RGFX Amiga image.
+rm - RealMedia.
+sauce - SAUCE metadata, for internal use.
+swg - SWAG packet, LHA-like archive.
+tome - Tome, Macintosh installer-archive.
+xpk - XPK compressed file.

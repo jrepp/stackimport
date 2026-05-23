@@ -1,0 +1,42 @@
+# Vendored Dependency Index
+
+This file is the source-of-truth index for third-party code checked into
+`vendor/`. Keep it current whenever a dependency is added, removed, upgraded, or
+locally patched.
+
+## Summary
+
+| Path | Dependency | Role | License | Local Integration | Local Modifications |
+| --- | --- | --- | --- | --- | --- |
+| `rapidjson/` | RapidJSON 1.1.0 | Header-only JSON DOM/writer used by `stackimport_static` | MIT, see `rapidjson/license.txt` | `vendor_rapidjson` interface target; linked into `stackimport_static` | No upstream source changes. Added `rapidjson/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. |
+| `resource_dasm/` | `resource_dasm` / `libresource_file` snapshot | Classic Mac resource fork and resource conversion reference implementation | MIT, see `resource_dasm/LICENSE` | Built by `vendor_resource_dasm` external project; included in `stackimport-vendor-static` | No upstream source changes intended. Local integration is through the top-level vendor CMake wrapper and strict build flags. |
+| `phosg/` | `phosg` snapshot | Required support library for `resource_dasm` | MIT, see `phosg/src/LICENSE` | Built by `vendor_phosg` external project before `vendor_resource_dasm` | No upstream source changes intended. Local integration is through the top-level vendor CMake wrapper and strict build flags. |
+| `deark/` | Deark 1.7.2 | Broad legacy decoder/reference for containers and image formats | MIT-style Deark license, see `deark/COPYING`; bundled foreign-code notices under `deark/foreign/` | Built by `vendor_deark` custom target; archives are included in `stackimport-vendor-static` | No upstream source changes intended. Local integration passes C17 and strict warning flags through Make. |
+| `stb/` | `stb_image_write.h` | Header-only PNG/image writer candidate | MIT or public domain, license text embedded at end of `stb/stb_image_write.h` | `vendor_stb_image_write` interface target | No upstream source changes intended. CMake wrapper only. |
+| `dr_wav/` | `dr_wav.h` | Header-only WAV reader/writer candidate | Public domain or MIT-0, license text embedded at end of `dr_wav/dr_wav.h` | `vendor_dr_wav` interface target | No upstream source changes intended. CMake wrapper only. |
+
+## Build Targets
+
+The main vendor entry points are defined in `vendor/CMakeLists.txt`:
+
+| Target | Purpose |
+| --- | --- |
+| `vendor-header-libraries` | Makes header-only interface targets available. |
+| `vendor-tools` | Builds header-only targets plus Deark, phosg, and resource_dasm. |
+| `vendor-static-artifacts` | Builds static artifacts used by `stackimport-vendor-static`. |
+| `stackimport-vendor-static` | Top-level target that combines `libstackimport.a` with vendored static archives. |
+
+The wrapper sets C17 and C++23 where supported, disables compiler extensions for
+CMake-based dependencies, and forwards configured static-analysis tools to those
+CMake builds.
+
+## Maintenance Rules
+
+- Preserve upstream license files in place.
+- Record every local source patch in the `Local Modifications` column above.
+- Prefer CMake wrapper changes over editing vendored source.
+- If a dependency is upgraded, update the dependency/version text, license path,
+  and modification notes in this file in the same change.
+- If a dependency has foreign bundled code, keep its notices near that code and
+  summarize them here.
+

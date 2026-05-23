@@ -1,0 +1,270 @@
+// This file is part of Deark.
+// Copyright (C) 2016 Jason Summers
+// See the file COPYING for terms of use.
+
+// Old Print Shop and PrintMaster formats
+
+#include <deark-config.h>
+#include <deark-private.h>
+DE_DECLARE_MODULE(de_module_printshop);
+DE_DECLARE_MODULE(de_module_newprintshop);
+DE_DECLARE_MODULE(de_module_printmaster);
+DE_DECLARE_MODULE(de_module_printshop_gs);
+
+// **************************************************************************
+// The Print Shop .DAT/.NAM format
+// **************************************************************************
+
+#define PRINTSHOP_FMT_DAT 1
+#define PRINTSHOP_FMT_POG 2
+#define PRINTSHOP_FMT_SHP 3
+
+typedef struct localctx_struct {
+	int fmt;
+	dbuf *namefile;
+} lctx;
+
+static void do_printshop_etc_image(deark *c, lctx *d, i64 imgnum,
+	i64 pos, i64 *bytes_consumed)
+{
+	i64 width, height;
+	i64 rowspan;
+	i64 imgspan;
+	i64 imgoffset = 0;
+	de_finfo *fi = NULL;
+	u8 x;
+
+	*bytes_consumed = 0;
+
+	if(d->fmt==PRINTSHOP_FMT_SHP) {
+		x = de_getbyte(pos);
+		if(x!=0x0b) goto done; // No more images?
+		height = (i64)de_getbyte(pos+1);
+		width = (i64)de_getbyte(pos+2);
+		if(width==0 || height==0) goto done;
+		rowspan = (width+7)/8; // This is just a guess.
+		imgoffset = 4;
+		imgspan = 4 + rowspan * height + 1;
+		if(pos+imgspan > c->infile->len) goto done;
+	}
+	else { // DAT or POG format
+		width = 88;
+		height = 52;
+		rowspan = (width+7)/8;
+		imgspan = rowspan * height;
+		if(pos+imgspan > c->infile->len) goto done; // Reached end of file
+	}
+
+	de_dbg(c, "image[%d] at %d, %d"DE_CHAR_TIMES"%d", (int)imgnum, (int)pos, (int)width, (int)height);
+	de_dbg_indent(c, 1);
+
+	fi = de_finfo_create(c);
+
+	if(d->namefile && (d->namefile->len >= (imgnum+1)*16)) {
+		de_ucstring *name = NULL;
+		name = ucstring_create(c);
+		dbuf_read_to_ucstring(d->namefile, imgnum*16, 16, name, DE_CONVFLAG_STOP_AT_NUL, DE_ENCODING_ASCII);
+		de_dbg(c, "name: \"%s\"", ucstring_getpsz(name));
+		de_finfo_set_name_from_ucstring(c, fi, name, 0);
+		ucstring_destroy(name);
+	}
+
+	de_convert_and_write_image_bilevel(c->infile, pos+ imgoffset,
+		width, height, rowspan, DE_CVTF_WHITEISZERO, fi, 0);
+
+	de_dbg_indent(c, -1);
+
+	*bytes_consumed = imgspan;
+done:
+	de_finfo_destroy(c, fi);
+}
+
+static void do_printshop_etc(deark *c, lctx *d)
+{
+	i64 headersize = 0;
+	const char *namefile_fn = NULL;
+	i64 bytes_consumed;
+	i64 pos;
+	i64 img_count;
+	i64 num_images = 0;
+	int num_images_is_known = 0;
+
+	namefile_fn = de_get_ext_option(c, "namefile");
+	if(!namefile_fn) namefile_fn = de_get_ext_option(c, "file2");
+
+	if(namefile_fn) {
+		d->namefile = dbuf_open_input_file(c, namefile_fn);
+	}
+	if(d->namefile) {
+		de_dbg(c, "Using name file: %s", namefile_fn);
+	}
+
+	if(d->fmt == PRINTSHOP_FMT_POG) {
+		num_images = de_getu16le(8);
+		de_dbg(c, "number of images: %d", (int)num_images);
+		num_images_is_known = 1;
+		headersize = 10;
+	}
+	else {
+		headersize = 0;
+	}
+
+	pos = headersize;
+	img_count = 0;
+	while(1) {
+		if(num_images_is_known && (img_count >= num_images)) break;
+		if(pos >= c->infile->len) break;
+		do_printshop_etc_image(c, d, img_count, pos, &bytes_consumed);
+		if(bytes_consumed<1) break;
+		pos += bytes_consumed;
+		img_count++;
+	}
+
+	if(num_images_is_known && (c->infile->len - pos)>=128) {
+		de_warn(c, "%d bytes of data were ignored. This file may not have "
+			"been fully decoded.", (int)(c->infile->len - pos));
+	}
+
+	dbuf_close(d->namefile);
+	d->namefile = NULL;
+}
+
+static void de_run_printshop(deark *c, de_module_params *mparams)
+{
+	lctx *d;
+	d = de_malloc(c, sizeof(lctx));
+	d->fmt = PRINTSHOP_FMT_DAT;
+	de_declare_fmt(c, "The Print Shop (DAT/NAM)");
+	do_printshop_etc(c, d);
+	de_free(c, d);
+}
+
+static int de_identify_printshop(deark *c)
+{
+	const char *bn;
+
+	// Best we can do is to validate the file size, and that the
+	// name is of the form "gr*.dat".
+	if((c->infile->len % 572)!=0) return 0;
+	bn = de_get_input_file_basename(c);
+	if(!de_sz_has_ext(bn, "dat")) return 0;
+	if(de_strncasecmp(bn, "gr", 2)) return 0;
+	return 10;
+}
+
+void de_module_printshop(deark *c, struct deark_module_info *mi)
+{
+	mi->id = "printshop";
+	mi->desc = "The Print Shop .DAT/.NAM";
+	mi->run_fn = de_run_printshop;
+	mi->identify_fn = de_identify_printshop;
+}
+
+// **************************************************************************
+// The New Print Shop .POG/.PNM format
+// **************************************************************************
+
+static void de_run_newprintshop(deark *c, de_module_params *mparams)
+{
+	lctx *d;
+	d = de_malloc(c, sizeof(lctx));
+	d->fmt = PRINTSHOP_FMT_POG;
+	de_declare_fmt(c, "The New Print Shop (POG/PNM)");
+	do_printshop_etc(c, d);
+	de_free(c, d);
+}
+
+static int de_identify_newprintshop(deark *c)
+{
+	if(de_input_file_has_ext(c, "pog")) {
+		if((c->infile->len % 572)==10) {
+			return 90;
+		}
+		else {
+			return 10;
+		}
+	}
+	return 0;
+}
+
+void de_module_newprintshop(deark *c, struct deark_module_info *mi)
+{
+	// There's no surefire way to distinguish between Print Shop and
+	// New Print Shop files, so it's more convenient to put them in separate
+	// modules (so the user can simply use -m to select the format).
+	mi->id = "newprintshop";
+	mi->desc = "The New Print Shop .POG/.PNM";
+	mi->run_fn = de_run_newprintshop;
+	mi->identify_fn = de_identify_newprintshop;
+}
+
+// **************************************************************************
+// PrintMaster .SHP/.SDR format
+// **************************************************************************
+
+static void de_run_printmaster(deark *c, de_module_params *mparams)
+{
+	lctx *d;
+	d = de_malloc(c, sizeof(lctx));
+	d->fmt = PRINTSHOP_FMT_SHP;
+	de_declare_fmt(c, "PrintMaster (SHP/SDR)");
+	do_printshop_etc(c, d);
+	de_free(c, d);
+}
+
+static int de_identify_printmaster(deark *c)
+{
+	u8 b[4];
+	int sdr_ext;
+
+	sdr_ext = de_input_file_has_ext(c, "sdr");
+	de_read(b, 0, 4);
+	if(!de_memcmp(b, "\x0b\x34\x58", 3)) {
+		return sdr_ext ? 90 : 10;
+	}
+	if(!sdr_ext) return 0;
+	if(b[0]==0x0b) return 30;
+	return 0;
+}
+
+void de_module_printmaster(deark *c, struct deark_module_info *mi)
+{
+	mi->id = "printmaster";
+	mi->desc = "PrintMaster .SHP/.SDR";
+	mi->run_fn = de_run_printmaster;
+	mi->identify_fn = de_identify_printmaster;
+}
+
+// **************************************************************************
+// PrintShop Apple IIgs 88x52 8-color
+// **************************************************************************
+
+static void de_run_printshop_gs(deark *c, de_module_params *mparams)
+{
+	de_bitmap *img = NULL;
+	de_finfo *fi = NULL;
+	static const de_color pal[8] = {
+		0xffffffffU,0xffffff00U,0xffff0000U,0xffff6600U,
+		0xff0000ffU,0xff00ff00U,0xffcc00ccU,0xff000000U };
+
+	img = de_bitmap_create(c, 88, 52, 3);
+	fi = de_finfo_create(c);
+	fi->density.code = DE_DENSITY_UNK_UNITS;
+	// I don't know what the density ratio should be.
+	// But 88:52 (1.692:1), making the images square, seems pretty close
+	// to what was intended.
+	fi->density.xdens = 88.0;
+	fi->density.ydens = 52.0;
+	de_convert_image_paletted_planar(c->infile, 0, 3, 11, 11*52, pal, img, 0x2);
+	de_bitmap_write_to_file_finfo(img, fi, 0);
+	de_bitmap_destroy(img);
+	de_finfo_destroy(c, fi);
+}
+
+void de_module_printshop_gs(deark *c, struct deark_module_info *mi)
+{
+	mi->id = "printshop_gs";
+	mi->desc = "Print Shop - Apple IIgs";
+	mi->run_fn = de_run_printshop_gs;
+	mi->identify_fn = NULL;
+}
