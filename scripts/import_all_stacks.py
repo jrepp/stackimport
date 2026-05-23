@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +53,28 @@ class ImportResult:
     output_package: Path | None
 
 
+@dataclass(frozen=True)
+class DisassemblyJob:
+    run_id: str
+    source_id: int
+    extracted_file_id: int | None
+    attempt_id: int
+    archive_input: str
+    display_input: str
+    import_path: Path
+    output_package: Path
+    resource_dasm_bin: Path
+
+
+@dataclass(frozen=True)
+class DisassemblyResult:
+    job: DisassemblyJob
+    status: str
+    detail: str
+    log_path: Path | None
+    disassembly_file_count: int
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Extract HyperCard archives, run stackimport, and index import results in SQLite.",
@@ -72,6 +95,24 @@ def parse_args() -> argparse.Namespace:
         "--unar-bin",
         default=os.environ.get("UNAR_BIN", "unar"),
         help="unar binary for .sit/.hqx extraction. Default: unar",
+    )
+    parser.add_argument(
+        "--resource-dasm-bin",
+        type=Path,
+        default=Path(os.environ.get("RESOURCE_DASM_BIN", REPO_ROOT / "build" / "vendor-install" / "bin" / "resource_dasm")),
+        help="resource_dasm binary for optional XCMD/XFCN disassembly. Default: build/vendor-install/bin/resource_dasm",
+    )
+    parser.add_argument(
+        "--disassemble-code-resources",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("DISASSEMBLE_CODE_RESOURCES", "1").lower() not in {"0", "false", "no"},
+        help="Run resource_dasm for XCMD/XFCN resources after stack imports. Default: true",
+    )
+    parser.add_argument(
+        "--resource-dasm-jobs",
+        type=int,
+        default=int(os.environ.get("RESOURCE_DASM_JOBS", min(4, os.cpu_count() or 1))),
+        help="Maximum concurrent resource_dasm subprocesses. Default: min(4, CPU count)",
     )
     parser.add_argument(
         "--run-root",
@@ -663,6 +704,10 @@ def logical_file_info(rel_path: str) -> tuple[str, int | None]:
     name = Path(rel_path).name
     if name == "printsettings.json":
         return "printsettings", None
+    code_resource = re.match(r"^.*_(XCMD|XFCN)_(-?\d+)(?:_.*)?\.txt$", name)
+    if code_resource:
+        logical_kind = "externalcommand" if code_resource.group(1) == "XCMD" else "externalfunction"
+        return logical_kind, int(code_resource.group(2))
     match = re.match(r"^(card|background|BMAP|PAT|stylesheet|master|pagesetup|reporttemplate|printsettings)_(-?\d+)", name)
     if match:
         logical_kind = match.group(1).lower()
@@ -759,6 +804,8 @@ def run_stackimport(
     log_path: Path,
     stackimport_bin: Path,
     stackimport_args: list[str],
+    resource_dasm_bin: Path,
+    disassemble_code_resources: bool,
 ) -> ImportResult:
     command = [str(stackimport_bin), *stackimport_args, str(import_path)]
     completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
@@ -886,6 +933,19 @@ def run_stackimport(
         )
 
     if output_package.exists():
+        if disassemble_code_resources:
+            disassemble_external_code_resources(
+                conn=conn,
+                run_id=run_id,
+                source_id=source_id,
+                extracted_file_id=extracted_file_id,
+                attempt_id=attempt_id,
+                archive_input=archive_input,
+                display_input=display_input,
+                import_path=import_path,
+                output_package=output_package,
+                resource_dasm_bin=resource_dasm_bin,
+            )
         index_output_package(conn, attempt_id, output_package)
 
     return ImportResult(
@@ -900,6 +960,139 @@ def run_stackimport(
         log_path=log_path,
         output_package=output_package if output_package.exists() else None,
     )
+
+
+def relative_output_path_for_tool(output_dir: Path) -> tuple[Path, Path]:
+    output_dir = output_dir.resolve()
+    if output_dir.is_relative_to(REPO_ROOT.resolve()):
+        return REPO_ROOT, output_dir.relative_to(REPO_ROOT.resolve())
+    return output_dir.parent, Path(output_dir.name)
+
+
+def disassemble_external_code_resources(
+    *,
+    conn: sqlite3.Connection,
+    run_id: str,
+    source_id: int,
+    extracted_file_id: int | None,
+    attempt_id: int,
+    archive_input: str,
+    display_input: str,
+    import_path: Path,
+    output_package: Path,
+    resource_dasm_bin: Path,
+) -> None:
+    resource_fork_path = Path(str(import_path) + "/..namedfork/rsrc")
+    output_dir = output_package / "resource-disassembly"
+    provenance_path = output_dir / "resource-disassembly.provenance.json"
+    if not resource_fork_path.exists() or resource_fork_path.stat().st_size == 0:
+        insert_format_gap(
+            conn,
+            run_id,
+            "resource_disassembly",
+            "resource fork missing or empty",
+            display_input,
+            source_id=source_id,
+            extracted_file_id=extracted_file_id,
+            attempt_id=attempt_id,
+        )
+        return
+    if not resource_dasm_bin.exists():
+        insert_format_gap(
+            conn,
+            run_id,
+            "resource_disassembly",
+            f"resource_dasm binary not found: {resource_dasm_bin}",
+            display_input,
+            source_id=source_id,
+            extracted_file_id=extracted_file_id,
+            attempt_id=attempt_id,
+        )
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tool_cwd, tool_output = relative_output_path_for_tool(output_dir)
+    command = [
+        str(resource_dasm_bin.resolve()),
+        str(import_path.resolve()),
+        str(tool_output),
+        "--target-type=XCMD",
+        "--target-type=XFCN",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=tool_cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        check=False,
+    )
+    log_path = output_dir / "resource_dasm.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                f"Original input: {archive_input}",
+                f"Import input: {import_path}",
+                f"Display input: {display_input}",
+                f"Command: {subprocess.list2cmdline(command)}",
+                f"Working directory: {tool_cwd}",
+                f"Exit code: {completed.returncode}",
+                "",
+                completed.stdout,
+            ]
+        ),
+        encoding="utf-8",
+        errors="replace",
+    )
+    disassembly_files = sorted(
+        path for path in output_dir.glob("*.txt")
+        if re.search(r"_(?:XCMD|XFCN)_-?\d+(?:_|\\.)", path.name)
+    )
+    provenance = {
+        "format": "stackimport.resourceDisassembly.provenance",
+        "runId": run_id,
+        "attemptId": attempt_id,
+        "archiveInput": archive_input,
+        "displayInput": display_input,
+        "importPath": str(import_path),
+        "resourceForkPath": str(resource_fork_path),
+        "resourceForkBytes": resource_fork_path.stat().st_size,
+        "resourceForkSha256": file_sha256(resource_fork_path),
+        "outputDirectory": str(output_dir),
+        "tool": str(resource_dasm_bin),
+        "command": command,
+        "exitCode": completed.returncode,
+        "disassemblyFileCount": len(disassembly_files),
+        "disassemblyFiles": [str(path.relative_to(output_package)) for path in disassembly_files],
+        "encodingNotes": "resource_dasm decodes classic Mac resource names and emits UTF-8 text filenames/content",
+    }
+    provenance_path.write_text(json.dumps(provenance, indent=2, sort_keys=True), encoding="utf-8")
+
+    if completed.returncode != 0:
+        insert_format_gap(
+            conn,
+            run_id,
+            "resource_disassembly",
+            f"resource_dasm failed with exit_code={completed.returncode}",
+            display_input,
+            source_id=source_id,
+            extracted_file_id=extracted_file_id,
+            attempt_id=attempt_id,
+            log_path=log_path,
+        )
+    elif not disassembly_files:
+        insert_format_gap(
+            conn,
+            run_id,
+            "resource_disassembly",
+            "resource_dasm found no XCMD/XFCN resources",
+            display_input,
+            source_id=source_id,
+            extracted_file_id=extracted_file_id,
+            attempt_id=attempt_id,
+            log_path=log_path,
+        )
 
 
 def parse_json_if_possible(path: Path) -> object | None:
@@ -2088,6 +2281,8 @@ def main() -> int:
                     log_dir / f"{log_stem}.{import_count}.log",
                     stackimport_bin,
                     args.stackimport_args,
+                    args.resource_dasm_bin,
+                    args.disassemble_code_resources,
                 )
                 if result.status == "ok":
                     stack_ok += 1
@@ -2138,6 +2333,8 @@ def main() -> int:
                     log_dir / f"{log_stem}.log",
                     stackimport_bin,
                     args.stackimport_args,
+                    args.resource_dasm_bin,
+                    args.disassemble_code_resources,
                 )
                 update_source_status(conn, source_id, "imported")
                 if result.status == "ok":

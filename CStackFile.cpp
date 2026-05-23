@@ -346,7 +346,7 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 
 bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 {
-	int32_t	vBlockSize = blockData.size();
+	int32_t	vBlockSize = static_cast<int32_t>(blockData.size());
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing 'STBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
 	
@@ -358,6 +358,23 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	}
 	
 	std::vector<CStyleEntry>	styles;
+
+	if( blockData.size() < 12 )
+	{
+		fprintf( stderr, "Warning: 'STBL' #%d is too short (%lu bytes); using an empty style table.\n", blockID, blockData.size() );
+		char vFileName[256] = { 0 };
+		snprintf( vFileName, sizeof(vFileName), "stylesheet_%d.css", blockID );
+		mStyleSheetName = vFileName;
+		FILE* vStylesheetFile = fopen( OutputPath(vFileName).c_str(), "w" );
+		if( vStylesheetFile )
+		{
+			fprintf( vStylesheetFile, "/* Missing or empty HyperCard style table %d. */\n", blockID );
+			fclose( vStylesheetFile );
+		}
+		if( mProgressMessages )
+			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		return true;
+	}
 	
 	size_t		currOffs = 4;
 	int32_t		styleCount = ReadBEInt32(blockData, currOffs);
@@ -467,9 +484,17 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 
 bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 {
-	uint32_t	vBlockSize = blockData.size();
+	uint32_t	vBlockSize = static_cast<uint32_t>(blockData.size());
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing 'FTBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
+
+	if( blockData.size() < 8 )
+	{
+		fprintf( stderr, "Warning: 'FTBL' #%d is too short (%lu bytes); using an empty font table.\n", blockID, blockData.size() );
+		if( mProgressMessages )
+			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		return true;
+	}
 
 	int16_t	numFonts = ReadBEInt16(blockData, 6);
 	size_t	currOffsIntoData = 8;
@@ -480,10 +505,10 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 		
 		int16_t	fontID = ReadBEInt16(blockData, currOffsIntoData);
 		
-		int x = 0;
+		size_t x = 0;
 		size_t startOffs = currOffsIntoData +2;
 		fontName = mac_roman_string( blockData, startOffs );
-		x = static_cast<int>(MacRomanStringEnd( blockData, startOffs ));
+		x = MacRomanStringEnd( blockData, startOffs );
 		
 		mFontTable[fontID] = fontName;
 	
@@ -582,7 +607,7 @@ bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 		for( int n = 0; n < templateCount && blockData.hasdata( currOffs, 36 ); n++, currOffs += 36 )
 		{
 			int32_t	templateID = ReadBEInt32( blockData, currOffs );
-			uint8_t	nameLen = blockData[static_cast<int>(currOffs +4)];
+			uint8_t	nameLen = static_cast<uint8_t>(blockData[static_cast<int>(currOffs +4)]);
 			if( nameLen > 31 )
 				nameLen = 31;
 			JsonValue item(rapidjson::kObjectType);
@@ -662,7 +687,7 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 		currOffs += 2;
 		document.AddMember("numCopies", ReadBEInt16( blockData, currOffs ), allocator);
 		currOffs += 2;
-		uint8_t	printingMethod = blockData[static_cast<int>(currOffs++)];
+		uint8_t	printingMethod = static_cast<uint8_t>(blockData[static_cast<int>(currOffs++)]);
 		document.AddMember("printingMethod", json_string(printingMethod == 0 ? "draft" : (printingMethod == 1 ? "deferred" : "unknown"), allocator), allocator);
 		currOffs++;	// Reserved.
 	}
@@ -727,7 +752,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 		int16_t	flags = ReadBEInt16( blockData, 22 );
 		document.AddMember("leftToRight", (flags & (1 << 8)) != 0, allocator);
 		document.AddMember("dynamicHeight", (flags & (1 << 0)) != 0, allocator);
-		uint8_t	headerLen = blockData[24];
+		uint8_t	headerLen = static_cast<uint8_t>(blockData[24]);
 		document.AddMember("header", json_string(mac_roman_string(blockData, 25, 25 +headerLen), allocator), allocator);
 	}
 
@@ -740,7 +765,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 		for( int n = 0; n < itemCount && blockData.hasdata( currOffs, 22 ); n++ )
 		{
 			int16_t	itemSize = ReadBEInt16( blockData, currOffs );
-			if( itemSize <= 0 || !blockData.hasdata( currOffs, itemSize ) )
+			if( itemSize <= 0 || !blockData.hasdata( currOffs, static_cast<size_t>(itemSize) ) )
 				break;
 
 			JsonValue item(rapidjson::kObjectType);
@@ -773,7 +798,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 			item.AddMember("font", json_string(mac_roman_string(blockData, fontStart, fontEnd), allocator), allocator);
 			items.PushBack(item, allocator);
 
-			currOffs += itemSize;
+			currOffs += static_cast<size_t>(itemSize);
 			currOffs = EvenAlign( currOffs );
 		}
 		document.AddMember("items", items, allocator);
@@ -870,6 +895,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	for( int n = 0; n < numParts; n++ )
 	{
 		int16_t	partLength = ReadBEInt16(blockData, currOffsIntoData);
+		size_t	partRecordLength = static_cast<size_t>(partLength);
 		int16_t	partID = ReadBEInt16(blockData, currOffsIntoData +2);
 		int16_t	flagsAndType = ReadBEInt16(blockData, currOffsIntoData +4);
 		int16_t	partType = flagsAndType >> 8;
@@ -1001,13 +1027,14 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 		int16_t	textHeight = ReadBEInt16(blockData, currOffsIntoData +28);
 		if( !isButton )
 			part.AddMember("textHeight", textHeight, allocator);
-		int x = 0, startOffs = static_cast<int>(currOffsIntoData +30);
+		size_t x = 0;
+		size_t startOffs = currOffsIntoData +30;
 		part.AddMember("name", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
-		x = static_cast<int>(MacRomanStringEnd(blockData, startOffs));
+		x = MacRomanStringEnd(blockData, startOffs);
 		startOffs = x +2;
 		part.AddMember("script", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
 		parts.PushBack(part, allocator);
-		currOffsIntoData += partLength;
+		currOffsIntoData += partRecordLength;
 		currOffsIntoData += (currOffsIntoData % 2);
 	}
 	if( !isCard )
@@ -1025,7 +1052,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 		CBuf	theText, theStyles;
 		if( partID < 0 )
 		{
-			partID = -partID;
+			partID = static_cast<int16_t>(-static_cast<int>(partID));
 			content.AddMember("layer", json_string("card", allocator), allocator);
 			content.AddMember("id", partID, allocator);
 			uint16_t stylesLength = ReadBEUInt16(blockData, currOffsIntoData +4);
@@ -1037,8 +1064,9 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			}
 			else
 				stylesLength = 0;
-			theText.resize( partLength -stylesLength +1 );
-			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, partLength -stylesLength );
+			int textLength = partLength -static_cast<int>(stylesLength);
+			theText.resize( static_cast<size_t>(textLength +1) );
+			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, static_cast<size_t>(textLength) );
 			theText[theText.size()-1] = 0;
 		}
 		else
@@ -1054,8 +1082,9 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			}
 			else
 				stylesLength = 0;
-			theText.resize( partLength -stylesLength +1 );
-			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, partLength -stylesLength );
+			int textLength = partLength -static_cast<int>(stylesLength);
+			theText.resize( static_cast<size_t>(textLength +1) );
+			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, static_cast<size_t>(textLength) );
 			theText[theText.size()-1] = 0;
 			if( owner != -1 )
 			{
@@ -1098,14 +1127,14 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			content.AddMember("highlight", highlighted, allocator);
 		}
 		contents.PushBack(content, allocator);
-		currOffsIntoData += partLength +4 +(partLength % 2);
+		currOffsIntoData += static_cast<size_t>(partLength +4 +(partLength % 2));
 	}
 	document.AddMember("contents", contents, allocator);
 	
-	int startOffs = static_cast<int>(currOffsIntoData);
+	size_t startOffs = currOffsIntoData;
 	std::string layerName = mac_roman_string(blockData, startOffs);
 	document.AddMember("name", json_string(layerName, allocator), allocator);
-	int nameEnd = static_cast<int>(MacRomanStringEnd(blockData, startOffs));
+	size_t nameEnd = MacRomanStringEnd(blockData, startOffs);
 	startOffs = nameEnd +1;
 	std::string script = mac_roman_string(blockData, startOffs);
 	document.AddMember("script", json_string(script, allocator), allocator);
@@ -1160,12 +1189,12 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 			int32_t		currCardID = ReadBEInt32( blockData, currDataOffs );
 			if( currCardID == 0 )
 				break;	// End of page list. (Sentinel)
-			uint8_t		cardFlags = blockData[currDataOffs +4];
+			uint8_t		cardFlags = static_cast<uint8_t>(blockData[currDataOffs +4]);
 			page.cardIDs.push_back(currCardID);
 			
 			success = LoadLayerBlock( "CARD", currCardID, mBlockMap[CStackBlockIdentifier("CARD",currCardID)], cardFlags );
 			
-			currDataOffs += mCardBlockSize;
+			currDataOffs += static_cast<size_t>(mCardBlockSize);
 		}
 		mPageSummaries.push_back(page);
 	}
@@ -1571,7 +1600,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	if( !success )
 		return false;
 	
-	mMaxProgress = mBlockMap.size();
+	mMaxProgress = static_cast<int>(mBlockMap.size());
 	mCurrentProgress = 0;
 	
   #if MAC_CODE
@@ -1598,9 +1627,29 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	}
 	success = LoadStackBlock( -1, stackItty->second );
 	if( success )
-		success = LoadFontTable( mFontTableBlockID, mBlockMap[CStackBlockIdentifier("FTBL",mFontTableBlockID)] );
+	{
+		CBlockMap::iterator fontTableItty = mBlockMap.find(CStackBlockIdentifier("FTBL",mFontTableBlockID));
+		if( fontTableItty != mBlockMap.end() )
+			success = LoadFontTable( mFontTableBlockID, fontTableItty->second );
+		else
+		{
+			fprintf( stderr, "Warning: Referenced 'FTBL' #%d is missing; using an empty font table.\n", mFontTableBlockID );
+			CBuf emptyFontTable;
+			success = LoadFontTable( mFontTableBlockID, emptyFontTable );
+		}
+	}
 	if( success )
-		success = LoadStyleTable( mStyleTableBlockID, mBlockMap[CStackBlockIdentifier("STBL",mStyleTableBlockID)] );
+	{
+		CBlockMap::iterator styleTableItty = mBlockMap.find(CStackBlockIdentifier("STBL",mStyleTableBlockID));
+		if( styleTableItty != mBlockMap.end() )
+			success = LoadStyleTable( mStyleTableBlockID, styleTableItty->second );
+		else
+		{
+			fprintf( stderr, "Warning: Referenced 'STBL' #%d is missing; using an empty style table.\n", mStyleTableBlockID );
+			CBuf emptyStyleTable;
+			success = LoadStyleTable( mStyleTableBlockID, emptyStyleTable );
+		}
+	}
 	
 	// Now load all backgrounds and bitmaps:
 	if( success )

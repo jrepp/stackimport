@@ -203,8 +203,10 @@ char*	CBuf::buf( size_t offs, size_t amount )
 {
 	if( amount == SIZE_MAX )
 		amount = offs <= mShared->mSize ? mShared->mSize -offs : 0;
-	assert( mShared->mBuffer != nullptr );
 	static char		dummy[2048] = {0};
+	if( amount == 0 )
+		return dummy;
+	assert( mShared->mBuffer != nullptr );
 	if( !hasdata( offs, amount ) )
 		return dummy;
 	
@@ -218,6 +220,8 @@ const char*	CBuf::buf( size_t offs, size_t amount ) const
 	static char		dummy[2048] = {0};
 	if( amount == SIZE_MAX )
 		amount = offs <= mShared->mSize ? mShared->mSize -offs : 0;
+	if( amount == 0 )
+		return dummy;
 	assert( mShared->mBuffer != nullptr );
 	if( !hasdata( offs, amount ) )
 		return dummy;
@@ -228,6 +232,8 @@ const char*	CBuf::buf( size_t offs, size_t amount ) const
 
 void	CBuf::xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amount )
 {
+	if( amount == 0 )
+		return;
 	assert( mShared->mBuffer != nullptr);
 	assert( (amount +dstOffs) <= mShared->mSize );
 	if( !src || !hasdata( dstOffs, amount ) )
@@ -239,6 +245,8 @@ void	CBuf::xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amo
 
 void	CBuf::xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amount )
 {
+	if( amount == 0 )
+		return;
 	assert( mShared->mBuffer != nullptr );
 	assert( (amount +dstOffs) <= mShared->mSize );
 	if( !hasdata( dstOffs, amount ) || !src.hasdata( srcOffs, amount ) )
@@ -250,6 +258,8 @@ void	CBuf::xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amou
 
 void	CBuf::shiftnstr( size_t dstOffs, size_t amount, int shiftAmount )
 {
+	if( amount == 0 )
+		return;
 	assert( mShared->mBuffer != nullptr );
 	assert( (dstOffs +amount) <= mShared->mSize );
 	if( dstOffs > mShared->mSize || amount > (mShared->mSize -dstOffs) )
