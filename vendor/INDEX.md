@@ -15,6 +15,7 @@ locally patched.
 | `stb/` | `stb_image_write.h` | Header-only PNG/image writer candidate | MIT or public domain, license text embedded at end of `stb/stb_image_write.h` | `vendor_stb_image_write` interface target | No upstream source changes intended. CMake wrapper only. |
 | `dr_wav/` | `dr_wav.h` | Header-only WAV reader/writer candidate | Public domain or MIT-0, license text embedded at end of `dr_wav/dr_wav.h` | `vendor_dr_wav` interface target | No upstream source changes intended. CMake wrapper only. |
 | `snd2wav/` | `snd2wav` snapshot at `d6900ad35ba4da1fb488fe006f64a7977d98b32c` | Legacy Mac `snd ` to WAV conversion helper currently used by sound conversion paths | No explicit license file found in snapshot; source copyright headers state all rights reserved | `vendor_snd2wav` static target; linked into `stackimport_static` | Converted from a git submodule to checked-in vendored source. Added CMake wrapper in `vendor/CMakeLists.txt` and local provenance note in `snd2wav/STACKIMPORT_VENDOR.md`. |
+| `ppcd/` | PPCD snapshot at `58f7e6df284fa4cd5a9a734b7a44d1851dcdaf16` | PowerPC instruction disassembler candidate for XCMD/XFCN reverse engineering | CC0-1.0, see `ppcd/LICENSE` | `vendor_ppcd` static target built in isolated C++98 mode for upstream compatibility | Added `ppcd/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. Upstream `CommonDefs.h` is stored as `Commondefs.h` to match the include spelling on case-sensitive filesystems. Local source patch: one `char *` string-literal pointer changed to `const char *` in `ppcd.cpp`. |
 
 ## Build Targets
 
@@ -23,6 +24,7 @@ The main vendor entry points are defined in `vendor/CMakeLists.txt`:
 | Target | Purpose |
 | --- | --- |
 | `vendor-header-libraries` | Makes header-only interface targets available. |
+| `vendor_ppcd` | Builds the vendored PPCD PowerPC disassembler as a static library. |
 | `vendor_snd2wav` | Builds the vendored local `snd2wav` helper as a static library. |
 | `vendor-tools` | Builds header-only targets plus Deark, phosg, and resource_dasm. |
 | `vendor-static-artifacts` | Builds static artifacts used by `stackimport-vendor-static`. |

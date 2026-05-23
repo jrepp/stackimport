@@ -17,6 +17,7 @@ local integration targets, and modification status.
 | `deark/` | Deark 1.7.2 | Broad legacy file/container decoder, including MacBinary, resource forks, BinHex, StuffIt, and PICT coverage | MIT-style, see `deark/COPYING`; bundled third-party notices live in `deark/foreign/` |
 | `stb/` | `stb_image_write.h` | Single-header PNG writer candidate for direct image conversion | MIT or public domain, see license text at the end of `stb/stb_image_write.h` |
 | `dr_wav/` | `dr_wav.h` | Single-header WAV writer/reader candidate for audio conversion | Public domain or MIT-0, see license text at the end of `dr_wav/dr_wav.h` |
+| `ppcd/` | PPCD | Lightweight PowerPC instruction disassembler candidate for preserved PPC code resources | CC0-1.0, see `ppcd/LICENSE` |
 
 ## CMake Targets
 
@@ -31,6 +32,7 @@ That target builds:
 - `vendor_deark`
 - `vendor_phosg`
 - `vendor_resource_dasm`
+- `vendor_ppcd`
 - header-only interface targets for `stb_image_write` and `dr_wav`
 
 The vendored tool path is optional and separate from the default `stackimport`

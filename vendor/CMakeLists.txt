@@ -15,6 +15,26 @@ add_library(vendor_rapidjson INTERFACE)
 target_include_directories(vendor_rapidjson SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include")
 target_compile_features(vendor_rapidjson INTERFACE cxx_std_23)
 
+add_library(vendor_ppcd STATIC
+    ppcd/ppcd.cpp
+)
+target_include_directories(vendor_ppcd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/ppcd")
+set_target_properties(vendor_ppcd PROPERTIES
+    CXX_STANDARD 98
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    target_compile_options(vendor_ppcd PRIVATE
+        -Wno-writable-strings
+        -Wno-deprecated-declarations
+        -Wno-format
+    )
+elseif(MSVC)
+    target_compile_options(vendor_ppcd PRIVATE /Zc:strictStrings-)
+endif()
+
 add_library(vendor_snd2wav STATIC
     snd2wav/snd2wav/snd2wav.cpp
 )
@@ -33,7 +53,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
 endif()
 
 add_custom_target(vendor-header-libraries
-    DEPENDS vendor_snd2wav
+    DEPENDS vendor_ppcd vendor_snd2wav
     COMMENT "Header-only and local vendored conversion libraries are available"
 )
 
