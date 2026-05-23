@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            artifact_suffix: linux-amd64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            artifact_suffix: linux-arm64
+          - target: windows-amd64
+            runner: windows-2022
+            artifact_suffix: windows-amd64
+          - target: windows-arm64
+            runner: windows-11-arm
+            artifact_suffix: windows-arm64
+          - target: macos-amd64
+            runner: macos-15-intel
+            artifact_suffix: macos-amd64
+          - target: macos-arm64
+            runner: macos-14
+            artifact_suffix: macos-arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
+          -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
+
+      - name: Build static library, CLI, and tests
+        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="artifacts/stackimport-${{ matrix.artifact_suffix }}"
+          mkdir -p "${artifact_dir}/bin" "${artifact_dir}/lib" "${artifact_dir}/include"
+
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            cp build/Release/stackimport.exe "${artifact_dir}/bin/"
+            cp build/Release/stackimport-tests.exe "${artifact_dir}/bin/"
+            cp build/Release/stackimport.lib "${artifact_dir}/lib/"
+          else
+            cp build/stackimport "${artifact_dir}/bin/"
+            cp build/stackimport-tests "${artifact_dir}/bin/"
+            cp build/libstackimport.a "${artifact_dir}/lib/"
+          fi
+
+          cp stackimport_c.h "${artifact_dir}/include/"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stackimport-${{ matrix.artifact_suffix }}
+          path: artifacts/stackimport-${{ matrix.artifact_suffix }}
+          if-no-files-found: error
