@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 char *		__hex( int x );
-void		xornstr( char * dest, const char * src, int n );
-void		shiftnstr( char * s, int n, int sh );
+void		xornstr( char * dest, const char * src, size_t n );
+void		shiftnstr( char * s, size_t n, int sh );

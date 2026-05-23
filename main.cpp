@@ -1,6 +1,10 @@
-#include "CStackFile.h"
-#include <iostream>
+#include "stackimport_c.h"
+
 #include <climits>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 
 
@@ -8,16 +12,87 @@ void	RunTests();
 
 
 // Arguments as string for syntax info
-#define SYNTAXSTR "[--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] <originalStackPath>"
+#define SYNTAXSTR "[--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>"
+
+namespace {
+
+void* cli_allocate(size_t size, size_t alignment, void*)
+{
+	void* ptr = nullptr;
+	if(alignment < sizeof(void*))
+		alignment = sizeof(void*);
+	if(posix_memalign(&ptr, alignment, size) != 0)
+		return nullptr;
+	return ptr;
+}
+
+void cli_deallocate(void* ptr, void*)
+{
+	free(ptr);
+}
+
+void cli_message(uint32_t severity, const char* message, void*)
+{
+	FILE* stream = severity >= STACKIMPORT_MESSAGE_WARNING ? stderr : stdout;
+	fprintf(stream, "%s\n", message ? message : "");
+}
+
+stackimport_file_handle cli_open_file(const char* path, const char* mode, void*)
+{
+	return fopen(path, mode);
+}
+
+size_t cli_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
+{
+	return fwrite(data, 1, size, static_cast<FILE*>(file));
+}
+
+int cli_close_file(stackimport_file_handle file, void*)
+{
+	return fclose(static_cast<FILE*>(file));
+}
+
+int cli_make_directory(const char* path, void*)
+{
+	return mkdir(path, 0777);
+}
+
+std::string absolute_path(const char* path)
+{
+	std::string result(path ? path : "");
+	if(!result.empty() && result[0] == '/')
+		return result;
+
+	char cwd[PATH_MAX + 1] = {0};
+	if(!getcwd(cwd, sizeof(cwd)))
+		return std::string();
+
+	std::string fullpath = cwd;
+	if(!fullpath.empty() && fullpath[fullpath.size() - 1] != '/')
+		fullpath += '/';
+	fullpath += result;
+	return fullpath;
+}
+
+std::string default_output_package_path(const std::string& input_path)
+{
+	std::string package_path(input_path);
+	const std::string suffix(".stak");
+	const std::string::size_type pos = package_path.rfind(suffix);
+	if(pos != std::string::npos)
+		package_path.resize(pos);
+	package_path.append(".xstk");
+	return package_path;
+}
+
+}
 
 
 int main( int argc, char * const argv[] )
 {
-	#if DEBUG
+	#if defined(DEBUG) && DEBUG
 	RunTests();
 	#endif
-	
-    CStackFile		theStack;
 	
 	if( argc < 2 )
 	{
@@ -25,19 +100,31 @@ int main( int argc, char * const argv[] )
 		return 2;
 	}
 	
+	uint32_t flags = 0;
+	const char* outputPathArgument = nullptr;
 	int		x = 1;	// Skip command name in argv[0].
 	if( argc > 2 )
 	{
 		for( ; x < argc; x++ )
 		{
 			if( strcmp(argv[x],"--dumprawblocks") == 0 )
-				theStack.SetDumpRawBlockData( true );
+				flags |= STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
 			else if( strcmp(argv[x],"--nostatus") == 0 )
-				theStack.SetStatusMessages( false );
+				flags |= STACKIMPORT_IMPORT_NO_STATUS;
 			else if( strcmp(argv[x],"--noprogress") == 0 )
-				theStack.SetProgressMessages( false );
+				flags |= STACKIMPORT_IMPORT_NO_PROGRESS;
 			else if( strcmp(argv[x],"--rawgraphics") == 0 )
-				theStack.SetDecodeGraphics( false );
+				flags |= STACKIMPORT_IMPORT_RAW_GRAPHICS;
+			else if( strcmp(argv[x],"--output") == 0 )
+			{
+				x++;
+				if( x >= argc )
+				{
+					fprintf( stderr, "Error: Missing path after --output, syntax is %s " SYNTAXSTR "\n", argv[0] );
+					return 3;
+				}
+				outputPathArgument = argv[x];
+			}
 			else if( argv[x][0] == '-' )
 			{
 				fprintf( stderr, "Error: Unknown option %s, syntax is %s " SYNTAXSTR "\n", argv[x], argv[0] );
@@ -54,20 +141,50 @@ int main( int argc, char * const argv[] )
 		return 4;
 	}
 	
-	const char*	fpath = argv[x];
-    char        fullpath[PATH_MAX +1] = {0};    // Outside so we can assign it to fpath and it stays alive.
-    if( fpath[0] != '/' )
-    {
-        getcwd( fullpath, PATH_MAX );
-        size_t  len = strlen(fullpath);
-        if( fullpath[len-1] != '/' )
-            fullpath[len++] = '/';
-        strncat( fullpath, fpath, PATH_MAX );
-        fpath = fullpath;
-    }
-	if( !theStack.LoadFile( fpath ) )
+	std::string	fpath = absolute_path(argv[x]);
+	if( fpath.empty() )
 	{
-		fprintf( stderr, "Error: Conversion of '%s' incomplete/failed.\n", fpath );
+		fprintf( stderr, "Error: Could not resolve current working directory.\n" );
+		return 5;
+	}
+	const std::string outputPath = outputPathArgument ?
+		absolute_path(outputPathArgument) :
+		default_output_package_path(fpath);
+	if( outputPath.empty() )
+	{
+		fprintf( stderr, "Error: Could not resolve output package path.\n" );
+		return 5;
+	}
+
+	stackimport_platform platform = {};
+	stackimport_platform_init(&platform);
+	platform.allocate = cli_allocate;
+	platform.deallocate = cli_deallocate;
+	platform.message = cli_message;
+	platform.open_file = cli_open_file;
+	platform.write_file = cli_write_file;
+	platform.close_file = cli_close_file;
+	platform.make_directory = cli_make_directory;
+
+	stackimport_context* context = nullptr;
+	stackimport_status status = stackimport_context_create_with_platform(&platform, &context);
+	if( status != STACKIMPORT_STATUS_OK )
+	{
+		fprintf( stderr, "Error: Could not create import context: %s.\n", stackimport_status_string(status) );
+		return 5;
+	}
+
+	stackimport_import_options options = {};
+	stackimport_import_options_init(&options);
+	options.flags = flags;
+	options.input_path = fpath.c_str();
+	options.output_package_path = outputPath.c_str();
+
+	status = stackimport_import(context, &options);
+	stackimport_context_destroy(context);
+	if( status != STACKIMPORT_STATUS_OK )
+	{
+		fprintf( stderr, "Error: Conversion of '%s' incomplete/failed: %s.\n", fpath.c_str(), stackimport_status_string(status) );
 		return 5;
 	}
 	

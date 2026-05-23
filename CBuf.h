@@ -9,9 +9,13 @@
 
 #pragma once
 
-#include <stdlib.h>
-#include <stdint.h>
+#include <cstdio>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <string>
+
+#include "stackimport_c.h"
 
 
 struct shared_buffer
@@ -19,6 +23,8 @@ struct shared_buffer
 	char*		mBuffer;
 	size_t		mSize;
 	int			mRefCount;
+	stackimport_deallocate_fn mDeallocate;
+	void*		mAllocatorUserData;
 };
 
 
@@ -36,30 +42,32 @@ public:
 	
 	char			operator [] ( int idx ) const;
 	char&			operator [] ( int idx );
+	char			operator [] ( size_t idx ) const;
+	char&			operator [] ( size_t idx );
 	
 	char*			buf( size_t offs = 0, size_t amount = SIZE_MAX );
 	const char*		buf( size_t offs = 0, size_t amount = SIZE_MAX ) const;
 	
-	void			xornstr( size_t dstOffs, char * src, size_t srcOffs, size_t amount );
+	void			xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amount );
 	void			xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amount );
 
-	void			shiftnstr( size_t dstOffs, int amount, int shiftAmount );
+	void			shiftnstr( size_t dstOffs, size_t amount, int shiftAmount );
 	
-	size_t			size() const					{ return mShared->mSize; };
+	size_t			size() const					{ return mShared->mSize; }
 	
-	int16_t			int16at( size_t offs ) const	{ int16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
-	int32_t			int32at( size_t offs ) const	{ int32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
+	int16_t			int16at( size_t offs ) const	{ int16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; }
+	int32_t			int32at( size_t offs ) const	{ int32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; }
 
-	uint16_t		uint16at( size_t offs ) const	{ uint16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
-	uint32_t		uint32at( size_t offs ) const	{ uint32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; };
+	uint16_t		uint16at( size_t offs ) const	{ uint16_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; }
+	uint32_t		uint32at( size_t offs ) const	{ uint32_t value = 0; ::memcpy( &value, buf(offs,sizeof(value)), sizeof(value) ); return value; }
 	
-	bool			hasdata( size_t offs, size_t amount )	{ return (mShared->mBuffer != NULL) && (amount +offs) <= mShared->mSize; };
+	bool			hasdata( size_t offs, size_t amount ) const	{ return (mShared->mBuffer != nullptr) && offs <= mShared->mSize && amount <= (mShared->mSize -offs); }
 	
 	void			tofile( const std::string& fpath );
 	
-	void			debug_print()		{ if( !mShared ) printf( "NULL\n" ); else { printf("CBuf %p { size = %zd, refCount = %d, \"%-*s\" }\n", this, mShared->mSize, mShared->mRefCount, (int)mShared->mSize, mShared->mBuffer ); } };
+	void			debug_print()		{ if( !mShared ) printf( "NULL\n" ); else { printf("CBuf %p { size = %zd, refCount = %d, \"%-*s\" }\n", static_cast<const void*>(this), mShared->mSize, mShared->mRefCount, static_cast<int>(mShared->mSize), mShared->mBuffer ); } }
 	
-	virtual CBuf&	operator = ( const CBuf& inTemplate );
+	CBuf&			operator = ( const CBuf& inTemplate );
 
 protected:
 	void			alloc_buffer( size_t amount );

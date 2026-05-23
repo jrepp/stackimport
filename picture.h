@@ -43,10 +43,12 @@ unsigned int __pow21(int p);
 
 class picture
 {
-	public:
-	
+public:
+		
 	picture(void);
 	picture(int w, int h, int d, bool greymask);
+	picture(const picture&) = delete;
+	picture& operator=(const picture&) = delete;
 	~picture(void);
 	void reinit(int w, int h, int d, bool greymask);
 	
@@ -102,14 +104,14 @@ class picture
 	void bwrite(fstream);
 	void bread(fstream);
 	void writefile(char *);
-	void writebitmapandmasktopbm(char * fn);
-	void writebitmaptopbm(char * fn);
-	void writemasktopbm(char * fn);
+	void writebitmapandmasktopbm(const char * fn);
+	void writebitmaptopbm(const char * fn);
+	void writemasktopbm(const char * fn);
 
 	void readfile(char *);
 	
-	private:
-	
+private:
+		
 	int width;
 	int height;
 	int depth;

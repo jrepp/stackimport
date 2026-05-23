@@ -14,37 +14,35 @@
 char * __hex(int x)
 {
 	const char	*	hex = "0123456789ABCDEF";
-	char			h[] = "ab";
 	static char		buf[4] = { 0 };
+	unsigned int	value = static_cast<unsigned int>(x) & 0xFF;
 	
-	h[0] = hex[(x/16) % 16];
-	h[1] = hex[x % 16];
-	strcpy( buf, h );
+	buf[0] = hex[(value / 16) % 16];
+	buf[1] = hex[value % 16];
+	buf[2] = 0;
 	
 	return buf;
 }
 
 
 // X-Ors the bytes in dest with those in src:
-void xornstr(char * dest, const char * src, int n)
+void xornstr(char * dest, const char * src, size_t n)
 {
-	int i = 0;
-	for (i=0; i<n; i++)
+	for (size_t i = 0; i<n; i++)
 	{
 		dest[i] ^= src[i];
 	}
 }
 
-void shiftnstr(char * s, int n, int sh)
+void shiftnstr(char * s, size_t n, int sh)
 {
-	int i = 0;
 	int p = 1;
 	int x = 0;
-	for (i=0; i<sh; i++) { p += p; }	// Bitshift p by sh bits?
-	for (i=0; i<n; i++)
+	for (int i=0; i<sh; i++) { p += p; }	// Bitshift p by sh bits?
+	for (size_t i=0; i<n; i++)
 	{
-		x += ((unsigned char)s[i] * 65536) / p;		// Bitshift by 2 bytes?
-		s[i] = x / 65536;							// Store low byte?
+		x += (static_cast<unsigned char>(s[i]) * 65536) / p;		// Bitshift by 2 bytes?
+		s[i] = static_cast<char>(x / 65536);						// Store low byte?
 		x = (x % 65536) * 256;						// Keep high byte?
 	}
 }

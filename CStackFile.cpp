@@ -9,6 +9,7 @@
 
 
 #include "CStackFile.h"
+#include <cerrno>
 #include <iostream>
 #include <fstream>
 #include <sys/stat.h>
@@ -16,8 +17,13 @@
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"
+#include "stackimport_platform_internal.h"
+#include "stackimport_rapidjson_allocator.h"
 #include <arpa/inet.h>
 #include "snd2wav/snd2wav/snd2wav.h"
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
 
 
 // Table of C-strings for converting the non-ASCII MacRoman characters (above 127)
@@ -58,38 +64,110 @@ unsigned char	sMacRomanToUTF8Table[128][5] =
 	{ 0xc2, 0xb8, 0x00, 0x00 }, { 0xcb, 0x9d, 0x00, 0x00 }, { 0xcb, 0x9b, 0x00, 0x00 }, { 0xcb, 0x87, 0x00, 0x00 }
 };
 
+size_t MacRomanStringEnd( const CBuf& data, size_t startOffs );
 
-const unsigned char*	UniCharFromMacRoman( unsigned char c )
+namespace {
+
+using JsonPoolAllocator = rapidjson::MemoryPoolAllocator<StackImportRapidJsonAllocator>;
+using JsonDocument = rapidjson::GenericDocument<rapidjson::UTF8<>, JsonPoolAllocator, StackImportRapidJsonAllocator>;
+using JsonValue = rapidjson::GenericValue<rapidjson::UTF8<>, JsonPoolAllocator>;
+using JsonStringBuffer = rapidjson::GenericStringBuffer<rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
+using JsonWriter = rapidjson::PrettyWriter<JsonStringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
+
+JsonValue json_string(const std::string& value, JsonPoolAllocator& allocator)
 {
-	if( c >= 128 )
-		return sMacRomanToUTF8Table[ c -128 ];
-	else if( c == 0x11 )
-	{
-		static unsigned char	commandKey[4] = { 0xe2, 0x8c, 0x98, 0 };	// Unicode 0x2318
-		return commandKey;
-	}
-	else
-	{
-		static unsigned char	asciiStr[2] = { 0, 0 };
-		asciiStr[0] = c;
-		return asciiStr;
-	}
+	JsonValue result;
+	result.SetString(value.c_str(), static_cast<rapidjson::SizeType>(value.size()), allocator);
+	return result;
 }
 
-void	WriteMacRomanXML( FILE* outFile, const CBuf& data, size_t startOffs, size_t endOffs )
+JsonValue json_string(const char* value, JsonPoolAllocator& allocator)
 {
+	const char* safeValue = value ? value : "";
+	JsonValue result;
+	result.SetString(safeValue, static_cast<rapidjson::SizeType>(std::strlen(safeValue)), allocator);
+	return result;
+}
+
+bool write_json_file(const std::string& path, const char* data, size_t size)
+{
+	stackimport_file_handle file = stackimport_internal_open_file(path.c_str(), "wb");
+	if(!file)
+		return false;
+	const bool ok = stackimport_internal_write_file(file, data, size) == size;
+	stackimport_internal_close_file(file);
+	return ok;
+}
+
+bool write_json_document(const std::string& path, JsonDocument& document, StackImportRapidJsonAllocator& baseAllocator)
+{
+	JsonStringBuffer jsonBuffer(&baseAllocator);
+	JsonWriter writer(jsonBuffer, &baseAllocator);
+	document.Accept(writer);
+	return write_json_file(path, jsonBuffer.GetString(), jsonBuffer.GetSize());
+}
+
+JsonValue json_output_ref(
+	const char* kind,
+	int32_t id,
+	const char* file,
+	const char* sourceBlockType,
+	int32_t sourceBlockId,
+	JsonPoolAllocator& allocator)
+{
+	JsonValue media(rapidjson::kObjectType);
+	media.AddMember("kind", json_string(kind, allocator), allocator);
+	if(id >= 0)
+		media.AddMember("id", id, allocator);
+	media.AddMember("file", json_string(file, allocator), allocator);
+	if(sourceBlockType)
+	{
+		media.AddMember("sourceBlockType", json_string(sourceBlockType, allocator), allocator);
+		media.AddMember("sourceBlockId", sourceBlockId, allocator);
+	}
+	return media;
+}
+
+std::string mac_roman_string(const CBuf& data, size_t startOffs, size_t endOffs)
+{
+	std::string result;
 	for( size_t x = startOffs; x < endOffs && data[static_cast<int>(x)] != 0; x++ )
 	{
-		char currCh = data[static_cast<int>(x)];
-		if( currCh == '<' )
-			fprintf( outFile, "&lt;" );
-		else if( currCh == '>' )
-			fprintf( outFile, "&gt;" );
-		else if( currCh == '&' )
-			fprintf( outFile, "&amp;" );
+		unsigned char currCh = static_cast<unsigned char>(data[static_cast<int>(x)]);
+		const unsigned char* utf8 = nullptr;
+		if( currCh >= 128 )
+			utf8 = sMacRomanToUTF8Table[ currCh -128 ];
+		else if( currCh == 0x11 )
+		{
+			static unsigned char commandKey[4] = { 0xe2, 0x8c, 0x98, 0 };
+			utf8 = commandKey;
+		}
 		else
-			fprintf( outFile, "%s", UniCharFromMacRoman(currCh) );
+		{
+			char ascii[2] = { static_cast<char>(currCh), 0 };
+			result.append( ascii );
+			continue;
+		}
+		result.append( reinterpret_cast<const char*>(utf8) );
 	}
+	return result;
+}
+
+std::string mac_roman_string(const CBuf& data, size_t startOffs)
+{
+	return mac_roman_string(data, startOffs, MacRomanStringEnd(data, startOffs));
+}
+
+JsonValue json_rect(int16_t left, int16_t top, int16_t right, int16_t bottom, JsonPoolAllocator& allocator)
+{
+	JsonValue rect(rapidjson::kObjectType);
+	rect.AddMember("left", left, allocator);
+	rect.AddMember("top", top, allocator);
+	rect.AddMember("right", right, allocator);
+	rect.AddMember("bottom", bottom, allocator);
+	return rect;
+}
+
 }
 
 size_t	MacRomanStringEnd( const CBuf& data, size_t startOffs )
@@ -151,11 +229,23 @@ void	NumVersionToStr( unsigned char numVersion[4], char outStr[16] )
 
 
 CStackFile::CStackFile()
-	: mDumpRawBlockData(false), mStatusMessages(true), mXmlFile(NULL),
-	mCardBlockSize(-1), mListBlockID(-1), mMaxProgress(0), mCurrentProgress(0),
-	mFontTableBlockID(-1), mStyleTableBlockID(-1), mProgressMessages(true), mDecodeGraphics(true)
+	: mDumpRawBlockData(false), mStatusMessages(true), mProgressMessages(true), mDecodeGraphics(true),
+	mListBlockID(-1), mFontTableBlockID(-1), mStyleTableBlockID(-1), mStackID(-1),
+	mStackCardCount(0), mFirstCardID(0), mUserLevel(0), mCardWidth(512), mCardHeight(342),
+	mStackCantModify(false), mStackCantDelete(false), mStackPrivateAccess(false),
+	mStackCantAbort(false), mStackCantPeek(false), mCardBlockSize(-1),
+	mCurrentProgress(0), mMaxProgress(0)
 {
 	
+}
+
+std::string CStackFile::OutputPath( const char* fileName ) const
+{
+	std::string result = mBasePath;
+	if( !result.empty() && result[result.size() -1] != '/' )
+		result += '/';
+	result += fileName;
+	return result;
 }
 
 
@@ -164,67 +254,49 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing 'STAK' #-1 (%lu bytes)\n", blockData.size() );
 
-	fprintf( mXmlFile, "\t<stack id=\"%d\" file=\"stack_%d.xml\" name=\"", stackID, stackID );
-	for( int x = 0; mFileName[x] != 0; x++ )
-	{
-		char currCh = mFileName[x];
-		if( currCh == '"' )
-			fprintf( mXmlFile, "%%22" );
-		else if( currCh == '\n' )
-			fprintf( mXmlFile, "%%0A;" );
-		else if( currCh == '\r' )
-			fprintf( mXmlFile, "%%0D" );
-		else
-			fputc( currCh, mXmlFile );	// mFileName comes from POSIX, should already be UTF8, is *definitely* not MacRoman.
-	}
-	fprintf( mXmlFile, "\" />\n" );
-	
 	if( mDumpRawBlockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "STAK_%d.data", stackID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 	
-	fprintf( mStackXmlFile, "\t<id>%d</id>\n", stackID );
-	int32_t	numberOfCards = ntohl(blockData.int32at( 32 ));
-	fprintf( mStackXmlFile, "\t<cardCount>%d</cardCount>\n", numberOfCards );
-	int32_t	cardID = ntohl(blockData.int32at( 36 ));
-	fprintf( mStackXmlFile, "\t<cardID>%d</cardID>\n", cardID );
+	mStackID = stackID;
+	mStackCardCount = ntohl(blockData.int32at( 32 ));
+	mFirstCardID = ntohl(blockData.int32at( 36 ));
 	mListBlockID = ntohl(blockData.int32at( 40 ));
-	fprintf( mStackXmlFile, "\t<listID>%d</listID>\n", mListBlockID );
-	int16_t	userLevel = ntohs(blockData.int16at( 60 ));
-	fprintf( mXmlFile, "\t<userLevel>%d</userLevel>\n", userLevel );
+	mUserLevel = ntohs(blockData.int16at( 60 ));
 	int16_t	flags = ntohs(blockData.int16at( 64 ));
-	fprintf( mStackXmlFile, "\t<cantModify>%s</cantModify>\n", (flags & (1 << 15)) ? "<true />" : "<false />" );
-	fprintf( mStackXmlFile, "\t<cantDelete>%s</cantDelete>\n", (flags & (1 << 14)) ? "<true />" : "<false />" );
-	fprintf( mXmlFile, "\t<privateAccess>%s</privateAccess>\n", (flags & (1 << 13)) ? "<true />" : "<false />" );
-	fprintf( mStackXmlFile, "\t<cantAbort>%s</cantAbort>\n", (flags & (1 << 11)) ? "<true />" : "<false />" );
-	fprintf( mXmlFile, "\t<cantPeek>%s</cantPeek>\n", (flags & (1 << 10)) ? "<true />" : "<false />" );
+	mStackCantModify = (flags & (1 << 15)) != 0;
+	mStackCantDelete = (flags & (1 << 14)) != 0;
+	mStackPrivateAccess = (flags & (1 << 13)) != 0;
+	mStackCantAbort = (flags & (1 << 11)) != 0;
+	mStackCantPeek = (flags & (1 << 10)) != 0;
 	char		versStr[16] = { 0 };
 	int32_t	version0 = blockData.int32at( 84 );
 	NumVersionToStr( (unsigned char*) &version0, versStr );
-	fprintf( mXmlFile, "\t<createdByVersion>HyperCard %s</createdByVersion>\n", versStr );
+	mCreatedByVersion = "HyperCard ";
+	mCreatedByVersion += versStr;
 	int32_t	version1 = blockData.int32at( 88 );
 	NumVersionToStr( (unsigned char*) &version1, versStr );
-	fprintf( mXmlFile, "\t<lastCompactedVersion>HyperCard %s</lastCompactedVersion>\n", versStr );
+	mLastCompactedVersion = "HyperCard ";
+	mLastCompactedVersion += versStr;
 	int32_t	version2 = blockData.int32at( 92 );
 	NumVersionToStr( (unsigned char*) &version2, versStr );
-	fprintf( mXmlFile, "\t<lastEditedVersion>HyperCard %s</lastEditedVersion>\n", versStr );
+	mLastEditedVersion = "HyperCard ";
+	mLastEditedVersion += versStr;
 	int32_t	version3 = blockData.int32at( 96 );
 	NumVersionToStr( (unsigned char*) &version3, versStr );
-	fprintf( mXmlFile, "\t<firstEditedVersion>HyperCard %s</firstEditedVersion>\n", versStr );
+	mFirstEditedVersion = "HyperCard ";
+	mFirstEditedVersion += versStr;
 	mFontTableBlockID = ntohl(blockData.int32at( 420 ));
-	fprintf( mXmlFile, "\t<fontTableID>%d</fontTableID>\n", mFontTableBlockID );
 	mStyleTableBlockID = ntohl(blockData.int32at( 424 ));
-	fprintf( mXmlFile, "\t<styleTableID>%d</styleTableID>\n", mStyleTableBlockID );
-	int16_t	height = ntohs(blockData.int16at( 428 ));
-	if( height == 0 )
-		height = 342;
-	int16_t	width = ntohs(blockData.int16at( 430 ));
-	if( width == 0 )
-		width = 512;
-	fprintf( mStackXmlFile, "\t<cardSize>\n\t\t<width>%d</width>\n\t\t<height>%d</height>\n\t</cardSize>\n", width, height );
+	mCardHeight = ntohs(blockData.int16at( 428 ));
+	if( mCardHeight == 0 )
+		mCardHeight = 342;
+	mCardWidth = ntohs(blockData.int16at( 430 ));
+	if( mCardWidth == 0 )
+		mCardWidth = 512;
 
 	char			pattern[8] = { 0 };
 	int				offs = 692;
@@ -232,29 +304,14 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	{
 		memmove( pattern, blockData.buf( offs, 8 ), 8 );
 		char		fname[256] = { 0 };
-		sprintf( fname, "PAT_%u.pbm", n +1 );
+		snprintf( fname, sizeof(fname), "PAT_%u.pbm", n +1 );
 		picture		thePicture( 8, 8, 1, false );
 		thePicture.memcopyin( pattern, 0, 8 );
-		thePicture.writebitmaptopbm( fname );
+		thePicture.writebitmaptopbm( OutputPath(fname).c_str() );
 		offs += 8;
-		fprintf(mXmlFile,"\t<media>\n\t\t<id>%u</id>\n\t\t<type>pattern</type>\n\t\t<file>PAT_%u.pbm</file>\n\t</media>\n", n+1, n+1);
 	}
 	
-	int x = 0, startOffs = 1524;
-	fprintf( mStackXmlFile, "\t<script>" );
-	for( x = startOffs; blockData[x] != 0; x++ )
-	{
-		char currCh = blockData[x];
-		if( currCh == '<' )
-			fprintf( mStackXmlFile, "&lt;" );
-		else if( currCh == '>' )
-			fprintf( mStackXmlFile, "&gt;" );
-		else if( currCh == '&' )
-			fprintf( mStackXmlFile, "&amp;" );
-		else
-			fprintf( mStackXmlFile, "%s", UniCharFromMacRoman(currCh) );
-	}
-	fprintf( mStackXmlFile, "</script>\n" );
+	mStackScript = mac_roman_string( blockData, 1524 );
 	
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -273,15 +330,14 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "STBL_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 	
-	std::vector<struct CStyleEntry>	styles;
+	std::vector<CStyleEntry>	styles;
 	
 	size_t		currOffs = 4;
 	int32_t		styleCount = ntohl(blockData.int32at( currOffs ));
 	currOffs += 4;
-	fprintf( mXmlFile, "\t<!-- 'STBL' #%d (%d styles) -->\n", blockID, styleCount );
 
 	std::string	vLayerFilePath = mBasePath;
 	char		vFileName[256] = { 0 };
@@ -294,7 +350,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	
 	currOffs += 2;
 	int16_t	nextStyleID = ntohs(blockData.int16at( currOffs ));
-	fprintf( mXmlFile, "\t<nextStyleID>%d</nextStyleID>\n", nextStyleID );
+	(void)nextStyleID;
 	currOffs += 2;
 	currOffs += 2;
 	
@@ -391,7 +447,6 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing 'FTBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
 
-	fprintf( mXmlFile, "\t<!-- 'FTBL' #%d (%d bytes) -->\n", blockID, vBlockSize );
 	int16_t	numFonts = ntohs(blockData.int16at( 6 ));
 	size_t	currOffsIntoData = 8;
 	currOffsIntoData += 4;	// Reserved?
@@ -399,33 +454,17 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 	{
 		std::string		fontName;
 		
-		fprintf( mXmlFile, "\t<font>\n" );
 		int16_t	fontID = ntohs(blockData.int16at( currOffsIntoData ));
-		fprintf( mXmlFile, "\t\t<id>%d</id>\n", fontID );
 		
 		int x = 0, startOffs = currOffsIntoData +2;
-		fprintf( mXmlFile, "\t\t<name>" );
-		for( x = startOffs; blockData[x] != 0; x++ )
-		{
-			char currCh = blockData[x];
-			if( currCh == '<' )
-				fontName.append( "&lt;" );
-			else if( currCh == '>' )
-				fontName.append( "&gt;" );
-			else if( currCh == '&' )
-				fontName.append( "&amp;" );
-			else
-				fontName.append( (const char*) UniCharFromMacRoman(currCh) );
-		}
-		fprintf( mXmlFile, "%s", fontName.c_str() );
-		fprintf( mXmlFile, "</name>\n" );
+		fontName = mac_roman_string( blockData, startOffs );
+		x = static_cast<int>(MacRomanStringEnd( blockData, startOffs ));
 		
 		mFontTable[fontID] = fontName;
 	
 		currOffsIntoData = x +1;
 		currOffsIntoData += currOffsIntoData %2;	// Align on even byte.
 		
-		fprintf( mXmlFile, "\t</font>\n" );
 	}
 	
 	if( mProgressMessages )
@@ -443,21 +482,19 @@ bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "MAST_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
 	std::string	filePath = mBasePath;
-	filePath.append( "/master_-1.xml" );
-	FILE* vFile = fopen( filePath.c_str(), "w" );
-	if( !vFile )
-	{
-		fprintf( stderr, "Error: Couldn't create master reference XML at '%s'\n", filePath.c_str() );
-		return false;
-	}
-
-	fprintf( mXmlFile, "\t<master file=\"master_-1.xml\" />\n" );
-	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<master>\n" );
-	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+	filePath.append( "/master_-1.json" );
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(1024, &baseAllocator);
+	JsonDocument document(&pool, 1024, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.master", allocator), allocator);
+	document.AddMember("id", blockID, allocator);
+	JsonValue references(rapidjson::kArrayType);
 
 	for( size_t currOffs = 20; blockData.hasdata( currOffs, sizeof(uint32_t)); currOffs += sizeof(uint32_t) )
 	{
@@ -466,15 +503,19 @@ bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 			continue;
 		uint32_t	fileOffset = (entry >> 8) << 5;
 		uint8_t		idLowByte = entry & 0xff;
-		fprintf( vFile, "\t<reference>\n" );
-		fprintf( vFile, "\t\t<fileOffset>%u</fileOffset>\n", fileOffset );
-		fprintf( vFile, "\t\t<idLowByte>%u</idLowByte>\n", idLowByte );
-		fprintf( vFile, "\t\t<raw>0x%08x</raw>\n", entry );
-		fprintf( vFile, "\t</reference>\n" );
+		JsonValue reference(rapidjson::kObjectType);
+		reference.AddMember("fileOffset", fileOffset, allocator);
+		reference.AddMember("idLowByte", idLowByte, allocator);
+		reference.AddMember("raw", entry, allocator);
+		references.PushBack(reference, allocator);
 	}
 
-	fprintf( vFile, "</master>\n" );
-	fclose( vFile );
+	document.AddMember("references", references, allocator);
+	if( !write_json_document(filePath, document, baseAllocator) )
+	{
+		fprintf( stderr, "Error: Couldn't create master JSON at '%s'\n", filePath.c_str() );
+		return false;
+	}
 
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -491,29 +532,27 @@ bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "PRNT_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
 	std::string	filePath = mBasePath;
-	filePath.append( "/printsettings.xml" );
-	FILE* vFile = fopen( filePath.c_str(), "w" );
-	if( !vFile )
-	{
-		fprintf( stderr, "Error: Couldn't create print settings XML at '%s'\n", filePath.c_str() );
-		return false;
-	}
-
-	fprintf( mXmlFile, "\t<printSettings id=\"%d\" file=\"printsettings.xml\" />\n", blockID );
-	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<printSettings>\n" );
-	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+	filePath.append( "/printsettings.json" );
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(1024, &baseAllocator);
+	JsonDocument document(&pool, 1024, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.printSettings", allocator), allocator);
+	document.AddMember("id", blockID, allocator);
 
 	if( blockData.hasdata( 0x24, sizeof(int16_t) ) )
-		fprintf( vFile, "\t<pageSetupID>%d</pageSetupID>\n", ReadBEInt16( blockData, 0x24 ) );
+		document.AddMember("pageSetupId", ReadBEInt16( blockData, 0x24 ), allocator);
 
 	if( blockData.hasdata( 0x128, sizeof(int16_t) ) )
 	{
 		int16_t	templateCount = ReadBEInt16( blockData, 0x128 );
-		fprintf( vFile, "\t<reportTemplateCount>%d</reportTemplateCount>\n", templateCount );
+		document.AddMember("reportTemplateCount", templateCount, allocator);
+		JsonValue templates(rapidjson::kArrayType);
 		size_t	currOffs = 0x12a;
 		for( int n = 0; n < templateCount && blockData.hasdata( currOffs, 36 ); n++, currOffs += 36 )
 		{
@@ -521,17 +560,19 @@ bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 			uint8_t	nameLen = blockData[static_cast<int>(currOffs +4)];
 			if( nameLen > 31 )
 				nameLen = 31;
-			fprintf( vFile, "\t<reportTemplate>\n" );
-			fprintf( vFile, "\t\t<id>%d</id>\n", templateID );
-			fprintf( vFile, "\t\t<name>" );
-			WriteMacRomanXML( vFile, blockData, currOffs +5, currOffs +5 +nameLen );
-			fprintf( vFile, "</name>\n" );
-			fprintf( vFile, "\t</reportTemplate>\n" );
+			JsonValue item(rapidjson::kObjectType);
+			item.AddMember("id", templateID, allocator);
+			item.AddMember("name", json_string(mac_roman_string(blockData, currOffs +5, currOffs +5 +nameLen), allocator), allocator);
+			templates.PushBack(item, allocator);
 		}
+		document.AddMember("reportTemplates", templates, allocator);
 	}
 
-	fprintf( vFile, "</printSettings>\n" );
-	fclose( vFile );
+	if( !write_json_document(filePath, document, baseAllocator) )
+	{
+		fprintf( stderr, "Error: Couldn't create print settings JSON at '%s'\n", filePath.c_str() );
+		return false;
+	}
 
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -548,24 +589,21 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "PRST_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
 	char		fileName[256] = { 0 };
-	snprintf( fileName, sizeof(fileName), "pagesetup_%d.xml", blockID );
+	snprintf( fileName, sizeof(fileName), "pagesetup_%d.json", blockID );
 	std::string	filePath = mBasePath;
 	filePath.append( "/" );
 	filePath.append( fileName );
-	FILE* vFile = fopen( filePath.c_str(), "w" );
-	if( !vFile )
-	{
-		fprintf( stderr, "Error: Couldn't create page setup XML at '%s'\n", filePath.c_str() );
-		return false;
-	}
-
-	fprintf( mXmlFile, "\t<pageSetup id=\"%d\" file=\"%s\" />\n", blockID, fileName );
-	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<pageSetup>\n" );
-	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(1024, &baseAllocator);
+	JsonDocument document(&pool, 1024, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.pageSetup", allocator), allocator);
+	document.AddMember("id", blockID, allocator);
 
 	size_t	currOffs = 4;
 	const char*	shortNames[] = {
@@ -575,12 +613,12 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 		"printerDeviceNumber", "pageV", "pageH"
 	};
 	for( size_t n = 0; n < sizeof(shortNames) / sizeof(shortNames[0]) && blockData.hasdata( currOffs, 2 ); n++, currOffs += 2 )
-		fprintf( vFile, "\t<%s>%d</%s>\n", shortNames[n], ReadBEInt16( blockData, currOffs ), shortNames[n] );
+		document.AddMember(rapidjson::StringRef(shortNames[n]), ReadBEInt16( blockData, currOffs ), allocator);
 
 	if( blockData.hasdata( currOffs, 2 ) )
 	{
-		fprintf( vFile, "\t<port>%u</port>\n", (uint8_t) blockData[static_cast<int>(currOffs++)] );
-		fprintf( vFile, "\t<feedType>%u</feedType>\n", (uint8_t) blockData[static_cast<int>(currOffs++)] );
+		document.AddMember("port", static_cast<uint8_t>(blockData[static_cast<int>(currOffs++)]), allocator);
+		document.AddMember("feedType", static_cast<uint8_t>(blockData[static_cast<int>(currOffs++)]), allocator);
 	}
 
 	const char*	printRecordNames[] = {
@@ -588,24 +626,27 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 		"pageLeft2", "pageBottom2", "pageRight2"
 	};
 	for( size_t n = 0; n < sizeof(printRecordNames) / sizeof(printRecordNames[0]) && blockData.hasdata( currOffs, 2 ); n++, currOffs += 2 )
-		fprintf( vFile, "\t<%s>%d</%s>\n", printRecordNames[n], ReadBEInt16( blockData, currOffs ), printRecordNames[n] );
+		document.AddMember(rapidjson::StringRef(printRecordNames[n]), ReadBEInt16( blockData, currOffs ), allocator);
 
 	currOffs += 16;	// Reserved.
 	if( blockData.hasdata( currOffs, 8 ) )
 	{
-		fprintf( vFile, "\t<firstPage>%d</firstPage>\n", ReadBEInt16( blockData, currOffs ) );
+		document.AddMember("firstPage", ReadBEInt16( blockData, currOffs ), allocator);
 		currOffs += 2;
-		fprintf( vFile, "\t<lastPage>%d</lastPage>\n", ReadBEInt16( blockData, currOffs ) );
+		document.AddMember("lastPage", ReadBEInt16( blockData, currOffs ), allocator);
 		currOffs += 2;
-		fprintf( vFile, "\t<numCopies>%d</numCopies>\n", ReadBEInt16( blockData, currOffs ) );
+		document.AddMember("numCopies", ReadBEInt16( blockData, currOffs ), allocator);
 		currOffs += 2;
 		uint8_t	printingMethod = blockData[static_cast<int>(currOffs++)];
-		fprintf( vFile, "\t<printingMethod>%s</printingMethod>\n", printingMethod == 0 ? "draft" : (printingMethod == 1 ? "deferred" : "unknown") );
+		document.AddMember("printingMethod", json_string(printingMethod == 0 ? "draft" : (printingMethod == 1 ? "deferred" : "unknown"), allocator), allocator);
 		currOffs++;	// Reserved.
 	}
 
-	fprintf( vFile, "</pageSetup>\n" );
-	fclose( vFile );
+	if( !write_json_document(filePath, document, baseAllocator) )
+	{
+		fprintf( stderr, "Error: Couldn't create page setup JSON at '%s'\n", filePath.c_str() );
+		return false;
+	}
 
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -622,24 +663,21 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "PRFT_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
 	char		fileName[256] = { 0 };
-	snprintf( fileName, sizeof(fileName), "reporttemplate_%d.xml", blockID );
+	snprintf( fileName, sizeof(fileName), "reporttemplate_%d.json", blockID );
 	std::string	filePath = mBasePath;
 	filePath.append( "/" );
 	filePath.append( fileName );
-	FILE* vFile = fopen( filePath.c_str(), "w" );
-	if( !vFile )
-	{
-		fprintf( stderr, "Error: Couldn't create report template XML at '%s'\n", filePath.c_str() );
-		return false;
-	}
-
-	fprintf( mXmlFile, "\t<reportTemplate id=\"%d\" file=\"%s\" />\n", blockID, fileName );
-	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<reportTemplate>\n" );
-	fprintf( vFile, "\t<id>%d</id>\n", blockID );
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(1024, &baseAllocator);
+	JsonDocument document(&pool, 1024, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.reportTemplate", allocator), allocator);
+	document.AddMember("id", blockID, allocator);
 
 	if( blockData.hasdata( 24, 1 ) )
 	{
@@ -651,28 +689,28 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 			case 2: units = "inches"; break;
 			case 3: units = "points"; break;
 		}
-		fprintf( vFile, "\t<units>%s</units>\n", units );
-		fprintf( vFile, "\t<margins>\n" );
-		fprintf( vFile, "\t\t<top>%d</top>\n", ReadBEInt16( blockData, 6 ) );
-		fprintf( vFile, "\t\t<left>%d</left>\n", ReadBEInt16( blockData, 8 ) );
-		fprintf( vFile, "\t\t<bottom>%d</bottom>\n", ReadBEInt16( blockData, 10 ) );
-		fprintf( vFile, "\t\t<right>%d</right>\n", ReadBEInt16( blockData, 12 ) );
-		fprintf( vFile, "\t</margins>\n" );
-		fprintf( vFile, "\t<spacing>\n\t\t<height>%d</height>\n\t\t<width>%d</width>\n\t</spacing>\n", ReadBEInt16( blockData, 14 ), ReadBEInt16( blockData, 16 ) );
-		fprintf( vFile, "\t<cellSize>\n\t\t<height>%d</height>\n\t\t<width>%d</width>\n\t</cellSize>\n", ReadBEInt16( blockData, 18 ), ReadBEInt16( blockData, 20 ) );
+		document.AddMember("units", json_string(units, allocator), allocator);
+		document.AddMember("margins", json_rect(ReadBEInt16( blockData, 8 ), ReadBEInt16( blockData, 6 ), ReadBEInt16( blockData, 12 ), ReadBEInt16( blockData, 10 ), allocator), allocator);
+		JsonValue spacing(rapidjson::kObjectType);
+		spacing.AddMember("height", ReadBEInt16( blockData, 14 ), allocator);
+		spacing.AddMember("width", ReadBEInt16( blockData, 16 ), allocator);
+		document.AddMember("spacing", spacing, allocator);
+		JsonValue cellSize(rapidjson::kObjectType);
+		cellSize.AddMember("height", ReadBEInt16( blockData, 18 ), allocator);
+		cellSize.AddMember("width", ReadBEInt16( blockData, 20 ), allocator);
+		document.AddMember("cellSize", cellSize, allocator);
 		int16_t	flags = ReadBEInt16( blockData, 22 );
-		fprintf( vFile, "\t<leftToRight>%s</leftToRight>\n", (flags & (1 << 8)) ? "<true />" : "<false />" );
-		fprintf( vFile, "\t<dynamicHeight>%s</dynamicHeight>\n", (flags & (1 << 0)) ? "<true />" : "<false />" );
+		document.AddMember("leftToRight", (flags & (1 << 8)) != 0, allocator);
+		document.AddMember("dynamicHeight", (flags & (1 << 0)) != 0, allocator);
 		uint8_t	headerLen = blockData[24];
-		fprintf( vFile, "\t<header>" );
-		WriteMacRomanXML( vFile, blockData, 25, 25 +headerLen );
-		fprintf( vFile, "</header>\n" );
+		document.AddMember("header", json_string(mac_roman_string(blockData, 25, 25 +headerLen), allocator), allocator);
 	}
 
 	if( blockData.hasdata( 0x118, sizeof(int16_t) ) )
 	{
 		int16_t	itemCount = ntohs(blockData.int16at( 0x118 ));
-		fprintf( vFile, "\t<itemCount>%d</itemCount>\n", itemCount );
+		document.AddMember("itemCount", itemCount, allocator);
+		JsonValue items(rapidjson::kArrayType);
 		size_t	currOffs = 0x11a;
 		for( int n = 0; n < itemCount && blockData.hasdata( currOffs, 22 ); n++ )
 		{
@@ -680,51 +718,47 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 			if( itemSize <= 0 || !blockData.hasdata( currOffs, itemSize ) )
 				break;
 
-			fprintf( vFile, "\t<item>\n" );
-			fprintf( vFile, "\t\t<rect>\n" );
-			fprintf( vFile, "\t\t\t<top>%d</top>\n", ReadBEInt16( blockData, currOffs +2 ) );
-			fprintf( vFile, "\t\t\t<left>%d</left>\n", ReadBEInt16( blockData, currOffs +4 ) );
-			fprintf( vFile, "\t\t\t<bottom>%d</bottom>\n", ReadBEInt16( blockData, currOffs +6 ) );
-			fprintf( vFile, "\t\t\t<right>%d</right>\n", ReadBEInt16( blockData, currOffs +8 ) );
-			fprintf( vFile, "\t\t</rect>\n" );
-			fprintf( vFile, "\t\t<columns>%d</columns>\n", ReadBEInt16( blockData, currOffs +10 ) );
+			JsonValue item(rapidjson::kObjectType);
+			item.AddMember("rect", json_rect(ReadBEInt16( blockData, currOffs +4 ), ReadBEInt16( blockData, currOffs +2 ), ReadBEInt16( blockData, currOffs +8 ), ReadBEInt16( blockData, currOffs +6 ), allocator), allocator);
+			item.AddMember("columns", ReadBEInt16( blockData, currOffs +10 ), allocator);
 			int16_t	flags = ReadBEInt16( blockData, currOffs +12 );
-			fprintf( vFile, "\t\t<changeHeight>%s</changeHeight>\n", (flags & (1 << 13)) ? "<true />" : "<false />" );
-			fprintf( vFile, "\t\t<changeStyle>%s</changeStyle>\n", (flags & (1 << 12)) ? "<true />" : "<false />" );
-			fprintf( vFile, "\t\t<changeSize>%s</changeSize>\n", (flags & (1 << 11)) ? "<true />" : "<false />" );
-			fprintf( vFile, "\t\t<changeFont>%s</changeFont>\n", (flags & (1 << 10)) ? "<true />" : "<false />" );
-			fprintf( vFile, "\t\t<invert>%s</invert>\n", (flags & (1 << 4)) ? "<true />" : "<false />" );
-			fprintf( vFile, "\t\t<frame top=\"%s\" left=\"%s\" bottom=\"%s\" right=\"%s\" />\n",
-						(flags & (1 << 0)) ? "true" : "false",
-						(flags & (1 << 1)) ? "true" : "false",
-						(flags & (1 << 2)) ? "true" : "false",
-						(flags & (1 << 3)) ? "true" : "false" );
-			fprintf( vFile, "\t\t<textSize>%d</textSize>\n", ReadBEInt16( blockData, currOffs +14 ) );
-			fprintf( vFile, "\t\t<textHeight>%d</textHeight>\n", ReadBEInt16( blockData, currOffs +16 ) );
-			fprintf( vFile, "\t\t<textStyle>%u</textStyle>\n", (uint8_t) blockData[static_cast<int>(currOffs +18)] );
+			item.AddMember("changeHeight", (flags & (1 << 13)) != 0, allocator);
+			item.AddMember("changeStyle", (flags & (1 << 12)) != 0, allocator);
+			item.AddMember("changeSize", (flags & (1 << 11)) != 0, allocator);
+			item.AddMember("changeFont", (flags & (1 << 10)) != 0, allocator);
+			item.AddMember("invert", (flags & (1 << 4)) != 0, allocator);
+			JsonValue frame(rapidjson::kObjectType);
+			frame.AddMember("top", (flags & (1 << 0)) != 0, allocator);
+			frame.AddMember("left", (flags & (1 << 1)) != 0, allocator);
+			frame.AddMember("bottom", (flags & (1 << 2)) != 0, allocator);
+			frame.AddMember("right", (flags & (1 << 3)) != 0, allocator);
+			item.AddMember("frame", frame, allocator);
+			item.AddMember("textSize", ReadBEInt16( blockData, currOffs +14 ), allocator);
+			item.AddMember("textHeight", ReadBEInt16( blockData, currOffs +16 ), allocator);
+			item.AddMember("textStyle", static_cast<uint8_t>(blockData[static_cast<int>(currOffs +18)]), allocator);
 			int16_t	textAlign = ReadBEInt16( blockData, currOffs +20 );
-			fprintf( vFile, "\t\t<textAlign>%d</textAlign>\n", textAlign );
+			item.AddMember("textAlign", textAlign, allocator);
 
 			size_t	contentStart = currOffs +22;
 			size_t	contentEnd = MacRomanStringEnd( blockData, contentStart );
-			fprintf( vFile, "\t\t<contents>" );
-			WriteMacRomanXML( vFile, blockData, contentStart, contentEnd );
-			fprintf( vFile, "</contents>\n" );
+			item.AddMember("contents", json_string(mac_roman_string(blockData, contentStart, contentEnd), allocator), allocator);
 
 			size_t	fontStart = contentEnd +1;
 			size_t	fontEnd = MacRomanStringEnd( blockData, fontStart );
-			fprintf( vFile, "\t\t<font>" );
-			WriteMacRomanXML( vFile, blockData, fontStart, fontEnd );
-			fprintf( vFile, "</font>\n" );
-			fprintf( vFile, "\t</item>\n" );
+			item.AddMember("font", json_string(mac_roman_string(blockData, fontStart, fontEnd), allocator), allocator);
+			items.PushBack(item, allocator);
 
 			currOffs += itemSize;
 			currOffs = EvenAlign( currOffs );
 		}
+		document.AddMember("items", items, allocator);
 	}
 
-	fprintf( vFile, "</reportTemplate>\n" );
-	fclose( vFile );
+	if( !write_json_document(filePath, document, baseAllocator) )
+	{
+		fprintf( stderr, "Error: Couldn't create report template JSON at '%s'\n", filePath.c_str() );
+		return false;
+	}
 
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -738,353 +772,238 @@ struct	CStyleRun { int16_t startOffset; int16_t styleID; };
 
 bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& blockData, uint8_t inFlags )
 {
-	int32_t		vBlockSize = blockData.size();
-	std::string	vLayerFilePath = mBasePath;
-	
-	bool		isCard = strcmp( "CARD", vBlockType ) == 0;
+	int32_t		vBlockSize = static_cast<int32_t>(blockData.size());
+	const bool	isCard = strcmp( "CARD", vBlockType ) == 0;
 	char		vFileName[256] = { 0 };
 	if( !isCard )
-		snprintf( vFileName, 255, "/background_%d.xml", blockID );
+		snprintf( vFileName, 255, "background_%d.json", blockID );
 	else
-		snprintf( vFileName, 255, "/card_%d.xml", blockID );
-	vLayerFilePath.append( vFileName );
-	
-	FILE*		vFile = fopen( vLayerFilePath.c_str(), "w" );
+		snprintf( vFileName, 255, "card_%d.json", blockID );
+	std::string	vLayerFilePath = OutputPath( vFileName );
 	
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing '%4s' #%d %X (%d bytes)\n", vBlockType, blockID, blockID, vBlockSize );
-	
-	fprintf( vFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n" );
-	if( !isCard )
-	{
-		fprintf( vFile, "<!DOCTYPE background PUBLIC \"-//Apple, Inc.//DTD background V 2.0//EN\" \"\" >\n" );
-		fprintf( vFile, "<background>\n" );
-	}
-	else
-	{
-		fprintf( vFile, "<!DOCTYPE card PUBLIC \"-//Apple, Inc.//DTD card V 2.0//EN\" \"\" >\n" );
-		fprintf( vFile, "<card>\n" );
-	}
-	fprintf( vFile, "\t<id>%d</id>\n", blockID );
 	
 	if( mDumpRawBlockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "%s_%d.data", vBlockType, blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(4096, &baseAllocator);
+	JsonDocument document(&pool, 4096, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string(isCard ? "stackimport.card" : "stackimport.background", allocator), allocator);
+	document.AddMember("id", blockID, allocator);
+	document.AddMember("blockType", json_string(vBlockType, allocator), allocator);
+	document.AddMember("blockSize", vBlockSize, allocator);
+	document.AddMember("file", json_string(vFileName, allocator), allocator);
+	
 	size_t	currOffsIntoData = 0;
 	int32_t	unknownFiller = ntohl(blockData.int32at( currOffsIntoData ));
 	currOffsIntoData += 4;
-	fprintf( vFile, "\t<filler1>%d</filler1>\n", unknownFiller );
+	document.AddMember("filler1", unknownFiller, allocator);
 	int32_t	bitmapID = ntohl(blockData.int32at( currOffsIntoData ));
 	currOffsIntoData += 4;
 	if( bitmapID != 0 )
-		fprintf( vFile, "\t<bitmap>BMAP_%u.pbm</bitmap>\n", bitmapID );
+	{
+		char bitmapFile[256] = { 0 };
+		snprintf( bitmapFile, sizeof(bitmapFile), "BMAP_%u.pbm", bitmapID );
+		document.AddMember("bitmapId", bitmapID, allocator);
+		document.AddMember("bitmap", json_string(bitmapFile, allocator), allocator);
+	}
 	int16_t	flags = ntohs(blockData.int16at( currOffsIntoData ));
 	currOffsIntoData += 2;
-	fprintf( vFile, "\t<cantDelete> %s </cantDelete>\n", (flags & (1 << 14)) ? "<true />" : "<false />" );
-	fprintf( vFile, "\t<showPict> %s </showPict>\n", (flags & (1 << 13)) ? "<false />" : "<true />" );	// showPict is stored reversed.
-	fprintf( vFile, "\t<dontSearch> %s </dontSearch>\n", (flags & (1 << 11)) ? "<true />" : "<false />" );
-	currOffsIntoData += 14;	// Unknown data.
+	document.AddMember("cantDelete", (flags & (1 << 14)) != 0, allocator);
+	document.AddMember("showPict", (flags & (1 << 13)) == 0, allocator);
+	document.AddMember("dontSearch", (flags & (1 << 11)) != 0, allocator);
+	currOffsIntoData += 14;
 	int32_t	owner = -1;
 	if( isCard )
 	{
 		owner = ntohl(blockData.int32at( currOffsIntoData ));
-		fprintf( vFile, "\t<owner>%d</owner>\n", owner );
+		document.AddMember("owner", owner, allocator);
 		currOffsIntoData += 4;
-		
-		if( inFlags & 16 )
-			fprintf( vFile, "\t<marked><true /></marked>\n" );
+		document.AddMember("marked", (inFlags & 16) != 0, allocator);
 	}
-
-	fprintf( vFile, "\t<link rel=\"stylesheet\" type=\"text/css\" href=\"%s\" />\n", mStyleSheetName.c_str() );
+	if( !mStyleSheetName.empty() )
+		document.AddMember("styleSheet", json_string(mStyleSheetName, allocator), allocator);
 
 	int16_t	numParts = ntohs(blockData.int16at( currOffsIntoData ));
 	currOffsIntoData += 2;
-	currOffsIntoData += 6;	// Unknown filler.
+	currOffsIntoData += 6;
 	int16_t	numContents = ntohs(blockData.int16at( currOffsIntoData ));
 	currOffsIntoData += 2;
-	currOffsIntoData += 4;	// Unknown filler.
+	currOffsIntoData += 4;
+	document.AddMember("partCount", numParts, allocator);
+	document.AddMember("contentCount", numContents, allocator);
 	std::vector<int32_t>	buttonIDs;
+	JsonValue parts(rapidjson::kArrayType);
 	for( int n = 0; n < numParts; n++ )
 	{
 		int16_t	partLength = ntohs(blockData.int16at( currOffsIntoData ));
-		
-		fprintf( vFile, "\t<part>\n" );
 		int16_t	partID = ntohs(blockData.int16at( currOffsIntoData +2 ));
-		fprintf( vFile, "\t\t<id>%d</id>\n", partID );
 		int16_t	flagsAndType = ntohs(blockData.int16at( currOffsIntoData +4 ));
 		int16_t	partType = flagsAndType >> 8;
 		bool	isButton = partType == 1;
-		fprintf( vFile, "\t\t<type>%s</type>\n", isButton ? "button" : "field" );
 		if( isButton && !isCard )
 			buttonIDs.push_back( partID );
-		fprintf( vFile, "\t\t<visible> %s </visible>\n", (flagsAndType & (1 << 7)) ? "<false />" : "<true />" );	// Really "hidden" flag.
+		JsonValue part(rapidjson::kObjectType);
+		part.AddMember("id", partID, allocator);
+		part.AddMember("type", json_string(isButton ? "button" : "field", allocator), allocator);
+		part.AddMember("visible", (flagsAndType & (1 << 7)) == 0, allocator);
 		if( !isButton )
-			fprintf( vFile, "\t\t<dontWrap> %s </dontWrap>\n", (flagsAndType & (1 << 5)) ? "<true />" : "<false />" );
+		{
+			part.AddMember("dontWrap", (flagsAndType & (1 << 5)) != 0, allocator);
+			part.AddMember("dontSearch", (flagsAndType & (1 << 4)) != 0, allocator);
+			part.AddMember("sharedText", (flagsAndType & (1 << 3)) != 0, allocator);
+			part.AddMember("fixedLineHeight", (flagsAndType & (1 << 2)) == 0, allocator);
+			part.AddMember("autoTab", (flagsAndType & (1 << 1)) != 0, allocator);
+			part.AddMember("lockText", (flagsAndType & (1 << 0)) != 0, allocator);
+		}
 		else
-			fprintf( vFile, "\t\t<reserved5> %d </reserved5>\n", (flagsAndType & (1 << 5)) >> 5 );
-		if( !isButton )
-			fprintf( vFile, "\t\t<dontSearch> %s </dontSearch>\n", (flagsAndType & (1 << 4)) ? "<true />" : "<false />" );
-		else
-			fprintf( vFile, "\t\t<reserved4> %d </reserved4>\n", (flagsAndType & (1 << 4)) >> 4 );
-		if( !isButton )
-			fprintf( vFile, "\t\t<sharedText> %s </sharedText>\n", (flagsAndType & (1 << 3)) ? "<true />" : "<false />" );
-		else
-			fprintf( vFile, "\t\t<reserved3> %d </reserved3>\n", (flagsAndType & (1 << 3)) >> 3 );
-		if( !isButton )
-			fprintf( vFile, "\t\t<fixedLineHeight> %s </fixedLineHeight>\n", (flagsAndType & (1 << 2)) ? "<false />" : "<true />" );	// Really "use real line height" flag.
-		else
-			fprintf( vFile, "\t\t<reserved2> %d </reserved2>\n", (flagsAndType & (1 << 2)) >> 2 );
-		if( !isButton )
-			fprintf( vFile, "\t\t<autoTab> %s </autoTab>\n", (flagsAndType & (1 << 1)) ? "<true />" : "<false />" );
-		else
-			fprintf( vFile, "\t\t<reserved1> %d </reserved1>\n", (flagsAndType & (1 << 1)) >> 1 );
-		if( isButton )
-			fprintf( vFile, "\t\t<enabled> %s </enabled>\n", (flagsAndType & (1 << 0)) ? "<false />" : "<true />" );	// Same as lockText on fields. Really "disabled" flag.
-		else
-			fprintf( vFile, "\t\t<lockText> %s </lockText>\n", (flagsAndType & (1 << 0)) ? "<true />" : "<false />" );	// Same as enabled on buttons.
-		fprintf( vFile, "\t\t<rect>\n\t\t\t<left>%d</left>\n\t\t\t<top>%d</top>\n\t\t\t<right>%d</right>\n\t\t\t<bottom>%d</bottom>\n\t\t</rect>\n",
-					ntohs(blockData.int16at( currOffsIntoData +8 )),
-					ntohs(blockData.int16at( currOffsIntoData +6 )),
-					ntohs(blockData.int16at( currOffsIntoData +12 )),
-					ntohs(blockData.int16at( currOffsIntoData +10 )) );
+		{
+			part.AddMember("enabled", (flagsAndType & (1 << 0)) == 0, allocator);
+			part.AddMember("reserved5", (flagsAndType & (1 << 5)) >> 5, allocator);
+			part.AddMember("reserved4", (flagsAndType & (1 << 4)) >> 4, allocator);
+			part.AddMember("reserved3", (flagsAndType & (1 << 3)) >> 3, allocator);
+			part.AddMember("reserved2", (flagsAndType & (1 << 2)) >> 2, allocator);
+			part.AddMember("reserved1", (flagsAndType & (1 << 1)) >> 1, allocator);
+		}
+		part.AddMember("rect", json_rect(
+			ntohs(blockData.int16at( currOffsIntoData +8 )),
+			ntohs(blockData.int16at( currOffsIntoData +6 )),
+			ntohs(blockData.int16at( currOffsIntoData +12 )),
+			ntohs(blockData.int16at( currOffsIntoData +10 )), allocator), allocator);
 		int16_t	moreFlags = ntohs(blockData.int16at( currOffsIntoData +14 ));
 		int8_t	styleFromLowNibble = moreFlags & 15;
-		const char*		styleStr = "unknown";
+		const char*	styleStr = "unknown";
 		if( isButton )
 		{
 			switch( styleFromLowNibble )
 			{
-				case 0:
-					styleStr = "transparent";
-					break;
-				case 1:
-					styleStr = "opaque";
-					break;
-				case 2:
-					styleStr = "rectangle";
-					break;
-				case 3:
-					styleStr = "roundrect";
-					break;
-				case 4:
-					styleStr = "shadow";
-					break;
-				case 5:
-					styleStr = "checkbox";
-					break;
-				case 6:
-					styleStr = "radiobutton";
-					break;
-				case 8:
-					styleStr = "standard";
-					break;
-				case 9:
-					styleStr = "default";
-					break;
-				case 10:
-					styleStr = "oval";
-					break;
-				case 11:
-					styleStr = "popup";
-					break;
+				case 0: styleStr = "transparent"; break;
+				case 1: styleStr = "opaque"; break;
+				case 2: styleStr = "rectangle"; break;
+				case 3: styleStr = "roundrect"; break;
+				case 4: styleStr = "shadow"; break;
+				case 5: styleStr = "checkbox"; break;
+				case 6: styleStr = "radiobutton"; break;
+				case 8: styleStr = "standard"; break;
+				case 9: styleStr = "default"; break;
+				case 10: styleStr = "oval"; break;
+				case 11: styleStr = "popup"; break;
 			}
 		}
 		else
 		{
 			switch( styleFromLowNibble )
 			{
-				case 0:
-					styleStr = "transparent";
-					break;
-				case 1:
-					styleStr = "opaque";
-					break;
-				case 2:
-					styleStr = "rectangle";
-					break;
-				case 4:
-					styleStr = "shadow";
-					break;
-				case 7:
-					styleStr = "scrolling";
-					break;
+				case 0: styleStr = "transparent"; break;
+				case 1: styleStr = "opaque"; break;
+				case 2: styleStr = "rectangle"; break;
+				case 4: styleStr = "shadow"; break;
+				case 7: styleStr = "scrolling"; break;
 			}
 		}
-		fprintf( vFile, "\t\t<style>%s</style>\n", styleStr );
+		part.AddMember("style", json_string(styleStr, allocator), allocator);
 		moreFlags = moreFlags >> 8;
 		int8_t	family = moreFlags & 15;
 		if( isButton )
-			fprintf( vFile, "\t\t<showName> %s </showName>\n", (moreFlags & (1 << 7)) ? "<true />" : "<false />" );
+		{
+			part.AddMember("showName", (moreFlags & (1 << 7)) != 0, allocator);
+			part.AddMember("highlight", (moreFlags & (1 << 6)) != 0, allocator);
+			part.AddMember("autoHighlight", (moreFlags & (1 << 5) || family != 0), allocator);
+			part.AddMember("sharedHighlight", (moreFlags & (1 << 4)) == 0, allocator);
+			part.AddMember("family", family, allocator);
+		}
 		else
-			fprintf( vFile, "\t\t<autoSelect> %s </autoSelect>\n", (moreFlags & (1 << 7)) ? "<true />" : "<false />" );
-		if( isButton )
-			fprintf( vFile, "\t\t<highlight> %s </highlight>\n", (moreFlags & (1 << 6)) ? "<true />" : "<false />" );
-		else
-			fprintf( vFile, "\t\t<showLines> %s </showLines>\n", (moreFlags & (1 << 6)) ? "<true />" : "<false />" );
-		if( !isButton )
-			fprintf( vFile, "\t\t<wideMargins> %s </wideMargins>\n", (moreFlags & (1 << 5)) ? "<true />" : "<false />" );
-		else
-			fprintf( vFile, "\t\t<autoHighlight> %s </autoHighlight>\n", (moreFlags & (1 << 5) || family != 0) ? "<true />" : "<false />" );
-		if( isButton )
-			fprintf( vFile, "\t\t<sharedHighlight> %s </sharedHighlight>\n", (moreFlags & (1 << 4)) ? "<false />" : "<true />" );
-		else
-			fprintf( vFile, "\t\t<multipleLines> %s </multipleLines>\n", (moreFlags & (1 << 4)) ? "<true />" : "<false />" );
-		if( isButton )
-			fprintf( vFile, "\t\t<family>%d</family>\n", family );
-		else
-			fprintf( vFile, "\t\t<reservedFamily> %d </reservedFamily>\n", family );
-		
-		// titleWidth & iconID are list fields' lastSelectedLine and firstSelectedLine
-		// 	We generate a list containing each selected line so users of the file
-		//	format can add multiple selection easily.
+		{
+			part.AddMember("autoSelect", (moreFlags & (1 << 7)) != 0, allocator);
+			part.AddMember("showLines", (moreFlags & (1 << 6)) != 0, allocator);
+			part.AddMember("wideMargins", (moreFlags & (1 << 5)) != 0, allocator);
+			part.AddMember("multipleLines", (moreFlags & (1 << 4)) != 0, allocator);
+			part.AddMember("reservedFamily", family, allocator);
+		}
 		int16_t	titleWidth = ntohs(blockData.int16at( currOffsIntoData +16 ));
 		int16_t	iconID = ntohs(blockData.int16at( currOffsIntoData +18 ));
-		if( !isButton && iconID > 0 )
+		part.AddMember("titleWidth", titleWidth, allocator);
+		part.AddMember("icon", iconID, allocator);
+		if( (!isButton && iconID > 0) || (isButton && styleFromLowNibble == 11 && iconID != 0) )
 		{
-			if( titleWidth <= 0 )
-				titleWidth = iconID;
-			
-			fprintf( vFile, "\t\t<selectedLines>\n" );
-			for( int d = iconID; d <= titleWidth; d++ )
-				fprintf( vFile, "\t\t\t<integer>%d</integer>\n", d );
-			fprintf( vFile, "\t\t</selectedLines>\n" );
-		}
-		else if( isButton && styleFromLowNibble == 11 )	// Popup buttons use icon ID for selected line:
-		{
-			fprintf( vFile, "\t\t<titleWidth>%d</titleWidth>\n", titleWidth );
-			if( iconID != 0 )
+			JsonValue selectedLines(rapidjson::kArrayType);
+			if( !isButton )
 			{
-				fprintf( vFile, "\t\t<selectedLines>\n" );
-				fprintf( vFile, "\t\t\t<integer>%d</integer>\n", iconID );
-				fprintf( vFile, "\t\t</selectedLines>\n" );
+				if( titleWidth <= 0 )
+					titleWidth = iconID;
+				for( int d = iconID; d <= titleWidth; d++ )
+					selectedLines.PushBack(d, allocator);
 			}
-		}
-		else
-		{
-			fprintf( vFile, "\t\t<titleWidth>%d</titleWidth>\n", titleWidth );
-			fprintf( vFile, "\t\t<icon>%d</icon>\n", iconID );
+			else
+				selectedLines.PushBack(iconID, allocator);
+			part.AddMember("selectedLines", selectedLines, allocator);
 		}
 		int16_t	textAlign = ntohs(blockData.int16at( currOffsIntoData +20 ));
-		const char*		textAlignStr = "unknown";
+		const char*	textAlignStr = "unknown";
 		switch( textAlign )
 		{
-			case 0:
-				textAlignStr = "left";
-				break;
-			case 1:
-				textAlignStr = "center";
-				break;
-			case -1:
-				textAlignStr = "right";
-				break;
-			case -2:
-				textAlignStr = "forceLeft";
-				break;
+			case 0: textAlignStr = "left"; break;
+			case 1: textAlignStr = "center"; break;
+			case -1: textAlignStr = "right"; break;
+			case -2: textAlignStr = "forceLeft"; break;
 		}
-		fprintf( vFile, "\t\t<textAlign>%s</textAlign>\n", textAlignStr );
+		part.AddMember("textAlign", json_string(textAlignStr, allocator), allocator);
 		int16_t	textFontID = ntohs(blockData.int16at( currOffsIntoData +22 ));
-		fprintf( vFile, "\t\t<font>%s</font>\n", mFontTable[textFontID].c_str() );
+		part.AddMember("fontId", textFontID, allocator);
+		part.AddMember("font", json_string(mFontTable[textFontID], allocator), allocator);
 		int16_t	textSize = ntohs(blockData.int16at( currOffsIntoData +24 ));
-		fprintf( vFile, "\t\t<textSize>%d</textSize>\n", textSize );
+		part.AddMember("textSize", textSize, allocator);
 		int16_t	textStyleFlags = ntohs(blockData.int16at( currOffsIntoData +26 ));
-		if( textStyleFlags & (1 << 15) )
-			fprintf( vFile, "\t\t<textStyle>group</textStyle>\n" );
-		if( textStyleFlags & (1 << 14) )
-			fprintf( vFile, "\t\t<textStyle>extend</textStyle>\n" );
-		if( textStyleFlags & (1 << 13) )
-			fprintf( vFile, "\t\t<textStyle>condense</textStyle>\n" );
-		if( textStyleFlags & (1 << 12) )
-			fprintf( vFile, "\t\t<textStyle>shadow</textStyle>\n" );
-		if( textStyleFlags & (1 << 11) )
-			fprintf( vFile, "\t\t<textStyle>outline</textStyle>\n" );
-		if( textStyleFlags & (1 << 10) )
-			fprintf( vFile, "\t\t<textStyle>underline</textStyle>\n" );
-		if( textStyleFlags & (1 << 9) )
-			fprintf( vFile, "\t\t<textStyle>italic</textStyle>\n" );
-		if( textStyleFlags & (1 << 8) )
-			fprintf( vFile, "\t\t<textStyle>bold</textStyle>\n" );
-		if( textStyleFlags == 0 )
-			fprintf( vFile, "\t\t<textStyle>plain</textStyle>\n" );
-		
+		JsonValue textStyles(rapidjson::kArrayType);
+		if( textStyleFlags & (1 << 15) ) textStyles.PushBack(json_string("group", allocator), allocator);
+		if( textStyleFlags & (1 << 14) ) textStyles.PushBack(json_string("extend", allocator), allocator);
+		if( textStyleFlags & (1 << 13) ) textStyles.PushBack(json_string("condense", allocator), allocator);
+		if( textStyleFlags & (1 << 12) ) textStyles.PushBack(json_string("shadow", allocator), allocator);
+		if( textStyleFlags & (1 << 11) ) textStyles.PushBack(json_string("outline", allocator), allocator);
+		if( textStyleFlags & (1 << 10) ) textStyles.PushBack(json_string("underline", allocator), allocator);
+		if( textStyleFlags & (1 << 9) ) textStyles.PushBack(json_string("italic", allocator), allocator);
+		if( textStyleFlags & (1 << 8) ) textStyles.PushBack(json_string("bold", allocator), allocator);
+		if( textStyleFlags == 0 ) textStyles.PushBack(json_string("plain", allocator), allocator);
+		part.AddMember("textStyles", textStyles, allocator);
 		int16_t	textHeight = ntohs(blockData.int16at( currOffsIntoData +28 ));
 		if( !isButton )
-			fprintf( vFile, "\t\t<textHeight>%d</textHeight>\n", textHeight );
-		
-		int x = 0, startOffs = currOffsIntoData +30;
-		fprintf( vFile, "\t\t<name>" );
-		for( x = startOffs; blockData[x] != 0; x++ )
-		{
-			char currCh = blockData[x];
-			if( currCh == '<' )
-				fprintf( vFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( vFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( vFile, "&amp;" );
-			else
-				fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( vFile, "</name>\n" );
-		
+			part.AddMember("textHeight", textHeight, allocator);
+		int x = 0, startOffs = static_cast<int>(currOffsIntoData +30);
+		part.AddMember("name", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
+		x = static_cast<int>(MacRomanStringEnd(blockData, startOffs));
 		startOffs = x +2;
-		fprintf( vFile, "\t\t<script>" );
-		for( x = startOffs; blockData[x] != 0; x++ )
-		{
-			char currCh = blockData[x];
-			if( currCh == '<' )
-				fprintf( vFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( vFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( vFile, "&amp;" );
-			else
-				fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( vFile, "</script>\n" );
-		
-		fprintf( vFile, "\t</part>\n" );
-		
+		part.AddMember("script", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
+		parts.PushBack(part, allocator);
 		currOffsIntoData += partLength;
-		currOffsIntoData += (currOffsIntoData % 2);	// Align on even byte.
+		currOffsIntoData += (currOffsIntoData % 2);
 	}
-	
 	if( !isCard )
 		mButtonIDsPerBg[blockID] = buttonIDs;
+	document.AddMember("parts", parts, allocator);
 
+	JsonValue contents(rapidjson::kArrayType);
+	size_t totalTextBytes = 0;
 	for( int n = 0; n < numContents; n++ )
 	{
-		/*
-			Contents are a complicated thing. Essentially, they're a storage for card-specific data
-			used by background objects, though for simplicity, card parts also use contents to store
-			that same data. There are a few specialties, though:
-			
-			If the contents of a button start with a number > 32767, the number -32768 is the legth
-			of style data (including this length information) at the start of the content text, and
-			the actual text follows afterwards.
-			
-			Button contents can only be the same for all cards on a background. However, if there is
-			a contents entry for a background button on a card, it contains a "1" as plain text if
-			the button is highlighted and sharedHighlight is FALSE.
-		*/
-		
-		int16_t		partID = ntohs(blockData.int16at( currOffsIntoData ));
-		int16_t		partLength = ntohs(blockData.int16at( currOffsIntoData +2 ));
-		bool		isBgButtonContents = false;
-		
-		fprintf( vFile, "\t<content>\n" );
-		
-		CBuf		theText, theStyles;
-		if( partID < 0 )	// It's a card part's contents:
+		int16_t	partID = ntohs(blockData.int16at( currOffsIntoData ));
+		int16_t	partLength = ntohs(blockData.int16at( currOffsIntoData +2 ));
+		bool	isBgButtonContents = false;
+		JsonValue content(rapidjson::kObjectType);
+		CBuf	theText, theStyles;
+		if( partID < 0 )
 		{
 			partID = -partID;
-			fprintf( vFile, "\t\t<layer>card</layer>\n" );
-			fprintf( vFile, "\t\t<id>%d</id>\n", partID );
-			
-			uint16_t	stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
+			content.AddMember("layer", json_string("card", allocator), allocator);
+			content.AddMember("id", partID, allocator);
+			uint16_t stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
@@ -1096,17 +1015,12 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			theText.resize( partLength -stylesLength +1 );
 			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, partLength -stylesLength );
 			theText[theText.size()-1] = 0;
-			//theText.debug_print();
 		}
-		else	// It's a bg part's contents:
+		else
 		{
-			if( blockID == 9428 && partID == 20 )
-				printf("\n");	// Help debug missing characters in Power Tools.
-			
-			fprintf( vFile, "\t\t<layer>background</layer>\n" );
-			fprintf( vFile, "\t\t<id>%d</id>\n", partID );
-			
-			uint16_t	stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
+			content.AddMember("layer", json_string("background", allocator), allocator);
+			content.AddMember("id", partID, allocator);
+			uint16_t stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
@@ -1116,17 +1030,14 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			else
 				stylesLength = 0;
 			theText.resize( partLength -stylesLength +1 );
-			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength,
-								partLength -stylesLength );
+			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, partLength -stylesLength );
 			theText[theText.size()-1] = 0;
-			//theText.debug_print();
-			
 			if( owner != -1 )
 			{
-				std::vector<int32_t>&	buttonIDs = mButtonIDsPerBg[owner];
-				for( size_t x = 0; x < buttonIDs.size(); x++ )
+				std::vector<int32_t>& bgButtonIDs = mButtonIDsPerBg[owner];
+				for( size_t x = 0; x < bgButtonIDs.size(); x++ )
 				{
-					if( buttonIDs[x] == partID )
+					if( bgButtonIDs[x] == partID )
 					{
 						isBgButtonContents = true;
 						break;
@@ -1134,338 +1045,62 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 				}
 			}
 		}
-		
-		if( !isBgButtonContents )	// Bg buttons have no per-card contents in HC.
+		if( !isBgButtonContents )
 		{
-			std::vector<CStyleRun>		styleRuns;
+			JsonValue styleRuns(rapidjson::kArrayType);
 			if( theStyles.size() > 0 )
 			{
 				for( size_t x = 0; x < theStyles.size(); )
 				{
-					int16_t	startOffset = ntohs(theStyles.int16at( x ));
+					int16_t startOffset = ntohs(theStyles.int16at( x ));
 					x += sizeof(int16_t);
-					int16_t	styleID = ntohs(theStyles.int16at( x ));
+					int16_t styleID = ntohs(theStyles.int16at( x ));
 					x += sizeof(int16_t);
-					
-					styleRuns.push_back( (CStyleRun){ startOffset, styleID } );
+					JsonValue styleRun(rapidjson::kObjectType);
+					styleRun.AddMember("startOffset", startOffset, allocator);
+					styleRun.AddMember("styleId", styleID, allocator);
+					styleRuns.PushBack(styleRun, allocator);
 				}
 			}
-			int16_t		currStyleID = -1;
-			size_t		currOffset = 1;
-			fprintf( vFile, "\t\t<text>" );
-			size_t		numChars = theText.size();
-			bool		currentlyGroup = false;
-			
-			for( auto currRun : styleRuns )
-			{
-				if( currOffset < currRun.startOffset )	// Characters before this style run?
-				{	// Write them all out.
-					for( ; currOffset < currRun.startOffset; currOffset++ )
-					{
-						char currCh = theText[currOffset];
-						if( currCh == '<' )
-							fprintf( vFile, "&lt;" );
-						else if( currCh == '>' )
-							fprintf( vFile, "&gt;" );
-						else if( currCh == '&' )
-							fprintf( vFile, "&amp;" );
-						else
-							fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-					}
-				}
-				if( currentlyGroup )
-				{
-					fprintf( vFile, "</a>" );
-					currentlyGroup = false;
-				}
-				if( currStyleID >= 0 )	// If this isn't our first style run, close previous run:
-					fprintf( vFile, "</span>" );
-				currStyleID = currRun.styleID;
-				fprintf( vFile, "<span class=\"style%d\">", currStyleID );
-				if( mStyles[currStyleID].mGroup )
-				{
-					fprintf( vFile, "<a href=\"#\" class=\"group\">" );
-					currentlyGroup = true;
-				}
-			}
-			for( ; currOffset < numChars; currOffset++ )
-			{
-				char currCh = theText[currOffset];
-				if( currCh == '<' )
-					fprintf( vFile, "&lt;" );
-				else if( currCh == '>' )
-					fprintf( vFile, "&gt;" );
-				else if( currCh == '&' )
-					fprintf( vFile, "&amp;" );
-				else
-					fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-			}
-			if( currentlyGroup )
-			{
-				fprintf( vFile, "</a>" );
-				currentlyGroup = false;
-			}
-			if( currStyleID >= 0 )	// If we had any style runs before this text, close it now:
-				fprintf( vFile, "</span>" );
-			fprintf( vFile, "</text>\n" );
+			content.AddMember("styleRuns", styleRuns, allocator);
+			std::string contentText = mac_roman_string(theText, 0, theText.size());
+			totalTextBytes += contentText.size();
+			content.AddMember("text", json_string(contentText, allocator), allocator);
 		}
-		else	// Bg button? May have highlight on the card:
+		else
 		{
-			if( theText.size() == 3 && theText[0] == 0 && theText[1] == '1' && theText[2] == 0 )	// If "shared Highlight" is FALSE, a button's highlight is stored as the content string "1".
-				fprintf( vFile, "\t\t<highlight> <true /> </highlight>\n" );
+			const bool highlighted = theText.size() == 3 && theText[0] == 0 && theText[1] == '1' && theText[2] == 0;
+			content.AddMember("highlight", highlighted, allocator);
 		}
-		
-		currOffsIntoData += partLength +4 +(partLength % 2);	// Align on even byte.
-		
-		fprintf( vFile, "\t</content>\n" );
+		contents.PushBack(content, allocator);
+		currOffsIntoData += partLength +4 +(partLength % 2);
 	}
+	document.AddMember("contents", contents, allocator);
 	
-	int x = 0, startOffs = currOffsIntoData;
-	fprintf( vFile, "\t<name>" );
-	for( x = startOffs; blockData[x] != 0; x++ )
-	{
-		char currCh = blockData[x];
-		if( currCh == '<' )
-			fprintf( vFile, "&lt;" );
-		else if( currCh == '>' )
-			fprintf( vFile, "&gt;" );
-		else if( currCh == '&' )
-			fprintf( vFile, "&amp;" );
-		else
-			fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-	}
-	fprintf( vFile, "</name>\n" );
-
-	if( !isCard )
-		fprintf( mStackXmlFile, "\t<background id=\"%d\" file=\"%s\" name=\"", blockID, vFileName +1 );
-	else
-		fprintf( mStackXmlFile, "\t<card id=\"%d\" file=\"%s\" marked=\"%s\" name=\"", blockID, vFileName +1, ((inFlags & 16) ? "true" : "false") );
-	
-	for( x = startOffs; blockData[x] != 0; x++ )
-	{
-		char currCh = blockData[x];
-		if( currCh == '"' )
-			fprintf( mStackXmlFile, "%%22" );
-		else if( currCh == '\n' )
-			fprintf( mStackXmlFile, "%%0A;" );
-		else if( currCh == '\r' )
-			fprintf( mStackXmlFile, "%%0D" );
-		else
-			fprintf( mStackXmlFile, "%s", UniCharFromMacRoman(currCh) );
-	}
-	
-	fprintf( mStackXmlFile, "\" " );
-	if( isCard )
-		fprintf( mStackXmlFile, "owner=\"%d\" ", owner );
-	fprintf( mStackXmlFile, "/>\n" );
-	
-	startOffs = x +1;
-	fprintf( vFile, "\t<script>" );
-	for( x = startOffs; blockData[x] != 0; x++ )
-	{
-		char currCh = blockData[x];
-		if( currCh == '<' )
-			fprintf( vFile, "&lt;" );
-		else if( currCh == '>' )
-			fprintf( vFile, "&gt;" );
-		else if( currCh == '&' )
-			fprintf( vFile, "&amp;" );
-		else
-			fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-	}
-	fprintf( vFile, "</script>\n" );
+	int startOffs = static_cast<int>(currOffsIntoData);
+	std::string layerName = mac_roman_string(blockData, startOffs);
+	document.AddMember("name", json_string(layerName, allocator), allocator);
+	int nameEnd = static_cast<int>(MacRomanStringEnd(blockData, startOffs));
+	startOffs = nameEnd +1;
+	std::string script = mac_roman_string(blockData, startOffs);
+	document.AddMember("script", json_string(script, allocator), allocator);
+	mLayerSummaries.push_back(CLayerSummary{
+		isCard,
+		blockID,
+		owner,
+		inFlags,
+		vFileName,
+		layerName,
+		numParts,
+		numContents,
+		script.size(),
+		totalTextBytes
+	});
 	
 	if( mProgressMessages )
 		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
-	// Read AddColor data:
-#if MAC_CODE
-	OSType		theType = (!isCard) ? 'HCbg' : 'HCcd';
-	Handle		currIcon = Get1Resource( theType, blockID );
-	if( currIcon && GetHandleSize(currIcon) <= 0 )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	else if( currIcon && GetHandleSize(currIcon) > 0 )
-	{		
-		if( mStatusMessages )
-			fprintf( stdout, "Status: Converting AddColor '%s' %d.\n", ((theType == 'HCbg') ? "HCbg" : "HCcd"), blockID );
-		
-		size_t	dataLen = GetHandleSize( currIcon );
-		CBuf	theData( dataLen );
-		theData.memcpy( 0, *currIcon, 0, dataLen );
-		
-		size_t	currOffs = 0;
-		while( currOffs < dataLen )
-		{
-			fprintf( vFile, "\t<addcolorobject>\n" );
-			int8_t	currType = theData[currOffs];
-			bool	vHidden = currType & (1 << 7);
-			currType &= ~(1 << 7);
-			currOffs += 1;
-			
-			switch( currType )
-			{
-				case 0x01:	// Button
-				{
-					fprintf( vFile, "\t\t<type>button</type>\n" );
-					int16_t		buttonID = 0, bevelDepth = 0;
-					uint16_t	r = 0, g = 0, b = 0;
-					buttonID = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t<id>%d</id>\n", buttonID );
-					bevelDepth = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t<bevel>%d</bevel>\n", bevelDepth );
-					fprintf( vFile, "\t\t<color>\n" );
-					r = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<red>%d</red>\n", r );
-					g = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<green>%d</green>\n", g );
-					b = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<blue>%d</blue>\n", b );
-					fprintf( vFile, "\t\t</color>\n" );
-					break;
-				}
-
-				case 0x02:	// Field
-				{
-					fprintf( vFile, "\t\t<type>field</type>\n" );
-					int16_t		buttonID = 0, bevelDepth = 0;
-					uint16_t	r = 0, g = 0, b = 0;
-					buttonID = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t<id>%d</id>\n", buttonID );
-					bevelDepth = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t<bevel>%d</bevel>\n", bevelDepth );
-					fprintf( vFile, "\t\t<color>\n" );
-					r = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<red>%d</red>\n", r );
-					g = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<green>%d</green>\n", g );
-					b = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<blue>%d</blue>\n", b );
-					fprintf( vFile, "\t\t</color>\n" );
-					break;
-				}
-
-				case 0x03:	// Rectangle
-				{
-					fprintf( vFile, "\t\t<type>rectangle</type>\n" );
-					uint16_t	rc = 0, gc = 0, bc = 0;
-					int16_t		bevelDepth = 0;
-					int16_t		l, t, r, b;
-					fprintf( vFile, "\t\t<rect>\n" );
-					t = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<top>%d</top>\n", t );
-					l = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<left>%d</left>\n", l );
-					b = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<bottom>%d</bottom>\n", b );
-					r = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<right>%d</right>\n", r );
-					fprintf( vFile, "\t\t</rect>\n" );
-					bevelDepth = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t<bevel>%d</bevel>\n", bevelDepth );
-					fprintf( vFile, "\t\t<color>\n" );
-					rc = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<red>%d</red>\n", rc );
-					gc = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<green>%d</green>\n", gc );
-					bc = ntohs(theData.uint16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<blue>%d</blue>\n", bc );
-					fprintf( vFile, "\t\t</color>\n" );
-					break;
-				}
-
-				case 0x04:	// Picture Resource
-				case 0x05:	// Picture file
-				{
-					fprintf( vFile, "\t\t<type>picture</type>\n" );
-					fprintf( vFile, "\t\t<source>%s</source>\n", currType == 0x05 ? "file" : "resource" );
-					int16_t		l, t, r, b;
-					fprintf( vFile, "\t\t<rect>\n" );
-					t = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<top>%d</top>\n", t );
-					l = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<left>%d</left>\n", l );
-					b = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<bottom>%d</bottom>\n", b );
-					r = ntohs(theData.int16at( currOffs ));
-					currOffs += 2;
-					fprintf( vFile, "\t\t\t<right>%d</right>\n", r );
-					fprintf( vFile, "\t\t</rect>\n" );
-
-					uint8_t	transparentFlag = theData[currOffs];
-					currOffs += 1;
-					fprintf( vFile, "\t\t<transparent> %s </transparent>\n", transparentFlag ? "<true />" : "<false />" );
-					
-					uint8_t	imageNameLen = theData[currOffs];
-					currOffs += 1;
-					
-					if( currType == 0x05 )
-						fprintf( vFile, "\t\t<file>" );
-					else
-						fprintf( vFile, "\t\t<name>" );
-					for( int n = 0; n < imageNameLen; n++ )
-					{
-						char currCh = theData[currOffs++];
-						if( currCh == '<' )
-							fprintf( vFile, "&lt;" );
-						else if( currCh == '>' )
-							fprintf( vFile, "&gt;" );
-						else if( currCh == '&' )
-							fprintf( vFile, "&amp;" );
-						else
-							fprintf( vFile, "%s", UniCharFromMacRoman(currCh) );
-					}
-					if( currType == 0x05 )
-						fprintf( vFile, "</file>\n" );
-					else
-						fprintf( vFile, "</name>\n" );
-					currOffs = EvenAlign( currOffs );
-					break;
-				}
-				
-				default:
-					fprintf( vFile, "\t\t<!-- Unknown type %x, aborting '%s' resource %d. -->\n", currType, ((strcmp(vBlockType,"BKGD") == 0) ? "HCbg" : "HCcd"), blockID );
-					fprintf( stderr, "Error: Unknown type %x, aborting '%s' resource %d.\n", currType, ((strcmp(vBlockType,"BKGD") == 0) ? "HCbg" : "HCcd"), blockID );
-					currOffs = dataLen;	// Can't read more. Skip the rest.
-					break;
-			}
-			fprintf( vFile, "\t\t<visible> %s </visible>\n", (vHidden ? "<false />" : "<true />") );
-			fprintf( vFile, "\t</addcolorobject>\n" );
-		}
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-#endif //MAC_CODE
-		
-	if( !isCard )
-		fprintf( vFile, "</background>\n" );
-	else
-		fprintf( vFile, "</card>\n" );
-
-	fclose( vFile );
-	
-	return true;
+	return write_json_document(vLayerFilePath, document, baseAllocator);
 }
 
 
@@ -1480,12 +1115,15 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "PAGE_%d.data", blockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 	
 	if( mCardBlockSize != -1 )
 	{
 		size_t		currDataOffs = 12;
+		CPageSummary page;
+		page.id = blockID;
+		page.entryCount = pageEntryCount;
 		for( int16_t entryIndex = 0; entryIndex < pageEntryCount; entryIndex++ )
 		{
 			if( !blockData.hasdata( currDataOffs, sizeof(int32_t) ) )
@@ -1498,11 +1136,13 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 			if( currCardID == 0 )
 				break;	// End of page list. (Sentinel)
 			uint8_t		cardFlags = blockData[currDataOffs +4];
+			page.cardIDs.push_back(currCardID);
 			
 			success = LoadLayerBlock( "CARD", currCardID, mBlockMap[CStackBlockIdentifier("CARD",currCardID)], cardFlags );
 			
 			currDataOffs += mCardBlockSize;
 		}
+		mPageSummaries.push_back(page);
 	}
 	else
 		fprintf( stderr, "Warning: Couldn't parse 'PAGE' #%d (%lu bytes) because it preceded the page table list.\n", blockID, blockData.size() );
@@ -1523,7 +1163,7 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 	{
 		char sfn[256] = { 0 };
 		snprintf( sfn, sizeof(sfn), "LIST_%d.data", mListBlockID );
-		blockData.tofile( sfn );
+		blockData.tofile( OutputPath(sfn) );
 	}
 
 	size_t		currDataOffs = 4;
@@ -1560,450 +1200,230 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 #if MAC_CODE
 bool	CStackFile::LoadBWIcons()
 {
-	// Export all B/W icons:
-	SInt16		numIcons = Count1Resources( 'ICON' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currIcon = Get1IndResource( 'ICON', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currIcon, &theID, &theType, name );
-		char		fname[256];
-		
-		if( mStatusMessages )
-			fprintf( stdout, "Status: Converting 'ICON' %d.\n", theID );
-		
-		picture		theIcon( 32, 32, 1, false );
-		theIcon.memcopyin( *currIcon, 0, 4 * 32 );
-		
-		theIcon.buildmaskfromsurroundings();
-		
-//		snprintf( fname, sizeof(fname), "ICON_%d_mask.pbm", theID );
-//		theIcon.writemasktopbm( fname );
-		
-		snprintf( fname, sizeof(fname), "ICON_%d.pbm", theID );
-		theIcon.writebitmapandmasktopbm( fname );
-		
-		fprintf( mXmlFile, "\t<media>\n\t\t<id>%d</id>\n"
-							"\t\t<type>icon</type>\n"
-							"\t\t<name>", theID );
-		for( int n = 1; n <= name[0]; n++ )
-		{
-			char currCh = name[n];
-			if( currCh == '<' )
-				fprintf( mXmlFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( mXmlFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( mXmlFile, "&amp;" );
-			else
-				fprintf( mXmlFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( mXmlFile, "</name>\n"
-							"\t\t<file>ICON_%d.pbm</file>\n"
-							"\t</media>\n", theID );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
+	fprintf( stderr, "Warning: Mac resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
-#endif //MAC_CODE
 
-#if MAC_CODE
 bool	CStackFile::LoadPictures()
 {
-	// Export all PICT images:
-	SInt16	numIcons = Count1Resources( 'PICT' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currPicture = Get1IndResource( 'PICT', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currPicture, &theID, &theType, name );
-		char		fname[256];
-		
-		if( mStatusMessages )
-			fprintf( stdout, "Status: Converting 'PICT' %d.\n", theID );
-
-		snprintf( fname, sizeof(fname), "PICT_%d.pict", theID );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'PICT' %d.\n", fname, theID );
-			return false;
-		}
-		
-		for( int n = 0; n < 8; n++ )
-			fputs( "BILL_ATKINSON_ERIC_CARLSON_KEVIN_CALHOUN_DANIEL_THOME_HYPERCARD_", theFile );	// 64 bytes repeated 8 times is a neat 512 byte header.
-		fwrite( *currPicture, GetHandleSize( currPicture ), 1, theFile );
-		fclose( theFile );
-
-		fprintf( mXmlFile, "\t<media>\n\t\t<id>%d</id>\n\t\t<type>picture</type>\n\t\t<name>", theID );
-		for( int n = 1; n <= name[0]; n++ )
-		{
-			char currCh = name[n];
-			if( currCh == '<' )
-				fprintf( mXmlFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( mXmlFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( mXmlFile, "&amp;" );
-			else
-				fprintf( mXmlFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( mXmlFile, "</name>\n\t\t<file>PICT_%d.pict</file>\n\t</media>\n", theID );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
+	fprintf( stderr, "Warning: PICT resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
-#endif //MAC_CODE
 
-#if MAC_CODE
 bool	CStackFile::LoadCursors()
 {
-	SInt16	numIcons = Count1Resources( 'CURS' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currIcon = Get1IndResource( 'CURS', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currIcon, &theID, &theType, name );
-		char		fname[256];
-		
-		if( mStatusMessages )
-			fprintf( stdout, "Status: Converting 'CURS' %d.\n", theID );
-		
-		snprintf( fname, sizeof(fname), "CURS_%d.pbm", theID );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'CURS' %d.\n", fname, theID );
-			return false;
-		}
-		
-		fputs( "P4\n16 16\n", theFile );
-		fwrite( *currIcon, 2 * 16, 1, theFile );
-		fputs( "\nP4\n16 16\n", theFile );
-		fwrite( (*currIcon) +(2 * 16), 2 * 16, 1, theFile );
-		int16_t	vertPos = * (int16_t*) ((*currIcon) +(2 * 16) +(2 * 16));
-		int16_t	horzPos = * (int16_t*) ((*currIcon) +(2 * 16) +(2 * 16) +2);
-		fclose( theFile );
-		
-		fprintf( mXmlFile, "\t<media>\n\t\t<id>%d</id>\n\t\t<type>cursor</type>\n\t\t<name>", theID );
-		for( int n = 1; n <= name[0]; n++ )
-		{
-			char currCh = name[n];
-			if( currCh == '<' )
-				fprintf( mXmlFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( mXmlFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( mXmlFile, "&amp;" );
-			else
-				fprintf( mXmlFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( mXmlFile, "</name>\n\t\t<file>CURS_%d.pbm</file>\n\t\t<hotspot>\n\t\t\t<left>%d</left>\n\t\t\t<top>%d</top>\n\t\t</hotspot>\n\t</media>\n", theID, horzPos, vertPos );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
+	fprintf( stderr, "Warning: Cursor resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
-#endif //MAC_CODE
 
-
-#if MAC_CODE
 bool	CStackFile::LoadSounds()
 {
-#if USE_QUICKTIME
-	EnterMovies();
-#endif
-	SInt16	numIcons = Count1Resources( 'snd ' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currSound = Get1IndResource( 'snd ', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currSound, &theID, &theType, name );
-		char		fname[256];
-
-		if( mStatusMessages )
-			fprintf( stdout, "Status: Converting 'snd ' %d.\n", theID );
-
-		#if USE_QUICKTIME
-		snprintf( fname, sizeof(fname), "snd_%d.aiff", theID );
-		
-		Handle		myHandle = NewHandleClear(0);
-		Handle		myDataRef = NewHandleClear( sizeof(Handle) );
-		BlockMove( &myHandle, *myDataRef, sizeof(Handle) );
-		
-		Movie	theMovie = NewMovie( newMovieActive );
-		OSErr	resErr = GetMoviesError();
-		if( !theMovie || resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d creating QuickTime container for 'snd ' %d.\n", (int)resErr, theID );
-			return false;
-		}
-		
-		resErr = SetMovieDefaultDataRef( theMovie, myDataRef, HandleDataHandlerSubType);
-		if( !theMovie || resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d specifying data reference for 'snd ' %d.\n", (int)resErr, theID );
-			return false;
-		}
-		
-		resErr = PasteHandleIntoMovie( currSound, 'snd ', theMovie, 0L, NULL );
-		if( resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d inserting data of 'snd ' %d into QuickTime container.\n", (int)resErr, theID );
-			return false;
-		}
-		
-		FSRef		packageRef;
-		resErr = FSPathMakeRef( (UInt8*) mBasePath.c_str(), &packageRef, NULL );
-		if( resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d creating reference to package to export 'snd ' %d.\n", (int)resErr, theID );
-			return false;
-		}
-		FSSpec		theSpec = { 0 };
-		resErr = FSGetCatalogInfo( &packageRef, kFSCatInfoNone, NULL, NULL, &theSpec, NULL );
-		if( resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d converting reference to package to export 'snd ' %d.\n", (int)resErr, theID );
-			return false;
-		}
-		theSpec.name[0] = strlen(fname);
-		strcpy( ((char*)theSpec.name) +1, fname );
-		resErr = ConvertMovieToFile( theMovie, NULL, &theSpec, kQTFileTypeAIFF, 'TVOD', smSystemScript, NULL, createMovieFileDeleteCurFile | movieToFileOnlyExport, NULL );
-		if( resErr != noErr )
-		{
-			fprintf( stderr, "Error: Error %d converting 'snd ' %d to AIFF.\n", (int)resErr, theID );
-			return false;
-		}
-		
-		DisposeMovie( theMovie );
-	#else	// !USE_QUICKTIME
-		
-		std::string		srcpath( mBasePath );
-		snprintf( fname, sizeof(fname), "snd_%d.bin", theID );
-		srcpath.append(1,'/');
-		srcpath.append(fname);
-		
-		FILE	*	theFile = fopen( srcpath.c_str(), "w" );
-		fwrite( *currSound, GetHandleSize(currSound), 1, theFile );
-		fclose( theFile );
-
-		std::string		fpath( mBasePath );
-		snprintf( fname, sizeof(fname), "snd_%d.wav", theID );
-		fpath.append(1,'/');
-		fpath.append(fname);
-		
-		snd2wav		converter( srcpath, fpath );
-		int	status = converter.convert();
-		if( status != 0 )
-		{
-			fprintf( stderr, "Error: Error %d converting 'snd ' %d to WAVE.\n", (int)status, theID );
-			return false;
-		}
-	#endif
-		
-		fprintf( mXmlFile, "\t<media>\n\t\t<id>%d</id>\n\t\t<name>", theID );
-		for( int n = 1; n <= name[0]; n++ )
-		{
-			char currCh = name[n];
-			if( currCh == '<' )
-				fprintf( mXmlFile, "&lt;" );
-			else if( currCh == '>' )
-				fprintf( mXmlFile, "&gt;" );
-			else if( currCh == '&' )
-				fprintf( mXmlFile, "&amp;" );
-			else
-				fprintf( mXmlFile, "%s", UniCharFromMacRoman(currCh) );
-		}
-		fprintf( mXmlFile, "</name>\n\t\t<file>snd_%d.aiff</file>\n\t\t<type>sound</type>\n\t</media>\n", theID );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	#if USE_QUICKTIME
-	ExitMovies();
-	#endif
-	
+	fprintf( stderr, "Warning: Sound resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
-#endif // MAC_CODE
 
-#if MAC_CODE
 bool	CStackFile::Load68000Resources()
 {
-	SInt16	numIcons = Count1Resources( 'XCMD' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currPicture = Get1IndResource( 'XCMD', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currPicture, &theID, &theType, name );
-		char		fname[256];
-		int			nameLen = name[0];
-		
-		// Pascal String -> C-String:
-		memmove( name, name +1, nameLen );
-		name[nameLen] = 0;
-		
-		fprintf( stderr, "Warning: Skipping code resource 'XCMD' %d \"%s\".\n", theID, name );
-
-		snprintf( fname, sizeof(fname), "XCMD_68k_%d_%s.data", theID, name );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'XCMD' %d.\n", fname, theID );
-			return false;
-		}
-		
-		fwrite( *currPicture, GetHandleSize( currPicture ), 1, theFile );
-		fclose( theFile );
-
-		fprintf( mXmlFile, "\t<externalcommand type=\"command\" platform=\"mac68k\" id=\"%d\" size=\"%ld\" name=\"%s\" file=\"%s\" />\n",
-							theID, GetHandleSize( currPicture ), name, fname );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
-	// Export all XFCN resources:
-	numIcons = Count1Resources( 'XFCN' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currPicture = Get1IndResource( 'XFCN', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currPicture, &theID, &theType, name );
-		char		fname[256];
-		int			nameLen = name[0];
-		
-		// Pascal String -> C-String:
-		memmove( name, name +1, nameLen );
-		name[nameLen] = 0;
-		
-		fprintf( stderr, "Warning: Skipping code resource 'XFCN' %d \"%s\".\n", theID, name );
-
-		snprintf( fname, sizeof(fname), "XFCN_68k_%d_%s.data", theID, name );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'XFCN' %d.\n", fname, theID );
-			return false;
-		}
-		
-		fwrite( *currPicture, GetHandleSize( currPicture ), 1, theFile );
-		fclose( theFile );
-
-		fprintf( mXmlFile, "\t<externalcommand type=\"function\" platform=\"mac68k\" id=\"%d\" size=\"%ld\" name=\"%s\" file=\"%s\" />\n",
-							theID, GetHandleSize( currPicture ), name, fname );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
+	fprintf( stderr, "Warning: 68K code resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
-#endif //MAC_CODE
 
-#if MAC_CODE
 bool	CStackFile::LoadPowerPCResources()
 {
-	// Export all xcmd resources:
-	SInt16	numIcons = Count1Resources( 'xcmd' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currPicture = Get1IndResource( 'xcmd', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currPicture, &theID, &theType, name );
-		char		fname[256];
-		int			nameLen = name[0];
-		
-		// Pascal String -> C-String:
-		memmove( name, name +1, nameLen );
-		name[nameLen] = 0;
-		
-		fprintf( stderr, "Warning: Skipping code resource 'xcmd' %d \"%s\".\n", theID, name );
-
-		snprintf( fname, sizeof(fname), "xcmd_ppc_%d_%s.data", theID, name );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'xcmd' %d.\n", fname, theID );
-			return false;
-		}
-		
-		fwrite( *currPicture, GetHandleSize( currPicture ), 1, theFile );
-		fclose( theFile );
-
-		fprintf( mXmlFile, "\t<externalcommand type=\"command\" platform=\"macppc\" id=\"%d\" size=\"%ld\" name=\"%s\" file=\"%s\" />\n",
-							theID, GetHandleSize( currPicture ), name, fname );
-		
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-	
-	// Export all XFCN resources:
-	numIcons = Count1Resources( 'xfcn' );
-	for( SInt16 x = 1; x <= numIcons; x++ )	// Get1IndResource uses 1-based indexes.
-	{
-		Handle		currPicture = Get1IndResource( 'xfcn', x );
-		ResID       theID = 0;
-		ResType		theType = 0L;
-		Str255		name;
-		GetResInfo( currPicture, &theID, &theType, name );
-		char		fname[256];
-		int			nameLen = name[0];
-		
-		// Pascal String -> C-String:
-		memmove( name, name +1, nameLen );
-		name[nameLen] = 0;
-		
-		fprintf( stderr, "Warning: Skipping code resource 'xfcn' %d \"%s\".\n", theID, name );
-
-		snprintf( fname, sizeof(fname), "xfcn_ppc_%d_%s.data", theID, name );
-		FILE*		theFile = fopen( fname, "w" );
-		if( !theFile )
-		{
-			fprintf( stderr, "Error: Couldn't create file '%s' for 'xfcn' %d.\n", fname, theID );
-			return false;
-		}
-		
-		fwrite( *currPicture, GetHandleSize( currPicture ), 1, theFile );
-		fclose( theFile );
-
-		fprintf( mXmlFile, "\t<externalcommand type=\"function\" platform=\"macppc\" id=\"%d\" size=\"%ld\" name=\"%s\" file=\"%s\" />\n",
-							theID, GetHandleSize( currPicture ), name, fname );
-			
-		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
-	}
-
+	fprintf( stderr, "Warning: PowerPC code resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 #endif //MAC_CODE
 
 
-bool	CStackFile::LoadFile( const std::string& fpath )
+bool	CStackFile::WriteJsonIndexes() const
 {
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator projectPool(1024, &baseAllocator);
+	JsonDocument project(&projectPool, 1024, &baseAllocator);
+	project.SetObject();
+	JsonPoolAllocator& projectAllocator = project.GetAllocator();
+
+	project.AddMember("format", json_string("stackimport.project", projectAllocator), projectAllocator);
+	project.AddMember("sourceFileName", json_string(mFileName, projectAllocator), projectAllocator);
+	project.AddMember("stackFile", json_string("stack_-1.json", projectAllocator), projectAllocator);
+	project.AddMember("userLevel", mUserLevel, projectAllocator);
+	project.AddMember("privateAccess", mStackPrivateAccess, projectAllocator);
+	project.AddMember("cantPeek", mStackCantPeek, projectAllocator);
+	project.AddMember("createdByVersion", json_string(mCreatedByVersion, projectAllocator), projectAllocator);
+	project.AddMember("lastCompactedVersion", json_string(mLastCompactedVersion, projectAllocator), projectAllocator);
+	project.AddMember("lastEditedVersion", json_string(mLastEditedVersion, projectAllocator), projectAllocator);
+	project.AddMember("firstEditedVersion", json_string(mFirstEditedVersion, projectAllocator), projectAllocator);
+
+	JsonValue outputs(rapidjson::kArrayType);
+	for(int n = 0; n < 40; n++)
+	{
+		char patternFile[256] = { 0 };
+		snprintf(patternFile, sizeof(patternFile), "PAT_%d.pbm", n + 1);
+		outputs.PushBack(json_output_ref("pattern", n + 1, patternFile, "STAK", mStackID, projectAllocator), projectAllocator);
+	}
+
+	JsonValue blockArray(rapidjson::kArrayType);
+	for(const auto& block : mBlockMap)
+	{
+		JsonValue blockObject(rapidjson::kObjectType);
+		blockObject.AddMember("type", json_string(block.first.mType, projectAllocator), projectAllocator);
+		blockObject.AddMember("id", block.first.mID, projectAllocator);
+		blockObject.AddMember("size", static_cast<uint64_t>(block.second.size()), projectAllocator);
+		blockObject.AddMember("understood", block.first == CStackBlockIdentifier("BKGD")
+			|| block.first == CStackBlockIdentifier("BMAP")
+			|| block.first == CStackBlockIdentifier("CARD")
+			|| block.first == CStackBlockIdentifier("FTBL")
+			|| block.first == CStackBlockIdentifier("LIST")
+			|| block.first == CStackBlockIdentifier("MAST")
+			|| block.first == CStackBlockIdentifier("PAGE")
+			|| block.first == CStackBlockIdentifier("PRFT")
+			|| block.first == CStackBlockIdentifier("PRNT")
+			|| block.first == CStackBlockIdentifier("PRST")
+			|| block.first == CStackBlockIdentifier("STAK")
+			|| block.first == CStackBlockIdentifier("STBL"),
+			projectAllocator);
+		if(block.first == CStackBlockIdentifier("BMAP"))
+		{
+			char bitmapFile[256] = { 0 };
+			snprintf(bitmapFile, sizeof(bitmapFile), "BMAP_%d.%s", block.first.mID, mDecodeGraphics ? "pbm" : "raw");
+			blockObject.AddMember("outputFile", json_string(bitmapFile, projectAllocator), projectAllocator);
+			outputs.PushBack(json_output_ref(mDecodeGraphics ? "bitmap" : "rawBitmap", block.first.mID, bitmapFile, "BMAP", block.first.mID, projectAllocator), projectAllocator);
+		}
+		else if(block.first == CStackBlockIdentifier("MAST"))
+			outputs.PushBack(json_output_ref("master", block.first.mID, "master_-1.json", "MAST", block.first.mID, projectAllocator), projectAllocator);
+		else if(block.first == CStackBlockIdentifier("PRNT"))
+			outputs.PushBack(json_output_ref("printSettings", block.first.mID, "printsettings.json", "PRNT", block.first.mID, projectAllocator), projectAllocator);
+		else if(block.first == CStackBlockIdentifier("PRST"))
+		{
+			char pageSetupFile[256] = { 0 };
+			snprintf(pageSetupFile, sizeof(pageSetupFile), "pagesetup_%d.json", block.first.mID);
+			outputs.PushBack(json_output_ref("pageSetup", block.first.mID, pageSetupFile, "PRST", block.first.mID, projectAllocator), projectAllocator);
+		}
+		else if(block.first == CStackBlockIdentifier("PRFT"))
+		{
+			char reportTemplateFile[256] = { 0 };
+			snprintf(reportTemplateFile, sizeof(reportTemplateFile), "reporttemplate_%d.json", block.first.mID);
+			outputs.PushBack(json_output_ref("reportTemplate", block.first.mID, reportTemplateFile, "PRFT", block.first.mID, projectAllocator), projectAllocator);
+		}
+		blockArray.PushBack(blockObject, projectAllocator);
+	}
+	project.AddMember("blocks", blockArray, projectAllocator);
+
+	JsonValue fontArray(rapidjson::kArrayType);
+	for(const auto& font : mFontTable)
+	{
+		JsonValue fontObject(rapidjson::kObjectType);
+		fontObject.AddMember("id", font.first, projectAllocator);
+		fontObject.AddMember("name", json_string(font.second, projectAllocator), projectAllocator);
+		fontArray.PushBack(fontObject, projectAllocator);
+	}
+	project.AddMember("fonts", fontArray, projectAllocator);
+
+	JsonValue styleArray(rapidjson::kArrayType);
+	for(const auto& styleEntry : mStyles)
+	{
+		const CStyleEntry& style = styleEntry.second;
+		JsonValue styleObject(rapidjson::kObjectType);
+		styleObject.AddMember("id", styleEntry.first, projectAllocator);
+		styleObject.AddMember("fontId", style.mFontID, projectAllocator);
+		styleObject.AddMember("fontName", json_string(style.mFontName, projectAllocator), projectAllocator);
+		styleObject.AddMember("fontSize", style.mFontSize, projectAllocator);
+		styleObject.AddMember("bold", style.mBold, projectAllocator);
+		styleObject.AddMember("italic", style.mItalic, projectAllocator);
+		styleObject.AddMember("underline", style.mUnderline, projectAllocator);
+		styleObject.AddMember("outline", style.mOutline, projectAllocator);
+		styleObject.AddMember("shadow", style.mShadow, projectAllocator);
+		styleObject.AddMember("condense", style.mCondense, projectAllocator);
+		styleObject.AddMember("extend", style.mExtend, projectAllocator);
+		styleObject.AddMember("group", style.mGroup, projectAllocator);
+		styleArray.PushBack(styleObject, projectAllocator);
+	}
+	project.AddMember("styles", styleArray, projectAllocator);
+	if(!mStyleSheetName.empty())
+		outputs.PushBack(json_output_ref("stylesheet", mStyleTableBlockID, mStyleSheetName.c_str(), "STBL", mStyleTableBlockID, projectAllocator), projectAllocator);
+	outputs.PushBack(json_output_ref("project", -1, "project.json", nullptr, -1, projectAllocator), projectAllocator);
+	outputs.PushBack(json_output_ref("stack", mStackID, "stack_-1.json", "STAK", mStackID, projectAllocator), projectAllocator);
+	for(const auto& layer : mLayerSummaries)
+		outputs.PushBack(json_output_ref(layer.isCard ? "card" : "background", layer.id, layer.file.c_str(), layer.isCard ? "CARD" : "BKGD", layer.id, projectAllocator), projectAllocator);
+	project.AddMember("outputs", outputs, projectAllocator);
+
+	JsonStringBuffer projectBuffer(&baseAllocator);
+	JsonWriter projectWriter(projectBuffer, &baseAllocator);
+	project.Accept(projectWriter);
+	const std::string projectPath = OutputPath("project.json");
+	if(!write_json_file(projectPath, projectBuffer.GetString(), projectBuffer.GetSize()))
+		return false;
+
+	JsonPoolAllocator stackPool(1024, &baseAllocator);
+	JsonDocument stack(&stackPool, 1024, &baseAllocator);
+	stack.SetObject();
+	JsonPoolAllocator& stackAllocator = stack.GetAllocator();
+	stack.AddMember("format", json_string("stackimport.stack", stackAllocator), stackAllocator);
+	stack.AddMember("id", mStackID, stackAllocator);
+	stack.AddMember("name", json_string(mFileName, stackAllocator), stackAllocator);
+	stack.AddMember("firstCardId", mFirstCardID, stackAllocator);
+	stack.AddMember("listBlockId", mListBlockID, stackAllocator);
+	stack.AddMember("fontTableBlockId", mFontTableBlockID, stackAllocator);
+	stack.AddMember("styleTableBlockId", mStyleTableBlockID, stackAllocator);
+	stack.AddMember("cardBlockSize", mCardBlockSize, stackAllocator);
+	stack.AddMember("cardCount", mStackCardCount, stackAllocator);
+	stack.AddMember("cardWidth", mCardWidth, stackAllocator);
+	stack.AddMember("cardHeight", mCardHeight, stackAllocator);
+	stack.AddMember("cantModify", mStackCantModify, stackAllocator);
+	stack.AddMember("cantDelete", mStackCantDelete, stackAllocator);
+	stack.AddMember("cantAbort", mStackCantAbort, stackAllocator);
+	stack.AddMember("script", json_string(mStackScript, stackAllocator), stackAllocator);
+	JsonValue pages(rapidjson::kArrayType);
+	for(const auto& pageSummary : mPageSummaries)
+	{
+		JsonValue page(rapidjson::kObjectType);
+		page.AddMember("id", pageSummary.id, stackAllocator);
+		page.AddMember("entryCount", pageSummary.entryCount, stackAllocator);
+		JsonValue cards(rapidjson::kArrayType);
+		for(int32_t cardID : pageSummary.cardIDs)
+			cards.PushBack(cardID, stackAllocator);
+		page.AddMember("cardIds", cards, stackAllocator);
+		pages.PushBack(page, stackAllocator);
+	}
+	stack.AddMember("pages", pages, stackAllocator);
+	JsonValue layers(rapidjson::kArrayType);
+	for(const auto& layer : mLayerSummaries)
+	{
+		JsonValue layerObject(rapidjson::kObjectType);
+		layerObject.AddMember("kind", json_string(layer.isCard ? "card" : "background", stackAllocator), stackAllocator);
+		layerObject.AddMember("id", layer.id, stackAllocator);
+		layerObject.AddMember("file", json_string(layer.file, stackAllocator), stackAllocator);
+		layerObject.AddMember("name", json_string(layer.name, stackAllocator), stackAllocator);
+		layerObject.AddMember("partCount", layer.partCount, stackAllocator);
+		layerObject.AddMember("contentCount", layer.contentCount, stackAllocator);
+		layerObject.AddMember("scriptBytes", static_cast<uint64_t>(layer.scriptBytes), stackAllocator);
+		layerObject.AddMember("textBytes", static_cast<uint64_t>(layer.textBytes), stackAllocator);
+		if(layer.isCard)
+		{
+			layerObject.AddMember("owner", layer.owner, stackAllocator);
+			layerObject.AddMember("marked", (layer.flags & 16) != 0, stackAllocator);
+		}
+		layers.PushBack(layerObject, stackAllocator);
+	}
+	stack.AddMember("layers", layers, stackAllocator);
+
+	JsonStringBuffer stackBuffer(&baseAllocator);
+	JsonWriter stackWriter(stackBuffer, &baseAllocator);
+	stack.Accept(stackWriter);
+	const std::string stackPath = OutputPath("stack_-1.json");
+	return write_json_file(stackPath, stackBuffer.GetString(), stackBuffer.GetSize());
+}
+
+
+bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPackagePath )
+{
+	if( outputPackagePath.empty() )
+	{
+		fprintf( stderr, "Error: Missing output package path.\n" );
+		return false;
+	}
+
 	size_t		slashPos = fpath.rfind('/');
 	if( slashPos == std::string::npos )
 		slashPos = 0;
@@ -2017,32 +1437,14 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 		return false;
 	}
 	
-	std::string				packagePath( fpath );
-	std::string::size_type	pos = packagePath.rfind( std::string(".stak") );
-	if( pos != std::string::npos )
-		packagePath.resize( pos, 'X' );
-	packagePath.append( ".xstk" );
-	mkdir( packagePath.c_str(), 0777 );
-	chdir( packagePath.c_str() );
+	std::string				packagePath( outputPackagePath );
+	if( stackimport_internal_make_directory( packagePath.c_str() ) != 0 && errno != EEXIST )
+	{
+		fprintf( stderr, "Error: Couldn't create output package directory '%s'\n", packagePath.c_str() );
+		return false;
+	}
 	
 	mBasePath = packagePath;
-	
-	packagePath.append( "/project.xml" );
-	mXmlFile = fopen( packagePath.c_str(), "w" );
-	if( !mXmlFile )
-	{
-		fprintf( stderr, "Error: Couldn't create project file at '%s'\n", packagePath.c_str() );
-		return false;
-	}
-	
-	std::string	stackPath = mBasePath;
-	stackPath.append( "/stack_-1.xml" );
-	mStackXmlFile = fopen( stackPath.c_str(), "w" );
-	if( !mXmlFile )
-	{
-		fprintf( stderr, "Error: Couldn't create stack file at '%s'\n", stackPath.c_str() );
-		return false;
-	}
 		
   #if MAC_CODE
 	FSRef		fileRef;
@@ -2066,70 +1468,83 @@ bool	CStackFile::LoadFile( const std::string& fpath )
   #endif //MAC_CODE
 	
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Output package name is '%s'\n", packagePath.c_str() );
-	
-	fprintf( mXmlFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n"
-					"<!DOCTYPE project PUBLIC \"-//Apple, Inc.//DTD project V 2.0//EN\" \"\" >\n"
-					"<project>\n" );
-	
-	fprintf( mStackXmlFile, "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n"
-					"<!DOCTYPE stack PUBLIC \"-//Apple, Inc.//DTD stack V 2.0//EN\" \"\" >\n" );
-	fprintf( mStackXmlFile, "<stack>\n\t<name>" );
-	
-	for( int x = 0; mFileName[x] != 0; x++ )
-	{
-		char currCh = mFileName[x];
-		if( currCh == '<' )
-			fprintf( mStackXmlFile, "&lt;" );
-		else if( currCh == '>' )
-			fprintf( mStackXmlFile, "&gt;" );
-		else if( currCh == '&' )
-			fprintf( mStackXmlFile, "&amp;" );
-		else
-			fputc( currCh, mStackXmlFile );	// mFileName comes from POSIX, should already be UTF8, is *definitely* not MacRoman.
-	}
-	fprintf( mStackXmlFile, "</name>\n" );
+		fprintf( stdout, "Status: Output package name is '%s'\n", mBasePath.c_str() );
 	
 	char		vBlockType[5] = { 0 };
-	u_int32_t	vBlockSize = 0;
+	uint32_t	vBlockSize = 0;
 	int32_t		vBlockID = 0;
 	int			numBlocks = 0;
+	bool		success = true;
 	
 	// Read all blocks so we can random-access them. Yes, I know there are more
 	//	efficient ways, but honestly, who cares?
 	while( true )
 	{
+		memset( vBlockType, 0, sizeof(vBlockType) );
 		theFile.read( (char*) &vBlockSize, sizeof(vBlockSize) );
 		if( theFile.eof() )	// Couldn't read because we hit end of file.
 			break;
+		if( !theFile )
+		{
+			fprintf( stderr, "Error: Could not read complete block size.\n" );
+			success = false;
+			break;
+		}
 		
 		vBlockSize = ntohl(vBlockSize);
 		theFile.read( vBlockType, 4 );
 		theFile.read( (char*) &vBlockID, sizeof(vBlockID) );
+		if( !theFile )
+		{
+			fprintf( stderr, "Error: Could not read complete block header.\n" );
+			success = false;
+			break;
+		}
 		vBlockID = ntohl(vBlockID);
 		
 		numBlocks++;
+		if( vBlockSize < 12 )
+		{
+			fprintf( stderr, "Error: Invalid block size %u for '%4s' #%d.\n", vBlockSize, vBlockType, vBlockID );
+			success = false;
+			break;
+		}
 		
-		if( strcmp(vBlockType,"TAIL") == 0 && vBlockID == 0xffffffff )	// End marker block?
+		if( strcmp(vBlockType,"TAIL") == 0 && vBlockID == -1 )	// End marker block?
 			break;
 		else if( strcmp(vBlockType,"FREE") == 0 )	// Not a free, reusable block?
 		{
 			if( mStatusMessages )
-				fprintf( stdout, "Status: Skipping '%4s' #%d (%d bytes)\n", vBlockType, vBlockID, vBlockSize );
+				fprintf( stdout, "Status: Skipping '%4s' #%d (%u bytes)\n", vBlockType, vBlockID, vBlockSize );
 			theFile.ignore( vBlockSize -12 );	// Skip rest of block data.
+			if( !theFile )
+			{
+				fprintf( stderr, "Error: Could not skip complete 'FREE' block #%d.\n", vBlockID );
+				success = false;
+				break;
+			}
 		}
 		else
 		{
 			CBuf		blockData( vBlockSize -12 );
 			theFile.read( blockData.buf(0,vBlockSize -12), vBlockSize -12 );
+			if( !theFile )
+			{
+				fprintf( stderr, "Error: Could not read complete '%4s' block #%d.\n", vBlockType, vBlockID );
+				success = false;
+				break;
+			}
 			CStackBlockIdentifier	theTypeAndID(vBlockType,vBlockID);
 			mBlockMap[theTypeAndID] = blockData;
-//			if( mStatusMessages )
-//				fprintf( stdout, "Status: Located block %s %d - (%lu)\n", vBlockType, vBlockID, mBlockMap.size() );
+	//			if( mStatusMessages )
+	//				fprintf( stdout, "Status: Located block %s %d - (%lu)\n", vBlockType, vBlockID, mBlockMap.size() );
 		}
 	}
 	
-	fprintf( stdout, "Status: Found %d blocks in file.\n", numBlocks);
+	if( mStatusMessages )
+		fprintf( stdout, "Status: Found %d blocks in file.\n", numBlocks);
+	if( !success )
+		return false;
 	
 	mMaxProgress = mBlockMap.size();
 	mCurrentProgress = 0;
@@ -2142,7 +1557,8 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 						+Count1Resources( 'XCMD' ) +Count1Resources( 'XFCN' ) +Count1Resources( 'xcmd' )
 						+Count1Resources( 'xfcn' );
 		mMaxProgress += numResources;
-		fprintf( stdout, "Status: Found %d resources in file.\n", numResources);
+		if( mStatusMessages )
+			fprintf( stdout, "Status: Found %d resources in file.\n", numResources);
 	}
   #endif // MAC_CODE
 	if( mProgressMessages )
@@ -2155,7 +1571,7 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 		fprintf( stderr, "Error: Couldn't find stack block.\n" );
 		return false;
 	}
-	bool	success = LoadStackBlock( -1, stackItty->second );	// It's always -1 in HC, but in the XML format, we may want to support other IDs.
+	success = LoadStackBlock( -1, stackItty->second );
 	if( success )
 		success = LoadFontTable( mFontTableBlockID, mBlockMap[CStackBlockIdentifier("FTBL",mFontTableBlockID)] );
 	if( success )
@@ -2173,32 +1589,28 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 				CBuf&		blockData = currBlockItty->second;
 				if( mStatusMessages )
 					fprintf( stdout, "Status: Processing 'BMAP' #%d %X (%lu bytes)\n", blockID, blockID, blockData.size() );
-				fprintf( mXmlFile, "\t<!-- Processed 'BMAP' #%d (%lu bytes) -->\n", blockID, blockData.size() );
 				
-				char		fname[256];
-				sprintf( fname, "BMAP_%u.pbm", blockID );
+				char		fname[256] = { 0 };
 				
 				if( mDecodeGraphics )
 				{
-					char		fname[256];
-					sprintf( fname, "BMAP_%u.pbm", blockID );
+					snprintf( fname, sizeof(fname), "BMAP_%u.pbm", blockID );
 					
 					picture		thePicture;
 					woba_decode( thePicture, blockData.buf() );
 					
-					thePicture.writebitmapandmasktopbm( fname );
+					thePicture.writebitmapandmasktopbm( OutputPath(fname).c_str() );
 				}
 				else
 				{
-					char		fname[256];
-					sprintf( fname, "BMAP_%u.raw", blockID );
+					snprintf( fname, sizeof(fname), "BMAP_%u.raw", blockID );
 					
-					FILE*	theFile = fopen( fname, "w" );
-					if( theFile )
+					FILE*	rawFile = fopen( OutputPath(fname).c_str(), "w" );
+					if( rawFile )
 					{
-						if( blockData.size() != fwrite( blockData.buf(), 1, blockData.size(), theFile ) )
+						if( blockData.size() != fwrite( blockData.buf(), 1, blockData.size(), rawFile ) )
 							fprintf( stderr, "Error: Writing un-decoded BMAP #%u.\n", blockID );
-						fclose( theFile );
+						fclose( rawFile );
 					}
 					else
 						fprintf( stderr, "Error: Creating file for un-decoded BMAP #%u.\n", blockID );
@@ -2263,14 +1675,12 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 	}
   #endif // MAC_CODE
 	
-	fprintf( mXmlFile, "</project>\n" );
-	if( mXmlFile != stdout )
-		fclose( mXmlFile );
+	if( success && !WriteJsonIndexes() )
+	{
+		fprintf( stderr, "Error: Couldn't write RapidJSON output indexes.\n" );
+		success = false;
+	}
 
-	fprintf( mStackXmlFile, "</stack>\n" );
-	if( mStackXmlFile != stdout )
-		fclose( mStackXmlFile );
-	
   #if MAC_CODE
 	if( resErr != fnfErr && resErr != noErr )
 	{
@@ -2279,5 +1689,5 @@ bool	CStackFile::LoadFile( const std::string& fpath )
 	}
   #endif // MAC_CODE
 	
-	return true;
+	return success;
 }

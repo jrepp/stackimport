@@ -8,7 +8,30 @@
  */
 
 #include "CStackFile.h"
+#include "Mac68kDisassembly.h"
+#include "stackimport_c.h"
 #include <assert.h>
+#include <cstdlib>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+namespace {
+
+void* test_allocate(size_t size, size_t alignment, void*)
+{
+	void* ptr = nullptr;
+	if(posix_memalign(&ptr, alignment, size) != 0)
+		return nullptr;
+	return ptr;
+}
+
+void test_deallocate(void* ptr, void*)
+{
+	free(ptr);
+}
+
+}
 
 
 void	RunTests()
@@ -62,4 +85,41 @@ void	RunTests()
 	
 	assert( (b > wildcardNo) == false );
 	assert( wildcardNo > b );
+
+	assert(stackimport_context_size() <= 4096);
+	assert(stackimport_api_version() == STACKIMPORT_API_VERSION);
+	alignas(std::max_align_t) unsigned char storage[4096] = {};
+	stackimport_context* context = nullptr;
+	assert(stackimport_context_init(storage, sizeof(storage), &context) == STACKIMPORT_STATUS_OK);
+	stackimport_context_deinit(context);
+
+	stackimport_allocator allocator = {};
+	stackimport_allocator_init(&allocator);
+	allocator.allocate = test_allocate;
+	allocator.deallocate = test_deallocate;
+	assert(stackimport_context_create(&allocator, &context) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options options = {};
+	stackimport_import_options_init(&options);
+	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_INVALID_ARGUMENT);
+	options.input_path = "/tmp/missing-stack";
+	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_INVALID_ARGUMENT);
+	options.output_package_path = "/tmp/missing-stack.xstk";
+	options.flags = 1u << 31;
+	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_UNSUPPORTED_OPTION);
+	stackimport_context_destroy(context);
+
+	const uint8_t codeBytes[] = {0x4E, 0x75, 0xA9, 0xF0, 0x12};
+	const std::span<const uint8_t> code(codeBytes, sizeof(codeBytes));
+	const auto fullDisassembly = stackimport::DisassembleMac68kCodeResource(code, 0, 4, 0x1000);
+	assert(fullDisassembly.ok);
+	assert(fullDisassembly.text == "00001000: dc.w $4E75\n00001002: dc.w $A9F0\n");
+
+	const auto slicedDisassembly = stackimport::DisassembleMac68kCodeResource(code, 2, 3, 0x200);
+	assert(slicedDisassembly.ok);
+	assert(slicedDisassembly.text == "00000200: dc.w $A9F0\n00000202: dc.b $12\n");
+
+	const auto badStart = stackimport::DisassembleMac68kCodeResource(code, 6, 0, 0);
+	assert(!badStart.ok);
+	const auto badSize = stackimport::DisassembleMac68kCodeResource(code, 4, 2, 0);
+	assert(!badSize.ok);
 }

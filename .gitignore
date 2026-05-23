@@ -20,7 +20,10 @@
 *.pbxuser
 *.mode1v3
 build
+build-*/
+build-cmake/
 import-runs
+vendor/_downloads
 xcuserdata
 *.xcworkspacedata
 *.xcworkspace

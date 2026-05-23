@@ -30,6 +30,7 @@
 #include <cstring>
 #include <fstream>
 #include <algorithm>
+#include <climits>
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"
@@ -89,14 +90,19 @@ static void bounded_fill(char * dest, int destLength, int destStart, char ch, in
 	memset( dest +destStart, ch, count );
 }
 
-int __bitmap_row_width(int width, int height, int depth)
+int __bitmap_row_width(int width, int, int depth)
 {
+	if( width <= 0 || depth <= 0 || width > (INT_MAX / depth) )
+		return 0;
 	return ( ((width * depth) / 8) + ( ((width * depth) % 8)?1:0 ) );
 }
 
 int __bitmap_size(int width, int height, int depth)
 {
-	return __bitmap_row_width(width,height,depth) * height;
+	int rowWidth = __bitmap_row_width(width,height,depth);
+	if( height <= 0 || rowWidth <= 0 || height > (INT_MAX / rowWidth) )
+		return 0;
+	return rowWidth * height;
 }
 
 unsigned int __pow2(int p)
@@ -125,51 +131,32 @@ unsigned int __pow21(int p)
 }
 
 picture::picture(void)
+	: width(0), height(0), depth(0), greyscalemask(false),
+	rowlength(0), maskrowlength(0), bitmaplength(0), bitmap(nullptr),
+	masklength(0), mask(nullptr)
 {
-	width = 0;
-	height = 0;
-	depth = 0;
-	greyscalemask = false;
-	rowlength = 0;
-	maskrowlength = 0;
-	bitmaplength = 0;
-	masklength = 0;
 }
 
 picture::picture(int w, int h, int d, bool greymask)
+	: width(0), height(0), depth(0), greyscalemask(false),
+	rowlength(0), maskrowlength(0), bitmaplength(0), bitmap(nullptr),
+	masklength(0), mask(nullptr)
 {
-	width = w;
-	height = h;
-	depth = d;
-	greyscalemask = greymask;
-	rowlength = __bitmap_row_width(w,h,d);
-	maskrowlength = __bitmap_row_width(w,h,greymask?8:1);
-	bitmaplength = __bitmap_size(w,h,d);
-	masklength = __bitmap_size(w,h,greymask?8:1);
-	bitmap = new char[bitmaplength];
-	mask = new char[masklength];
-	memset(bitmap,0,bitmaplength);
-	memset(mask,0xFF,masklength);
+	reinit( w, h, d, greymask );
 }
 
 picture::~picture(void)
 {
-	if (bitmaplength) {
-		delete [] bitmap;
-	}
-	if (masklength) {
-		delete [] mask;
-	}
+	delete [] bitmap;
+	delete [] mask;
 }
 
 void picture::reinit(int w, int h, int d, bool greymask)
 {
-	if (bitmaplength) {
-		delete [] bitmap;
-	}
-	if (masklength) {
-		delete [] mask;
-	}
+	delete [] bitmap;
+	delete [] mask;
+	bitmap = nullptr;
+	mask = nullptr;
 	width = w;
 	height = h;
 	depth = d;
@@ -178,10 +165,16 @@ void picture::reinit(int w, int h, int d, bool greymask)
 	maskrowlength = __bitmap_row_width(w,h,greymask?8:1);
 	bitmaplength = __bitmap_size(w,h,d);
 	masklength = __bitmap_size(w,h,greymask?8:1);
+	if( bitmaplength <= 0 || masklength <= 0 )
+	{
+		width = height = depth = 0;
+		rowlength = maskrowlength = bitmaplength = masklength = 0;
+		return;
+	}
 	bitmap = new char[bitmaplength];
 	mask = new char[masklength];
-	memset(bitmap,0,bitmaplength);
-	memset(mask,0xFF,masklength);
+	memset(bitmap, 0, bitmaplength);
+	memset(mask, 0xFF, masklength);
 }
 
 int picture::gwidth(void) { return width; }
@@ -196,7 +189,7 @@ int picture::coordbyteoffset(int x, int y)
 	return (rowlength * y) + ((x * depth) / 8);
 }
 
-unsigned int picture::coordbitmask( int x, int y )
+unsigned int picture::coordbitmask( int x, int )
 {
 	int				i;
 	unsigned int	m = __pow21(depth);
@@ -225,7 +218,7 @@ int picture::maskcoordbyteoffset(int x, int y)
 	return (maskrowlength * y) + (greyscalemask?x:(x/8));
 }
 
-unsigned int picture::maskcoordbitmask(int x, int y)
+unsigned int picture::maskcoordbitmask(int x, int)
 {
 	unsigned int m = greyscalemask ? 0xFF : 1;
 	if( !greyscalemask )
@@ -404,6 +397,8 @@ void	picture::debugprint()
 
 void picture::copyrow(int dest, int src)
 {
+	if( dest < 0 || src < 0 || dest >= height || src >= height || rowlength <= 0 )
+		return;
 	memcpy(bitmap + coordbyteoffset(0,dest),
 	       bitmap + coordbyteoffset(0,src),
 	       rowlength);
@@ -411,6 +406,8 @@ void picture::copyrow(int dest, int src)
 
 void picture::maskcopyrow(int dest, int src)
 {
+	if( dest < 0 || src < 0 || dest >= height || src >= height || maskrowlength <= 0 )
+		return;
 	memcpy(mask + maskcoordbyteoffset(0,dest),
 	       mask + maskcoordbyteoffset(0,src),
 	       maskrowlength);
@@ -426,6 +423,7 @@ unsigned int picture::dupcolor(unsigned int c)
 	int i;
 	unsigned int f,p,d;
 	
+	if( depth <= 0 ) { return 0; }
 	if (depth >= 32) { return c; }
 	
 	f = (c & __pow21(depth));
@@ -441,6 +439,8 @@ unsigned int picture::dupcolor(unsigned int c)
 
 unsigned int picture::getpixel(int x, int y)
 {
+	if( !bitmap || x < 0 || y < 0 || x >= width || y >= height )
+		return 0;
 	int byteIndex = coordbyteoffset(x,y);
 	int j;
 	if (depth < 8)
@@ -468,6 +468,8 @@ unsigned int picture::getpixel(int x, int y)
 
 void picture::setpixel(int x, int y, int c)
 {
+	if( !bitmap || x < 0 || y < 0 || x >= width || y >= height )
+		return;
 	int i = coordbyteoffset(x,y);
 	unsigned int d = dupcolor(c);
 	unsigned int f = fixcolor(c);
@@ -488,6 +490,8 @@ void picture::setpixel(int x, int y, int c)
 
 unsigned int picture::maskgetpixel(int x, int y)
 {
+	if( !mask || x < 0 || y < 0 || x >= width || y >= height )
+		return 0;
 	int i = maskcoordbyteoffset(x,y);
 	if (greyscalemask) {
 		return (unsigned char)mask[i];
@@ -499,6 +503,8 @@ unsigned int picture::maskgetpixel(int x, int y)
 
 void picture::masksetpixel(int x, int y, int c)
 {
+	if( !mask || x < 0 || y < 0 || x >= width || y >= height )
+		return;
 	int i = maskcoordbyteoffset(x,y);
 	unsigned int d = dupcolor(c);
 	if (greyscalemask) {
@@ -511,7 +517,9 @@ void picture::masksetpixel(int x, int y, int c)
 
 void picture::__directcopybmptomask(void)
 {
-	memcpy(mask, bitmap, masklength);
+	if( !mask || !bitmap )
+		return;
+	memcpy(mask, bitmap, std::min(masklength, bitmaplength));
 }
 
 void picture::bwrite(fstream fp)
@@ -586,7 +594,7 @@ void picture::writefile(char * fn)
 }
 
 
-void picture::writebitmapandmasktopbm(char * fn)
+void picture::writebitmapandmasktopbm(const char * fn)
 {
 	fstream fp(fn, ios::out|ios::binary|ios::trunc);
 	char		str[256];
@@ -606,7 +614,7 @@ void picture::writebitmapandmasktopbm(char * fn)
 }
 
 
-void picture::writebitmaptopbm(char * fn)
+void picture::writebitmaptopbm(const char * fn)
 {
 	fstream fp(fn, ios::out|ios::binary|ios::trunc);
 	char		str[256];
@@ -620,7 +628,7 @@ void picture::writebitmaptopbm(char * fn)
 }
 
 
-void picture::writemasktopbm(char * fn)
+void picture::writemasktopbm(const char * fn)
 {
 	fstream fp(fn, ios::out|ios::binary|ios::trunc);
 	char		str[256];

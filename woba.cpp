@@ -37,7 +37,7 @@
 #endif
 #include "picture.h"
 #include "woba.h"
-#include <arpa/inet.h>
+#include <cstdint>
 #include "CBuf.h"
 #include "byteutils.h"
 
@@ -48,6 +48,22 @@ using namespace std;
 inline int __min(int x, int y)
 {
 	return (x > y) ? y : x;
+}
+
+static int16_t ReadBEInt16(const char* data, size_t pos)
+{
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data + pos);
+	return static_cast<int16_t>((static_cast<uint16_t>(bytes[0]) << 8) | bytes[1]);
+}
+
+static int32_t ReadBEInt32(const char* data, size_t pos)
+{
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data + pos);
+	uint32_t value = (static_cast<uint32_t>(bytes[0]) << 24)
+		| (static_cast<uint32_t>(bytes[1]) << 16)
+		| (static_cast<uint32_t>(bytes[2]) << 8)
+		| static_cast<uint32_t>(bytes[3]);
+	return static_cast<int32_t>(value);
 }
 
 
@@ -68,13 +84,13 @@ void woba_decode(picture & p, char * woba)
 		maskBoundRectRight = 0; /* mask bounding rect */
 	int pictureBoundRectTop = 0,
 		pictureBoundRectLeft = 0,
-		pictureBoundRectBottom = 0,
 		pictureBoundRectRight = 0; /* picture bounding rect */
+	[[maybe_unused]] int pictureBoundRectBottom = 0;
 	int maskDataLength = 0,
 		pictureDataLength = 0; /* mask and picture data length */
 	
 	int bx = 0, bx8 = 0, x = 0, y = 0;
-	int rowwidth = 0, rowwidth8 = 0, height = 0;
+	int rowwidth = 0, rowwidth8 = 0;
 	int dx = 0;
 	int dy = 0;
 	int repeat = 1;
@@ -101,23 +117,21 @@ void woba_decode(picture & p, char * woba)
 		52 64 - start of mask (or bitmap if mask length == 0)
 	*/
 		#define MASK_START	52
-		#define INT16_AT(woba,pos)	ntohs(*(u_int16_t*)(woba+pos))
-		#define INT32_AT(woba,pos)	ntohl(*(u_int32_t*)(woba+pos))
 		
-		totalRectTop = INT16_AT(woba,12);
-		totalRectLeft = INT16_AT(woba,14);
-		totalRectBottom = INT16_AT(woba,16);
-		totalRectRight = INT16_AT(woba,18);
-		maskBoundRectTop = INT16_AT(woba,20);
-		maskBoundRectLeft = INT16_AT(woba,22);
-		maskBoundRectBottom = INT16_AT(woba,24);
-		maskBoundRectRight = INT16_AT(woba,26);
-		pictureBoundRectTop = INT16_AT(woba,28);
-		pictureBoundRectLeft = INT16_AT(woba,30);
-		pictureBoundRectBottom = INT16_AT(woba,32);
-		pictureBoundRectRight = INT16_AT(woba,34);
-		maskDataLength = INT32_AT(woba,44);
-		pictureDataLength = INT32_AT(woba,48);
+		totalRectTop = ReadBEInt16(woba,12);
+		totalRectLeft = ReadBEInt16(woba,14);
+		totalRectBottom = ReadBEInt16(woba,16);
+		totalRectRight = ReadBEInt16(woba,18);
+		maskBoundRectTop = ReadBEInt16(woba,20);
+		maskBoundRectLeft = ReadBEInt16(woba,22);
+		maskBoundRectBottom = ReadBEInt16(woba,24);
+		maskBoundRectRight = ReadBEInt16(woba,26);
+		pictureBoundRectTop = ReadBEInt16(woba,28);
+		pictureBoundRectLeft = ReadBEInt16(woba,30);
+		pictureBoundRectBottom = ReadBEInt16(woba,32);
+		pictureBoundRectRight = ReadBEInt16(woba,34);
+		maskDataLength = ReadBEInt32(woba,44);
+		pictureDataLength = ReadBEInt32(woba,48);
 		
 		#if DEBUGOUTPUT
 		std::cout << "Total Rect: " << totalRectLeft << "," << totalRectTop << "," << totalRectRight << "," << totalRectBottom << endl;
@@ -140,13 +154,12 @@ void woba_decode(picture & p, char * woba)
 			y = maskBoundRectTop;
 			rowwidth8 = ( (maskBoundRectRight & 0x1F)?((maskBoundRectRight | 0x1F)+1):maskBoundRectRight ) - (maskBoundRectLeft & (~ 0x1F));
 			rowwidth = rowwidth8 / 8;
-			height = maskBoundRectBottom - maskBoundRectTop;
 			dx = dy = 0;
 			repeat = 1;
 			
 			// Build a 50% grey checkerboard pattern:
-			patternbuffer[0] = patternbuffer[2] = patternbuffer[4] = patternbuffer[6] = 170;	// Even rows: 170 == 10101010 binary.
-			patternbuffer[1] = patternbuffer[3] = patternbuffer[5] = patternbuffer[7] = 85;		// Odd rows:   85 == 01010101 binary.
+			patternbuffer[0] = patternbuffer[2] = patternbuffer[4] = patternbuffer[6] = static_cast<char>(0xAA);	// Even rows: 170 == 10101010 binary.
+			patternbuffer[1] = patternbuffer[3] = patternbuffer[5] = patternbuffer[7] = static_cast<char>(0x55);	// Odd rows:   85 == 01010101 binary.
 			
 			// Make both buffers large enough to hold a full row of pixels:
 			buffer1.resize(rowwidth);
@@ -233,7 +246,7 @@ void woba_decode(picture & p, char * woba)
 					{
 						for (k=numberOfZeroBytes; k>0; k--)
 						{
-							if( x < buffer1.size() )
+							if( x >= 0 && static_cast<size_t>(x) < buffer1.size() )
 								buffer1[x] = 0;
 							x++;
 						}
@@ -441,13 +454,12 @@ void woba_decode(picture & p, char * woba)
 			y = pictureBoundRectTop;
 			rowwidth8 = ( (pictureBoundRectRight & 0x1F)?((pictureBoundRectRight | 0x1F)+1):pictureBoundRectRight ) - (pictureBoundRectLeft & (~ 0x1F));
 			rowwidth = rowwidth8/8;
-			height = pictureBoundRectBottom - pictureBoundRectTop;
 			dx = dy = 0;
 			repeat = 1;
 			
 			// Build a 50% grey pattern, even rows are 10101010 and odd rows are 01010101:
-			patternbuffer[0] = patternbuffer[2] = patternbuffer[4] = patternbuffer[6] = 170;
-			patternbuffer[1] = patternbuffer[3] = patternbuffer[5] = patternbuffer[7] = 85;
+			patternbuffer[0] = patternbuffer[2] = patternbuffer[4] = patternbuffer[6] = static_cast<char>(0xAA);
+			patternbuffer[1] = patternbuffer[3] = patternbuffer[5] = patternbuffer[7] = static_cast<char>(0x55);
 			
 			buffer1.resize(rowwidth);
 			buffer2.resize(rowwidth);
