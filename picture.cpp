@@ -37,6 +37,21 @@
 
 using namespace std;
 
+static size_t size_from_nonnegative_int(int value)
+{
+	return value > 0 ? static_cast<size_t>(value) : 0;
+}
+
+static std::streamsize stream_size_from_nonnegative_int(int value)
+{
+	return value > 0 ? static_cast<std::streamsize>(value) : 0;
+}
+
+static char char_from_byte_value(unsigned int value)
+{
+	return static_cast<char>(static_cast<unsigned char>(value));
+}
+
 static void bounded_copy_in(char * dest, int destLength, int destStart, const char * src, int count)
 {
 	if( !dest || !src || count <= 0 || destLength <= 0 )
@@ -51,14 +66,14 @@ static void bounded_copy_in(char * dest, int destLength, int destStart, const ch
 	if( count <= 0 || destStart >= destLength )
 		return;
 	count = std::min( count, destLength -destStart );
-	memcpy( dest +destStart, src +srcStart, count );
+	memcpy( dest +destStart, src +srcStart, static_cast<size_t>(count) );
 }
 
 static void bounded_copy_out(char * dest, int destLength, const char * src, int srcLength, int srcStart, int count)
 {
 	if( !dest || count <= 0 || destLength <= 0 )
 		return;
-	memset( dest, 0, std::min( count, destLength ) );
+	memset( dest, 0, static_cast<size_t>(std::min( count, destLength )) );
 	if( !src || srcLength <= 0 )
 		return;
 	int destStart = 0;
@@ -72,7 +87,7 @@ static void bounded_copy_out(char * dest, int destLength, const char * src, int 
 		return;
 	count = std::min( count, srcLength -srcStart );
 	count = std::min( count, destLength -destStart );
-	memcpy( dest +destStart, src +srcStart, count );
+	memcpy( dest +destStart, src +srcStart, static_cast<size_t>(count) );
 }
 
 static void bounded_fill(char * dest, int destLength, int destStart, char ch, int count)
@@ -87,7 +102,7 @@ static void bounded_fill(char * dest, int destLength, int destStart, char ch, in
 	if( count <= 0 || destStart >= destLength )
 		return;
 	count = std::min( count, destLength -destStart );
-	memset( dest +destStart, ch, count );
+	memset( dest +destStart, ch, static_cast<size_t>(count) );
 }
 
 int __bitmap_row_width(int width, int, int depth)
@@ -171,10 +186,10 @@ void picture::reinit(int w, int h, int d, bool greymask)
 		rowlength = maskrowlength = bitmaplength = masklength = 0;
 		return;
 	}
-	bitmap = new char[bitmaplength];
-	mask = new char[masklength];
-	memset(bitmap, 0, bitmaplength);
-	memset(mask, 0xFF, masklength);
+	bitmap = new char[static_cast<size_t>(bitmaplength)];
+	mask = new char[static_cast<size_t>(masklength)];
+	memset(bitmap, 0, static_cast<size_t>(bitmaplength));
+	memset(mask, 0xFF, static_cast<size_t>(masklength));
 }
 
 int picture::gwidth(void) { return width; }
@@ -274,22 +289,22 @@ void picture::maskmemcopyout(char * dest, int x, int y, int count)
 
 void picture::memcopyout(CBuf& dest, int start, int count)
 {
-	bounded_copy_out(dest.buf(0,count), count, bitmap, bitmaplength, start, count);
+	bounded_copy_out(dest.buf(0, size_from_nonnegative_int(count)), count, bitmap, bitmaplength, start, count);
 }
 
 void picture::memcopyout(CBuf& dest, int x, int y, int count)
 {
-	bounded_copy_out(dest.buf(0,count), count, bitmap, bitmaplength, coordbyteoffset(x,y), count);
+	bounded_copy_out(dest.buf(0, size_from_nonnegative_int(count)), count, bitmap, bitmaplength, coordbyteoffset(x,y), count);
 }
 
 void picture::maskmemcopyout(CBuf& dest, int start, int count)
 {
-	bounded_copy_out(dest.buf(0,count), count, mask, masklength, start, count);
+	bounded_copy_out(dest.buf(0, size_from_nonnegative_int(count)), count, mask, masklength, start, count);
 }
 
 void picture::maskmemcopyout(CBuf& dest, int x, int y, int count)
 {
-	bounded_copy_out(dest.buf(0,count), count, mask, masklength, maskcoordbyteoffset(x,y), count);
+	bounded_copy_out(dest.buf(0, size_from_nonnegative_int(count)), count, mask, masklength, maskcoordbyteoffset(x,y), count);
 }
 
 
@@ -401,7 +416,7 @@ void picture::copyrow(int dest, int src)
 		return;
 	memcpy(bitmap + coordbyteoffset(0,dest),
 	       bitmap + coordbyteoffset(0,src),
-	       rowlength);
+	       static_cast<size_t>(rowlength));
 }
 
 void picture::maskcopyrow(int dest, int src)
@@ -410,7 +425,7 @@ void picture::maskcopyrow(int dest, int src)
 		return;
 	memcpy(mask + maskcoordbyteoffset(0,dest),
 	       mask + maskcoordbyteoffset(0,src),
-	       maskrowlength);
+	       static_cast<size_t>(maskrowlength));
 }
 
 unsigned int picture::fixcolor(unsigned int c)
@@ -445,24 +460,24 @@ unsigned int picture::getpixel(int x, int y)
 	int j;
 	if (depth < 8)
 	{
-		if( bitmap[byteIndex] & coordbitmask(x,y) )
+		if( static_cast<unsigned char>(bitmap[byteIndex]) & coordbitmask(x,y) )
 			return 1;
 		else
 			return 0;
 	}
 	else if (depth == 8)
 	{
-		return (unsigned char)bitmap[byteIndex];
+		return static_cast<unsigned char>(bitmap[byteIndex]);
 	}
 	else {
 		j = depth / 8;
 		int	p1 = 0;
 		while (j) {
-			p1 = (p1*256)+(unsigned char)bitmap[byteIndex];
+			p1 = (p1 * 256) + static_cast<unsigned char>(bitmap[byteIndex]);
 			byteIndex++;
 			j--;
 		}
-		return p1;
+		return static_cast<unsigned int>(p1);
 	}
 }
 
@@ -471,18 +486,19 @@ void picture::setpixel(int x, int y, int c)
 	if( !bitmap || x < 0 || y < 0 || x >= width || y >= height )
 		return;
 	int i = coordbyteoffset(x,y);
-	unsigned int d = dupcolor(c);
-	unsigned int f = fixcolor(c);
+	unsigned int d = dupcolor(static_cast<unsigned int>(c));
+	unsigned int f = fixcolor(static_cast<unsigned int>(c));
 	int j;
 	if (depth < 8) {
-		bitmap[i] = ( (bitmap[i] & (~coordbitmask(x,y))) | (d & coordbitmask(x,y)) );
+		const unsigned int value = (static_cast<unsigned char>(bitmap[i]) & (~coordbitmask(x,y))) | (d & coordbitmask(x,y));
+		bitmap[i] = char_from_byte_value(value);
 	} else if (depth == 8) {
-		bitmap[i] = f;
+		bitmap[i] = char_from_byte_value(f);
 	} else {
 		j = depth / 8;
 		while (j) {
 			j--;
-			bitmap[i+j] = (f & 0xFF);
+			bitmap[i+j] = char_from_byte_value(f & 0xFF);
 			f /= 256;
 		}
 	}
@@ -494,9 +510,9 @@ unsigned int picture::maskgetpixel(int x, int y)
 		return 0;
 	int i = maskcoordbyteoffset(x,y);
 	if (greyscalemask) {
-		return (unsigned char)mask[i];
+		return static_cast<unsigned char>(mask[i]);
 	} else {
-		i = mask[i] & maskcoordbitmask(x,y);
+		i = static_cast<int>(static_cast<unsigned char>(mask[i]) & maskcoordbitmask(x,y));
 		return i ? 1 : 0;
 	}
 }
@@ -506,12 +522,13 @@ void picture::masksetpixel(int x, int y, int c)
 	if( !mask || x < 0 || y < 0 || x >= width || y >= height )
 		return;
 	int i = maskcoordbyteoffset(x,y);
-	unsigned int d = dupcolor(c);
+	unsigned int d = dupcolor(static_cast<unsigned int>(c));
 	if (greyscalemask) {
-		mask[i] = (d & 0xFF);
+		mask[i] = char_from_byte_value(d & 0xFF);
 	} else {
-		int		bitpos = maskcoordbitmask(x,y);
-		mask[i] = ( (mask[i] & (~bitpos)) | (d & bitpos) );
+		unsigned int bitpos = maskcoordbitmask(x,y);
+		const unsigned int value = (static_cast<unsigned char>(mask[i]) & (~bitpos)) | (d & bitpos);
+		mask[i] = char_from_byte_value(value);
 	}
 }
 
@@ -519,7 +536,7 @@ void picture::__directcopybmptomask(void)
 {
 	if( !mask || !bitmap )
 		return;
-	memcpy(mask, bitmap, std::min(masklength, bitmaplength));
+	memcpy(mask, bitmap, static_cast<size_t>(std::min(masklength, bitmaplength)));
 }
 
 void picture::bwrite(fstream fp)
@@ -534,11 +551,12 @@ void picture::bwrite(fstream fp)
 	stuff[5] = greyscalemask?8:1;
 	stuff[6] = bitmaplength;
 	stuff[7] = masklength;
-	buf = new char[32+bitmaplength+masklength];
-	memcpy(buf, (char *)stuff, 32);
-	memcpy(buf+32, bitmap, bitmaplength);
-	memcpy(buf+32+bitmaplength, mask, masklength);
-	fp.write(buf, 32+bitmaplength+masklength);
+	const int totalLength = 32 + bitmaplength + masklength;
+	buf = new char[static_cast<size_t>(totalLength)];
+	memcpy(buf, reinterpret_cast<const char *>(stuff), 32);
+	memcpy(buf+32, bitmap, static_cast<size_t>(bitmaplength));
+	memcpy(buf+32+bitmaplength, mask, static_cast<size_t>(masklength));
+	fp.write(buf, stream_size_from_nonnegative_int(totalLength));
 	delete [] buf;
 	/* fp.write(reinterpret_cast<char *>(stuff), 32); */
 	/* fp.write(bitmap, bitmaplength); */
@@ -558,10 +576,10 @@ void picture::bread(fstream fp)
 		greyscalemask = (stuff[5] == 8);
 		bitmaplength = stuff[6];
 		masklength = stuff[7];
-		bitmap = new char[bitmaplength];
-		mask = new char[masklength];
-		fp.read(bitmap, bitmaplength);
-		fp.read(mask, masklength);
+		bitmap = new char[static_cast<size_t>(bitmaplength)];
+		mask = new char[static_cast<size_t>(masklength)];
+		fp.read(bitmap, stream_size_from_nonnegative_int(bitmaplength));
+		fp.read(mask, stream_size_from_nonnegative_int(masklength));
 		
 		rowlength = __bitmap_row_width(width,height,depth);
 		maskrowlength = __bitmap_row_width(width,height,greyscalemask?8:1);
@@ -581,11 +599,12 @@ void picture::writefile(char * fn)
 	stuff[5] = greyscalemask?8:1;
 	stuff[6] = bitmaplength;
 	stuff[7] = masklength;
-	buf = new char[32+bitmaplength+masklength];
-	memcpy(buf, (char *)stuff, 32);
-	memcpy(buf+32, bitmap, bitmaplength);
-	memcpy(buf+32+bitmaplength, mask, masklength);
-	fp.write(buf, 32+bitmaplength+masklength);
+	const int totalLength = 32 + bitmaplength + masklength;
+	buf = new char[static_cast<size_t>(totalLength)];
+	memcpy(buf, reinterpret_cast<const char *>(stuff), 32);
+	memcpy(buf+32, bitmap, static_cast<size_t>(bitmaplength));
+	memcpy(buf+32+bitmaplength, mask, static_cast<size_t>(masklength));
+	fp.write(buf, stream_size_from_nonnegative_int(totalLength));
 	delete [] buf;
 	/* fp.write(reinterpret_cast<char *>(stuff), 32); */
 	/* fp.write(bitmap, bitmaplength); */
@@ -601,15 +620,15 @@ void picture::writebitmapandmasktopbm(const char * fn)
 	
 	// Write PBM Header:
 	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, strlen(str) );
+	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
 	
-	fp.write( bitmap, bitmaplength );
+	fp.write( bitmap, stream_size_from_nonnegative_int(bitmaplength) );
 	
 	// Write second PBM Header:
 	snprintf( str, sizeof(str), "\nP4\n%d %d\n", width, height );
-	fp.write( str, strlen(str) );
+	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
 	
-	fp.write( mask, masklength );
+	fp.write( mask, stream_size_from_nonnegative_int(masklength) );
 	fp.close();
 }
 
@@ -621,9 +640,9 @@ void picture::writebitmaptopbm(const char * fn)
 	
 	// Write PBM Header:
 	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, strlen(str) );
+	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
 	
-	fp.write( bitmap, bitmaplength );
+	fp.write( bitmap, stream_size_from_nonnegative_int(bitmaplength) );
 	fp.close();
 }
 
@@ -635,9 +654,9 @@ void picture::writemasktopbm(const char * fn)
 	
 	// Write PBM Header:
 	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, strlen(str) );
+	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
 	
-	fp.write( mask, masklength );
+	fp.write( mask, stream_size_from_nonnegative_int(masklength) );
 	fp.close();
 }
 
@@ -656,10 +675,10 @@ void picture::readfile(char * fn)
 		greyscalemask = (stuff[5] == 8);
 		bitmaplength = stuff[6];
 		masklength = stuff[7];
-		bitmap = new char[bitmaplength];
-		mask = new char[masklength];
-		fp.read(bitmap, bitmaplength);
-		fp.read(mask, masklength);
+		bitmap = new char[static_cast<size_t>(bitmaplength)];
+		mask = new char[static_cast<size_t>(masklength)];
+		fp.read(bitmap, stream_size_from_nonnegative_int(bitmaplength));
+		fp.read(mask, stream_size_from_nonnegative_int(masklength));
 		
 		rowlength = __bitmap_row_width(width,height,depth);
 		maskrowlength = __bitmap_row_width(width,height,greyscalemask?8:1);

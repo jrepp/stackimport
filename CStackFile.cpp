@@ -19,8 +19,7 @@
 #include "CBuf.h"
 #include "stackimport_platform_internal.h"
 #include "stackimport_rapidjson_allocator.h"
-#include <arpa/inet.h>
-#include "snd2wav/snd2wav/snd2wav.h"
+#include "vendor/snd2wav/snd2wav/snd2wav.h"
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
@@ -186,16 +185,45 @@ size_t	EvenAlign( size_t offs )
 
 int16_t	ReadBEInt16( const CBuf& data, size_t offs )
 {
-	return static_cast<int16_t>( ntohs(data.uint16at( offs )) );
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint16_t) ));
+	return static_cast<int16_t>(static_cast<uint16_t>(bytes[0]) << 8 | static_cast<uint16_t>(bytes[1]));
 }
 
 int32_t	ReadBEInt32( const CBuf& data, size_t offs )
 {
-	return static_cast<int32_t>( ntohl(data.uint32at( offs )) );
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint32_t) ));
+	return static_cast<int32_t>(static_cast<uint32_t>(bytes[0]) << 24
+		| static_cast<uint32_t>(bytes[1]) << 16
+		| static_cast<uint32_t>(bytes[2]) << 8
+		| static_cast<uint32_t>(bytes[3]));
+}
+
+uint16_t	ReadBEUInt16( const CBuf& data, size_t offs )
+{
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint16_t) ));
+	return static_cast<uint16_t>(static_cast<uint16_t>(bytes[0]) << 8 | static_cast<uint16_t>(bytes[1]));
+}
+
+uint32_t	ReadBEUInt32( const CBuf& data, size_t offs )
+{
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint32_t) ));
+	return static_cast<uint32_t>(static_cast<uint32_t>(bytes[0]) << 24
+		| static_cast<uint32_t>(bytes[1]) << 16
+		| static_cast<uint32_t>(bytes[2]) << 8
+		| static_cast<uint32_t>(bytes[3]));
+}
+
+uint32_t	ReadBEUInt32Bytes( const char bytes[4] )
+{
+	const unsigned char* unsignedBytes = reinterpret_cast<const unsigned char*>(bytes);
+	return static_cast<uint32_t>(static_cast<uint32_t>(unsignedBytes[0]) << 24
+		| static_cast<uint32_t>(unsignedBytes[1]) << 16
+		| static_cast<uint32_t>(unsignedBytes[2]) << 8
+		| static_cast<uint32_t>(unsignedBytes[3]));
 }
 
 
-void	NumVersionToStr( unsigned char numVersion[4], char outStr[16] )
+void	NumVersionToStr( const unsigned char numVersion[4], char outStr[16] )
 {
 	char	theCh = 'v';
 	
@@ -262,49 +290,45 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	}
 	
 	mStackID = stackID;
-	mStackCardCount = ntohl(blockData.int32at( 32 ));
-	mFirstCardID = ntohl(blockData.int32at( 36 ));
-	mListBlockID = ntohl(blockData.int32at( 40 ));
-	mUserLevel = ntohs(blockData.int16at( 60 ));
-	int16_t	flags = ntohs(blockData.int16at( 64 ));
+	mStackCardCount = ReadBEInt32(blockData, 32);
+	mFirstCardID = ReadBEInt32(blockData, 36);
+	mListBlockID = ReadBEInt32(blockData, 40);
+	mUserLevel = ReadBEInt16(blockData, 60);
+	int16_t	flags = ReadBEInt16(blockData, 64);
 	mStackCantModify = (flags & (1 << 15)) != 0;
 	mStackCantDelete = (flags & (1 << 14)) != 0;
 	mStackPrivateAccess = (flags & (1 << 13)) != 0;
 	mStackCantAbort = (flags & (1 << 11)) != 0;
 	mStackCantPeek = (flags & (1 << 10)) != 0;
 	char		versStr[16] = { 0 };
-	int32_t	version0 = blockData.int32at( 84 );
-	NumVersionToStr( (unsigned char*) &version0, versStr );
+	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 84, 4 )), versStr );
 	mCreatedByVersion = "HyperCard ";
 	mCreatedByVersion += versStr;
-	int32_t	version1 = blockData.int32at( 88 );
-	NumVersionToStr( (unsigned char*) &version1, versStr );
+	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 88, 4 )), versStr );
 	mLastCompactedVersion = "HyperCard ";
 	mLastCompactedVersion += versStr;
-	int32_t	version2 = blockData.int32at( 92 );
-	NumVersionToStr( (unsigned char*) &version2, versStr );
+	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 92, 4 )), versStr );
 	mLastEditedVersion = "HyperCard ";
 	mLastEditedVersion += versStr;
-	int32_t	version3 = blockData.int32at( 96 );
-	NumVersionToStr( (unsigned char*) &version3, versStr );
+	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 96, 4 )), versStr );
 	mFirstEditedVersion = "HyperCard ";
 	mFirstEditedVersion += versStr;
-	mFontTableBlockID = ntohl(blockData.int32at( 420 ));
-	mStyleTableBlockID = ntohl(blockData.int32at( 424 ));
-	mCardHeight = ntohs(blockData.int16at( 428 ));
+	mFontTableBlockID = ReadBEInt32(blockData, 420);
+	mStyleTableBlockID = ReadBEInt32(blockData, 424);
+	mCardHeight = ReadBEInt16(blockData, 428);
 	if( mCardHeight == 0 )
 		mCardHeight = 342;
-	mCardWidth = ntohs(blockData.int16at( 430 ));
+	mCardWidth = ReadBEInt16(blockData, 430);
 	if( mCardWidth == 0 )
 		mCardWidth = 512;
 
 	char			pattern[8] = { 0 };
-	int				offs = 692;
+	size_t			offs = 692;
 	for( int n = 0; n < 40; n++ )
 	{
 		memmove( pattern, blockData.buf( offs, 8 ), 8 );
 		char		fname[256] = { 0 };
-		snprintf( fname, sizeof(fname), "PAT_%u.pbm", n +1 );
+		snprintf( fname, sizeof(fname), "PAT_%u.pbm", static_cast<unsigned>(n +1) );
 		picture		thePicture( 8, 8, 1, false );
 		thePicture.memcopyin( pattern, 0, 8 );
 		thePicture.writebitmaptopbm( OutputPath(fname).c_str() );
@@ -336,7 +360,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	std::vector<CStyleEntry>	styles;
 	
 	size_t		currOffs = 4;
-	int32_t		styleCount = ntohl(blockData.int32at( currOffs ));
+	int32_t		styleCount = ReadBEInt32(blockData, currOffs);
 	currOffs += 4;
 
 	std::string	vLayerFilePath = mBasePath;
@@ -349,7 +373,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	FILE*		vStylesheetFile = fopen( vLayerFilePath.c_str(), "w" );
 	
 	currOffs += 2;
-	int16_t	nextStyleID = ntohs(blockData.int16at( currOffs ));
+	int16_t	nextStyleID = ReadBEInt16(blockData, currOffs);
 	(void)nextStyleID;
 	currOffs += 2;
 	currOffs += 2;
@@ -358,12 +382,12 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	{
 		CStyleEntry		style;
 		
-		style.mStyleID = ntohs(blockData.int16at( currOffs ));
+		style.mStyleID = ReadBEInt16(blockData, currOffs);
 		fprintf( vStylesheetFile, "\t\t.style%d\n\t\t{\n", style.mStyleID );
 		currOffs += 2;
 		currOffs += 8;
 		
-		style.mFontID = ntohs(blockData.int16at( currOffs ));
+		style.mFontID = ReadBEInt16(blockData, currOffs);
 		if( style.mFontID != -1 )
 		{
 			style.mFontName = mFontTable[style.mFontID];
@@ -371,7 +395,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 		}
 		currOffs += 2;
 		
-		int16_t	textStyleFlags = ntohs(blockData.int16at( currOffs ));
+		int16_t	textStyleFlags = ReadBEInt16(blockData, currOffs);
 		currOffs += 2;
 		
 		if( textStyleFlags == 0 )
@@ -419,7 +443,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 				style.mBold = true;
 			}
 		}
-		int16_t	fontSize = ntohs(blockData.int16at( currOffs ));
+		int16_t	fontSize = ReadBEInt16(blockData, currOffs);
 		if( fontSize != -1 )
 		{
 			fprintf( vStylesheetFile, "\t\t\tfont-size: %dpt;\n", fontSize );
@@ -447,16 +471,17 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 	if( mStatusMessages )
 		fprintf( stdout, "Status: Processing 'FTBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
 
-	int16_t	numFonts = ntohs(blockData.int16at( 6 ));
+	int16_t	numFonts = ReadBEInt16(blockData, 6);
 	size_t	currOffsIntoData = 8;
 	currOffsIntoData += 4;	// Reserved?
 	for( int n = 0; n < numFonts; n++ )
 	{
 		std::string		fontName;
 		
-		int16_t	fontID = ntohs(blockData.int16at( currOffsIntoData ));
+		int16_t	fontID = ReadBEInt16(blockData, currOffsIntoData);
 		
-		int x = 0, startOffs = currOffsIntoData +2;
+		int x = 0;
+		size_t startOffs = currOffsIntoData +2;
 		fontName = mac_roman_string( blockData, startOffs );
 		x = static_cast<int>(MacRomanStringEnd( blockData, startOffs ));
 		
@@ -498,7 +523,7 @@ bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 
 	for( size_t currOffs = 20; blockData.hasdata( currOffs, sizeof(uint32_t)); currOffs += sizeof(uint32_t) )
 	{
-		uint32_t	entry = ntohl(blockData.uint32at( currOffs ));
+		uint32_t	entry = ReadBEUInt32(blockData, currOffs);
 		if( entry == 0 )
 			continue;
 		uint32_t	fileOffset = (entry >> 8) << 5;
@@ -682,7 +707,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 	if( blockData.hasdata( 24, 1 ) )
 	{
 		const char* units = "unknown";
-		switch( (uint8_t) blockData[4] )
+		switch( static_cast<uint8_t>(blockData[4]) )
 		{
 			case 0: units = "centimeters"; break;
 			case 1: units = "millimeters"; break;
@@ -708,7 +733,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 
 	if( blockData.hasdata( 0x118, sizeof(int16_t) ) )
 	{
-		int16_t	itemCount = ntohs(blockData.int16at( 0x118 ));
+		int16_t	itemCount = ReadBEInt16(blockData, 0x118);
 		document.AddMember("itemCount", itemCount, allocator);
 		JsonValue items(rapidjson::kArrayType);
 		size_t	currOffs = 0x11a;
@@ -803,10 +828,10 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	document.AddMember("file", json_string(vFileName, allocator), allocator);
 	
 	size_t	currOffsIntoData = 0;
-	int32_t	unknownFiller = ntohl(blockData.int32at( currOffsIntoData ));
+	int32_t	unknownFiller = ReadBEInt32(blockData, currOffsIntoData);
 	currOffsIntoData += 4;
 	document.AddMember("filler1", unknownFiller, allocator);
-	int32_t	bitmapID = ntohl(blockData.int32at( currOffsIntoData ));
+	int32_t	bitmapID = ReadBEInt32(blockData, currOffsIntoData);
 	currOffsIntoData += 4;
 	if( bitmapID != 0 )
 	{
@@ -815,7 +840,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 		document.AddMember("bitmapId", bitmapID, allocator);
 		document.AddMember("bitmap", json_string(bitmapFile, allocator), allocator);
 	}
-	int16_t	flags = ntohs(blockData.int16at( currOffsIntoData ));
+	int16_t	flags = ReadBEInt16(blockData, currOffsIntoData);
 	currOffsIntoData += 2;
 	document.AddMember("cantDelete", (flags & (1 << 14)) != 0, allocator);
 	document.AddMember("showPict", (flags & (1 << 13)) == 0, allocator);
@@ -824,7 +849,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	int32_t	owner = -1;
 	if( isCard )
 	{
-		owner = ntohl(blockData.int32at( currOffsIntoData ));
+		owner = ReadBEInt32(blockData, currOffsIntoData);
 		document.AddMember("owner", owner, allocator);
 		currOffsIntoData += 4;
 		document.AddMember("marked", (inFlags & 16) != 0, allocator);
@@ -832,10 +857,10 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	if( !mStyleSheetName.empty() )
 		document.AddMember("styleSheet", json_string(mStyleSheetName, allocator), allocator);
 
-	int16_t	numParts = ntohs(blockData.int16at( currOffsIntoData ));
+	int16_t	numParts = ReadBEInt16(blockData, currOffsIntoData);
 	currOffsIntoData += 2;
 	currOffsIntoData += 6;
-	int16_t	numContents = ntohs(blockData.int16at( currOffsIntoData ));
+	int16_t	numContents = ReadBEInt16(blockData, currOffsIntoData);
 	currOffsIntoData += 2;
 	currOffsIntoData += 4;
 	document.AddMember("partCount", numParts, allocator);
@@ -844,9 +869,9 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	JsonValue parts(rapidjson::kArrayType);
 	for( int n = 0; n < numParts; n++ )
 	{
-		int16_t	partLength = ntohs(blockData.int16at( currOffsIntoData ));
-		int16_t	partID = ntohs(blockData.int16at( currOffsIntoData +2 ));
-		int16_t	flagsAndType = ntohs(blockData.int16at( currOffsIntoData +4 ));
+		int16_t	partLength = ReadBEInt16(blockData, currOffsIntoData);
+		int16_t	partID = ReadBEInt16(blockData, currOffsIntoData +2);
+		int16_t	flagsAndType = ReadBEInt16(blockData, currOffsIntoData +4);
 		int16_t	partType = flagsAndType >> 8;
 		bool	isButton = partType == 1;
 		if( isButton && !isCard )
@@ -874,11 +899,11 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			part.AddMember("reserved1", (flagsAndType & (1 << 1)) >> 1, allocator);
 		}
 		part.AddMember("rect", json_rect(
-			ntohs(blockData.int16at( currOffsIntoData +8 )),
-			ntohs(blockData.int16at( currOffsIntoData +6 )),
-			ntohs(blockData.int16at( currOffsIntoData +12 )),
-			ntohs(blockData.int16at( currOffsIntoData +10 )), allocator), allocator);
-		int16_t	moreFlags = ntohs(blockData.int16at( currOffsIntoData +14 ));
+			ReadBEInt16(blockData, currOffsIntoData +8),
+			ReadBEInt16(blockData, currOffsIntoData +6),
+			ReadBEInt16(blockData, currOffsIntoData +12),
+			ReadBEInt16(blockData, currOffsIntoData +10), allocator), allocator);
+		int16_t	moreFlags = ReadBEInt16(blockData, currOffsIntoData +14);
 		int8_t	styleFromLowNibble = moreFlags & 15;
 		const char*	styleStr = "unknown";
 		if( isButton )
@@ -928,8 +953,8 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			part.AddMember("multipleLines", (moreFlags & (1 << 4)) != 0, allocator);
 			part.AddMember("reservedFamily", family, allocator);
 		}
-		int16_t	titleWidth = ntohs(blockData.int16at( currOffsIntoData +16 ));
-		int16_t	iconID = ntohs(blockData.int16at( currOffsIntoData +18 ));
+		int16_t	titleWidth = ReadBEInt16(blockData, currOffsIntoData +16);
+		int16_t	iconID = ReadBEInt16(blockData, currOffsIntoData +18);
 		part.AddMember("titleWidth", titleWidth, allocator);
 		part.AddMember("icon", iconID, allocator);
 		if( (!isButton && iconID > 0) || (isButton && styleFromLowNibble == 11 && iconID != 0) )
@@ -946,7 +971,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 				selectedLines.PushBack(iconID, allocator);
 			part.AddMember("selectedLines", selectedLines, allocator);
 		}
-		int16_t	textAlign = ntohs(blockData.int16at( currOffsIntoData +20 ));
+		int16_t	textAlign = ReadBEInt16(blockData, currOffsIntoData +20);
 		const char*	textAlignStr = "unknown";
 		switch( textAlign )
 		{
@@ -956,12 +981,12 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			case -2: textAlignStr = "forceLeft"; break;
 		}
 		part.AddMember("textAlign", json_string(textAlignStr, allocator), allocator);
-		int16_t	textFontID = ntohs(blockData.int16at( currOffsIntoData +22 ));
+		int16_t	textFontID = ReadBEInt16(blockData, currOffsIntoData +22);
 		part.AddMember("fontId", textFontID, allocator);
 		part.AddMember("font", json_string(mFontTable[textFontID], allocator), allocator);
-		int16_t	textSize = ntohs(blockData.int16at( currOffsIntoData +24 ));
+		int16_t	textSize = ReadBEInt16(blockData, currOffsIntoData +24);
 		part.AddMember("textSize", textSize, allocator);
-		int16_t	textStyleFlags = ntohs(blockData.int16at( currOffsIntoData +26 ));
+		int16_t	textStyleFlags = ReadBEInt16(blockData, currOffsIntoData +26);
 		JsonValue textStyles(rapidjson::kArrayType);
 		if( textStyleFlags & (1 << 15) ) textStyles.PushBack(json_string("group", allocator), allocator);
 		if( textStyleFlags & (1 << 14) ) textStyles.PushBack(json_string("extend", allocator), allocator);
@@ -973,7 +998,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 		if( textStyleFlags & (1 << 8) ) textStyles.PushBack(json_string("bold", allocator), allocator);
 		if( textStyleFlags == 0 ) textStyles.PushBack(json_string("plain", allocator), allocator);
 		part.AddMember("textStyles", textStyles, allocator);
-		int16_t	textHeight = ntohs(blockData.int16at( currOffsIntoData +28 ));
+		int16_t	textHeight = ReadBEInt16(blockData, currOffsIntoData +28);
 		if( !isButton )
 			part.AddMember("textHeight", textHeight, allocator);
 		int x = 0, startOffs = static_cast<int>(currOffsIntoData +30);
@@ -993,8 +1018,8 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	size_t totalTextBytes = 0;
 	for( int n = 0; n < numContents; n++ )
 	{
-		int16_t	partID = ntohs(blockData.int16at( currOffsIntoData ));
-		int16_t	partLength = ntohs(blockData.int16at( currOffsIntoData +2 ));
+		int16_t	partID = ReadBEInt16(blockData, currOffsIntoData);
+		int16_t	partLength = ReadBEInt16(blockData, currOffsIntoData +2);
 		bool	isBgButtonContents = false;
 		JsonValue content(rapidjson::kObjectType);
 		CBuf	theText, theStyles;
@@ -1003,7 +1028,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			partID = -partID;
 			content.AddMember("layer", json_string("card", allocator), allocator);
 			content.AddMember("id", partID, allocator);
-			uint16_t stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
+			uint16_t stylesLength = ReadBEUInt16(blockData, currOffsIntoData +4);
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
@@ -1020,7 +1045,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 		{
 			content.AddMember("layer", json_string("background", allocator), allocator);
 			content.AddMember("id", partID, allocator);
-			uint16_t stylesLength = ntohs(blockData.uint16at( currOffsIntoData +4 ));
+			uint16_t stylesLength = ReadBEUInt16(blockData, currOffsIntoData +4);
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
@@ -1052,9 +1077,9 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			{
 				for( size_t x = 0; x < theStyles.size(); )
 				{
-					int16_t startOffset = ntohs(theStyles.int16at( x ));
+					int16_t startOffset = ReadBEInt16(theStyles, x);
 					x += sizeof(int16_t);
-					int16_t styleID = ntohs(theStyles.int16at( x ));
+					int16_t styleID = ReadBEInt16(theStyles, x);
 					x += sizeof(int16_t);
 					JsonValue styleRun(rapidjson::kObjectType);
 					styleRun.AddMember("startOffset", startOffset, allocator);
@@ -1132,7 +1157,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 				break;
 			}
 			
-			int32_t		currCardID = ntohl( blockData.int32at( currDataOffs ) );
+			int32_t		currCardID = ReadBEInt32( blockData, currDataOffs );
 			if( currCardID == 0 )
 				break;	// End of page list. (Sentinel)
 			uint8_t		cardFlags = blockData[currDataOffs +4];
@@ -1167,9 +1192,9 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 	}
 
 	size_t		currDataOffs = 4;
-	int32_t		numPageTables = ntohl(blockData.int32at(currDataOffs));
+	int32_t		numPageTables = ReadBEInt32(blockData, currDataOffs);
 	currDataOffs += 12;
-	mCardBlockSize = ntohs(blockData.int16at(currDataOffs));
+	mCardBlockSize = ReadBEInt16(blockData, currDataOffs);
 	currDataOffs += 18;
 	for( int32_t r = 0; r < numPageTables; r++ )
 	{
@@ -1180,10 +1205,10 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 			break;
 		}
 		
-		int32_t		currPagetableID = ntohl( blockData.int32at( currDataOffs ) );
+		int32_t		currPagetableID = ReadBEInt32( blockData, currDataOffs );
 		int16_t		pageEntryCount = 0;
 		if( blockData.hasdata( currDataOffs +4, sizeof(int16_t) ) )
-			pageEntryCount = ntohs( blockData.int16at( currDataOffs +4 ) );
+			pageEntryCount = ReadBEInt16( blockData, currDataOffs +4 );
 		
 		LoadPageTable( currPagetableID, mBlockMap[CStackBlockIdentifier("PAGE",currPagetableID)], pageEntryCount );
 		
@@ -1450,7 +1475,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	FSRef		fileRef;
 	mResRefNum = -1;
 	
-	OSStatus	resErr = FSPathMakeRef( (const UInt8*) fpath.c_str(), &fileRef, NULL );
+		OSStatus	resErr = FSPathMakeRef( reinterpret_cast<const UInt8*>(fpath.c_str()), &fileRef, NULL );
 	if( resErr == noErr )
 	{
 		mResRefNum = FSOpenResFile( &fileRef, fsRdPerm );
@@ -1462,7 +1487,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	}
 	else
 	{
-		fprintf( stderr, "Error: Error %d locating input file's resource fork.\n", (int)resErr );
+		fprintf( stderr, "Error: Error %d locating input file's resource fork.\n", static_cast<int>(resErr) );
 		mResRefNum = -1;
 	}
   #endif //MAC_CODE
@@ -1481,7 +1506,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	while( true )
 	{
 		memset( vBlockType, 0, sizeof(vBlockType) );
-		theFile.read( (char*) &vBlockSize, sizeof(vBlockSize) );
+		theFile.read( reinterpret_cast<char*>(&vBlockSize), sizeof(vBlockSize) );
 		if( theFile.eof() )	// Couldn't read because we hit end of file.
 			break;
 		if( !theFile )
@@ -1491,16 +1516,16 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 			break;
 		}
 		
-		vBlockSize = ntohl(vBlockSize);
+		vBlockSize = ReadBEUInt32Bytes(reinterpret_cast<const char*>(&vBlockSize));
 		theFile.read( vBlockType, 4 );
-		theFile.read( (char*) &vBlockID, sizeof(vBlockID) );
+		theFile.read( reinterpret_cast<char*>(&vBlockID), sizeof(vBlockID) );
 		if( !theFile )
 		{
 			fprintf( stderr, "Error: Could not read complete block header.\n" );
 			success = false;
 			break;
 		}
-		vBlockID = ntohl(vBlockID);
+		vBlockID = static_cast<int32_t>(ReadBEUInt32Bytes(reinterpret_cast<const char*>(&vBlockID)));
 		
 		numBlocks++;
 		if( vBlockSize < 12 )

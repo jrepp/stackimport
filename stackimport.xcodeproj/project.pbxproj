@@ -51,8 +51,8 @@
 		55C68B0B1163C18B00D8B44C /* byteutils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = byteutils.h; sourceTree = "<group>"; };
 		55C68B0C1163C18B00D8B44C /* byteutils.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = byteutils.cpp; sourceTree = "<group>"; };
 		55C68BF31164062A00D8B44C /* Tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = Tests.cpp; sourceTree = "<group>"; };
-		55C76D461D15D0A500A07B65 /* snd2wav.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = snd2wav.cpp; path = snd2wav/snd2wav/snd2wav.cpp; sourceTree = "<group>"; };
-		55C76D4B1D15D25700A07B65 /* snd2wav.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = snd2wav.h; path = snd2wav/snd2wav/snd2wav.h; sourceTree = "<group>"; };
+		55C76D461D15D0A500A07B65 /* snd2wav.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = snd2wav.cpp; path = vendor/snd2wav/snd2wav/snd2wav.cpp; sourceTree = "<group>"; };
+		55C76D4B1D15D25700A07B65 /* snd2wav.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = snd2wav.h; path = vendor/snd2wav/snd2wav/snd2wav.h; sourceTree = "<group>"; };
 		55C76D4C1D15D40500A07B65 /* StackimportPrefixMac.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = StackimportPrefixMac.pch; sourceTree = "<group>"; };
 		8DD76F6C0486A84900D96B5E /* stackimport */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = stackimport; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */

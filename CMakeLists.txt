@@ -88,7 +88,7 @@ set_target_properties(stackimport_static PROPERTIES
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
-    target_link_libraries(stackimport_static PUBLIC vendor_stb_image_write vendor_dr_wav vendor_rapidjson)
+    target_link_libraries(stackimport_static PUBLIC vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav)
 endif()
 
 add_executable(stackimport main.cpp)

@@ -184,7 +184,7 @@ For `stackimport` itself, prefer explicit conversion boundaries:
 - Big-endian helpers live in `byteutils.cpp` and `byteutils.h`.
 - Corpus extraction, fingerprinting, import execution, and report indexing live
   in `scripts/import_all_stacks.py`.
-- `snd2wav/` is the local copy of the helper project used for sampled sound
+- `vendor/snd2wav/` is the local copy of the helper project used for sampled sound
   conversion experiments.
 
 Keep changes narrowly scoped. If there are unrelated local modifications, leave

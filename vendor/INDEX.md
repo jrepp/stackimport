@@ -14,6 +14,7 @@ locally patched.
 | `deark/` | Deark 1.7.2 | Broad legacy decoder/reference for containers and image formats | MIT-style Deark license, see `deark/COPYING`; bundled foreign-code notices under `deark/foreign/` | Built by `vendor_deark` custom target; archives are included in `stackimport-vendor-static` | No upstream source changes intended. Local integration passes C17 and strict warning flags through Make. |
 | `stb/` | `stb_image_write.h` | Header-only PNG/image writer candidate | MIT or public domain, license text embedded at end of `stb/stb_image_write.h` | `vendor_stb_image_write` interface target | No upstream source changes intended. CMake wrapper only. |
 | `dr_wav/` | `dr_wav.h` | Header-only WAV reader/writer candidate | Public domain or MIT-0, license text embedded at end of `dr_wav/dr_wav.h` | `vendor_dr_wav` interface target | No upstream source changes intended. CMake wrapper only. |
+| `snd2wav/` | `snd2wav` snapshot at `d6900ad35ba4da1fb488fe006f64a7977d98b32c` | Legacy Mac `snd ` to WAV conversion helper currently used by sound conversion paths | No explicit license file found in snapshot; source copyright headers state all rights reserved | `vendor_snd2wav` static target; linked into `stackimport_static` | Converted from a git submodule to checked-in vendored source. Added CMake wrapper in `vendor/CMakeLists.txt` and local provenance note in `snd2wav/STACKIMPORT_VENDOR.md`. |
 
 ## Build Targets
 
@@ -22,6 +23,7 @@ The main vendor entry points are defined in `vendor/CMakeLists.txt`:
 | Target | Purpose |
 | --- | --- |
 | `vendor-header-libraries` | Makes header-only interface targets available. |
+| `vendor_snd2wav` | Builds the vendored local `snd2wav` helper as a static library. |
 | `vendor-tools` | Builds header-only targets plus Deark, phosg, and resource_dasm. |
 | `vendor-static-artifacts` | Builds static artifacts used by `stackimport-vendor-static`. |
 | `stackimport-vendor-static` | Top-level target that combines `libstackimport.a` with vendored static archives. |
@@ -39,4 +41,3 @@ CMake builds.
   and modification notes in this file in the same change.
 - If a dependency has foreign bundled code, keep its notices near that code and
   summarize them here.
-
