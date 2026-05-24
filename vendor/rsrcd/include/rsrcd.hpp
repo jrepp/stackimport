@@ -18,6 +18,7 @@
 #include <optional>
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <utility>
 
 namespace rsrcd {
@@ -274,9 +275,10 @@ public:
         if (count_ < inline_capacity_) {
             inline_[count_++] = ref;
         } else if (count_ < capacity_) {
-            heap_[count_++] = ref;
+            heap_[count_ - inline_capacity_] = ref;
+            ++count_;
         } else {
-            return Error::invalid_data("超出容量");
+            return Error::invalid_data("capacity exceeded");
         }
         return Result::ok();
     }
@@ -380,6 +382,10 @@ constexpr auto find_first(const ForkView& f, FourCC type) -> const ResRef* {
 // Implementation
 // ============================================================================
 
+constexpr auto range_in_bounds(size_t offset, size_t length, size_t size) -> bool {
+    return offset <= size && length <= size - offset;
+}
+
 inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     if (buf.size < 32) return Error::invalid_data("fork too small");
 
@@ -388,7 +394,8 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     uint32_t data_len = read_u32be(buf.data + 8);
     uint32_t map_len = read_u32be(buf.data + 12);
 
-    if (data_off + data_len > buf.size || map_off + map_len > buf.size) {
+    if (!range_in_bounds(data_off, data_len, buf.size) ||
+        !range_in_bounds(map_off, map_len, buf.size)) {
         return Error::invalid_data("invalid offsets");
     }
 
@@ -426,9 +433,9 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
         size_t res_off = type_list_off + types[ti].offset;
 
         for (uint16_t ri = 0; ri < types[ti].count; ++ri) {
-            if (res_off + 14 > map.size) break;
+            if (!range_in_bounds(res_off, 12, map.size)) break;
 
-            ResRef ref;
+            ResRef ref{};
             ref.type = Bytes{map.data + type_list_off + 2 + ti * 8, 4};
             ref.id = read_i16be(map.data + res_off);
             uint16_t name_off = read_u16be(map.data + res_off + 2);
@@ -493,7 +500,11 @@ inline Result Parser::parse_adf(Bytes buf, IParserOutput& output) {
 
     for (uint16_t i = 0; i < num_entries; ++i) {
         ResRef ref;
-        ref.type = Bytes{reinterpret_cast<uint8_t*>(&entries[i].id), 4};
+        if (!range_in_bounds(entries[i].o, entries[i].l, buf.size)) {
+            return Error::invalid_data("ADF entry out of bounds");
+        }
+
+        ref.type = Bytes{buf.data + 26 + i * 12, 4};
         ref.id = static_cast<int32_t>(entries[i].id);
         ref.data = buf.slice(entries[i].o, entries[i].l);
         ref.name = Bytes{};

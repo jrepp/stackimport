@@ -136,6 +136,19 @@ target_compile_options(vendor_rsrcd INTERFACE
     ${STACKIMPORT_VENDOR_WARNING_ERROR_FLAGS}
 )
 
+if(STACKIMPORT_BUILD_VENDOR_TESTS)
+    add_executable(stackimport-rsrcd-tests
+        rsrcd/tests/test_main.cpp
+    )
+    target_link_libraries(stackimport-rsrcd-tests PRIVATE vendor_rsrcd)
+    stackimport_configure_vendor_cxx_target(stackimport-rsrcd-tests)
+    target_compile_options(stackimport-rsrcd-tests PRIVATE
+        ${STACKIMPORT_VENDOR_CXX_WARNING_FLAGS}
+        ${STACKIMPORT_VENDOR_WARNING_ERROR_FLAGS}
+    )
+    add_test(NAME rsrcd-tests COMMAND stackimport-rsrcd-tests)
+endif()
+
 add_custom_target(vendor-header-libraries
     DEPENDS vendor_ppcd vendor_snd2wav
     COMMENT "Header-only and local vendored conversion libraries are available"

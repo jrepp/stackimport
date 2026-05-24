@@ -12,6 +12,7 @@ project(stackimport VERSION "${STACKIMPORT_VERSION_CORE}" LANGUAGES C CXX)
 option(STACKIMPORT_STRICT_WARNINGS "Enable strict compiler warnings" ON)
 option(STACKIMPORT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(STACKIMPORT_ENABLE_VENDOR "Expose vendored conversion support targets" ON)
+option(STACKIMPORT_BUILD_VENDOR_TESTS "Build vendored tests in the top-level test suite" ON)
 option(STACKIMPORT_ENABLE_CLANG_TIDY "Run clang-tidy during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_CPPCHECK "Run cppcheck during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_INCLUDE_WHAT_YOU_USE "Run include-what-you-use during CMake builds" OFF)
@@ -69,6 +70,8 @@ function(stackimport_disable_exceptions target)
         target_compile_options(${target} PRIVATE -fno-exceptions)
     endif()
 endfunction()
+
+enable_testing()
 
 if(STACKIMPORT_ENABLE_VENDOR)
     add_subdirectory(vendor)
@@ -179,7 +182,6 @@ if(WIN32)
     endforeach()
 endif()
 
-enable_testing()
 add_test(NAME stackimport-tests COMMAND stackimport-tests)
 
 add_custom_target(import-stacks

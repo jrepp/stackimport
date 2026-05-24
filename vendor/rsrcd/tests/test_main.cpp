@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 static int g_failures = 0;
 
@@ -88,8 +89,79 @@ static void test_bytes() {
 }
 
 // ============================================================================
+// VecParserOutput storage
+// ============================================================================
+
+static void test_vec_parser_output_heap_indexing() {
+    uint8_t types[4][4] = {
+        {'T', '0', '0', '0'},
+        {'T', '0', '0', '1'},
+        {'T', '0', '0', '2'},
+        {'T', '0', '0', '3'},
+    };
+
+    rsrcd::VecParserOutput<2> out;
+    CHECK_RESULT(out.reserve(4), "reserve heap-backed output");
+
+    for (int32_t i = 0; i < 4; ++i) {
+        rsrcd::ResRef ref{};
+        ref.type = rsrcd::Bytes{types[i], 4};
+        ref.id = 100 + i;
+        CHECK_RESULT(out.add(std::move(ref)), "add resource ref");
+    }
+
+    CHECK(out.count() == 4, "heap-backed output count");
+    CHECK(out.at(0).id == 100, "inline item 0 preserved");
+    CHECK(out.at(1).id == 101, "inline item 1 preserved");
+    CHECK(out.at(2).id == 102, "heap item 0 preserved");
+    CHECK(out.at(3).id == 103, "heap item 1 preserved");
+    CHECK(out.at(2).type.data == types[2], "heap item type pointer preserved");
+    CHECK(out.at(3).type.data == types[3], "second heap item type pointer preserved");
+}
+
+static void test_vec_parser_output_capacity_overflow() {
+    uint8_t type[4] = {'T', 'E', 'S', 'T'};
+    rsrcd::VecParserOutput<2> out;
+    CHECK_RESULT(out.reserve(3), "reserve limited heap-backed output");
+
+    for (int32_t i = 0; i < 3; ++i) {
+        rsrcd::ResRef ref{};
+        ref.type = rsrcd::Bytes{type, 4};
+        ref.id = i;
+        CHECK_RESULT(out.add(std::move(ref)), "add within capacity");
+    }
+
+    rsrcd::ResRef overflow{};
+    overflow.type = rsrcd::Bytes{type, 4};
+    overflow.id = 3;
+    auto r = out.add(std::move(overflow));
+    CHECK(!r, "add beyond capacity fails");
+    CHECK(out.count() == 3, "failed add does not change count");
+    CHECK(out.at(2).id == 2, "last valid heap item remains readable");
+}
+
+// ============================================================================
 // Resource fork parser
 // ============================================================================
+
+static void write_basic_fork_header(uint8_t* fork, uint32_t data_off, uint32_t map_off, uint32_t data_len, uint32_t map_len) {
+    rsrcd::write_u32be(fork + 0, data_off);
+    rsrcd::write_u32be(fork + 4, map_off);
+    rsrcd::write_u32be(fork + 8, data_len);
+    rsrcd::write_u32be(fork + 12, map_len);
+}
+
+static uint8_t* write_single_type_map(uint8_t* map, uint16_t type_list_off, uint16_t name_list_off, const char* type, uint16_t resource_count) {
+    rsrcd::write_u16be(map + 24, type_list_off);
+    rsrcd::write_u16be(map + 26, name_list_off);
+
+    uint8_t* type_list = map + type_list_off;
+    rsrcd::write_u16be(type_list, 0);
+    std::memcpy(type_list + 2, type, 4);
+    rsrcd::write_u16be(type_list + 6, static_cast<uint16_t>(resource_count - 1));
+    rsrcd::write_u16be(type_list + 8, 10);
+    return type_list + 10;
+}
 
 static void test_parse_fork_empty() {
     uint8_t fork[64] = {};
@@ -175,6 +247,151 @@ static void test_parse_fork_single_resource() {
     CHECK(!res.is_compressed(), "not compressed");
 }
 
+static void test_parse_fork_many_resources_cross_inline_capacity() {
+    uint8_t fork[512] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 128;
+    uint32_t data_len = 96;
+    uint32_t map_len = 256;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+
+    uint8_t* map = fork + map_off;
+    uint8_t* ref = write_single_type_map(map, 28, 128, "CURS", 4);
+    for (uint32_t i = 0; i < 4; ++i) {
+        uint32_t d_off = i * 8;
+        rsrcd::write_u32be(fork + data_off + d_off, 1);
+        fork[data_off + d_off + 4] = static_cast<uint8_t>('A' + i);
+        rsrcd::write_u16be(ref + 0, static_cast<uint16_t>(100 + i));
+        rsrcd::write_u16be(ref + 2, 0xFFFF);
+        rsrcd::write_u32be(ref + 4, d_off);
+        rsrcd::write_u32be(ref + 8, 0);
+        ref += 12;
+    }
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, 512}, out);
+    CHECK_RESULT(r, "parse resources crossing inline output capacity");
+    CHECK(out.count() == 4, "all resources parsed across inline capacity");
+    for (int32_t i = 0; i < 4; ++i) {
+        const auto& res = out.at(static_cast<size_t>(i));
+        CHECK(res.id == 100 + i, "heap-boundary resource id preserved");
+        CHECK(res.type.data != nullptr, "heap-boundary resource type is non-null");
+        CHECK(res.type.size == 4 && std::memcmp(res.type.data, "CURS", 4) == 0, "heap-boundary resource type preserved");
+        CHECK(res.data.size == 1 && res.data.data[0] == static_cast<uint8_t>('A' + i), "heap-boundary resource data preserved");
+    }
+}
+
+static void test_parse_fork_truncated_ref_list_stops_cleanly() {
+    uint8_t fork[128] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 64;
+    uint32_t data_len = 16;
+    uint32_t map_len = 52;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+    rsrcd::write_u32be(fork + data_off, 1);
+    fork[data_off + 4] = 'Z';
+
+    uint8_t* ref = write_single_type_map(fork + map_off, 28, 52, "ICON", 3);
+    rsrcd::write_u16be(ref + 0, 128);
+    rsrcd::write_u16be(ref + 2, 0xFFFF);
+    rsrcd::write_u32be(ref + 4, 0);
+    rsrcd::write_u32be(ref + 8, 0);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, 128}, out);
+    CHECK_RESULT(r, "parse truncated ref list");
+    CHECK(out.count() == 1, "truncated ref list adds only complete refs");
+    CHECK(out.at(0).type.data != nullptr, "complete ref keeps type pointer");
+    CHECK(out.at(0).data.size == 1 && out.at(0).data.data[0] == 'Z', "complete ref keeps data");
+}
+
+static void test_parse_fork_invalid_data_offset_leaves_empty_data() {
+    uint8_t fork[160] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 64;
+    uint32_t data_len = 16;
+    uint32_t map_len = 96;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+
+    uint8_t* ref = write_single_type_map(fork + map_off, 28, 64, "snd ", 1);
+    rsrcd::write_u16be(ref + 0, 200);
+    rsrcd::write_u16be(ref + 2, 0xFFFF);
+    rsrcd::write_u32be(ref + 4, 32);
+    rsrcd::write_u32be(ref + 8, 0);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, 160}, out);
+    CHECK_RESULT(r, "parse invalid data offset");
+    CHECK(out.count() == 1, "invalid data offset still reports ref");
+    CHECK(out.at(0).type.data != nullptr, "invalid data offset keeps type pointer");
+    CHECK(out.at(0).data.empty(), "invalid data offset leaves empty data view");
+    CHECK(out.at(0).data.data == nullptr, "invalid data offset leaves null data pointer");
+}
+
+static void test_parse_fork_invalid_name_offset_leaves_empty_name() {
+    uint8_t fork[192] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 64;
+    uint32_t data_len = 16;
+    uint32_t map_len = 128;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+    rsrcd::write_u32be(fork + data_off, 1);
+    fork[data_off + 4] = 'N';
+
+    uint8_t* ref = write_single_type_map(fork + map_off, 28, 64, "NAME", 1);
+    rsrcd::write_u16be(ref + 0, 201);
+    rsrcd::write_u16be(ref + 2, 1000);
+    rsrcd::write_u32be(ref + 4, 0);
+    rsrcd::write_u32be(ref + 8, 0);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, 192}, out);
+    CHECK_RESULT(r, "parse invalid name offset");
+    CHECK(out.count() == 1, "invalid name offset still reports ref");
+    CHECK(out.at(0).name.empty(), "invalid name offset leaves empty name view");
+    CHECK(out.at(0).name.data == nullptr, "invalid name offset leaves null name pointer");
+    CHECK(out.at(0).data.size == 1 && out.at(0).data.data[0] == 'N', "invalid name offset keeps data view");
+}
+
+static void test_parse_fork_ref_exactly_at_map_boundary() {
+    uint8_t fork[128] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 64;
+    uint32_t data_len = 16;
+    uint32_t map_len = 50;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+    rsrcd::write_u32be(fork + data_off, 1);
+    fork[data_off + 4] = 'B';
+
+    uint8_t* ref = write_single_type_map(fork + map_off, 28, 50, "BNDY", 1);
+    rsrcd::write_u16be(ref + 0, 202);
+    rsrcd::write_u16be(ref + 2, 0xFFFF);
+    rsrcd::write_u32be(ref + 4, 0);
+    rsrcd::write_u32be(ref + 8, 0);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, sizeof(fork)}, out);
+    CHECK_RESULT(r, "parse boundary-ending ref list");
+    CHECK(out.count() == 1, "ref ending at map boundary is parsed");
+    CHECK(out.at(0).id == 202, "boundary ref id preserved");
+    CHECK(out.at(0).data.size == 1 && out.at(0).data.data[0] == 'B', "boundary ref data preserved");
+}
+
+static void test_parse_fork_overflowing_data_range_fails() {
+    uint8_t fork[128] = {};
+    write_basic_fork_header(fork, 0xFFFFFFF0u, 32, 64, 64);
+
+    uint8_t* map = fork + 32;
+    rsrcd::write_u16be(map + 24, 28);
+    rsrcd::write_u16be(map + 26, 28);
+    rsrcd::write_u16be(map + 28, 0xFFFF);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, sizeof(fork)}, out);
+    CHECK(!r, "overflowing data range should fail");
+    CHECK(out.count() == 0, "overflowing data range adds no refs");
+}
+
 // ============================================================================
 // AppleDouble parser
 // ============================================================================
@@ -215,6 +432,25 @@ static void test_parse_adf_single_entry() {
     CHECK(out.count() == 1, "ADF entry count");
     CHECK(out.at(0).data.size == 4, "ADF entry data size");
     CHECK(std::memcmp(out.at(0).data.data, "TEST", 4) == 0, "ADF entry data");
+    CHECK(out.at(0).type.data == buf + 26, "ADF entry type points into source buffer");
+    CHECK(out.at(0).type.size == 4, "ADF entry type size");
+    CHECK(out.at(0).type.data[3] == 2, "ADF entry type bytes preserved");
+}
+
+static void test_parse_adf_invalid_entry_range_fails() {
+    uint8_t buf[64] = {};
+    rsrcd::write_u32be(buf + 0, 0x00051607);
+    rsrcd::write_u32be(buf + 4, 0x00020000);
+    rsrcd::write_u16be(buf + 22, 1);
+
+    rsrcd::write_u32be(buf + 26, 2);
+    rsrcd::write_u32be(buf + 30, 60);
+    rsrcd::write_u32be(buf + 34, 8);
+
+    rsrcd::VecParserOutput<4> out;
+    auto r = rsrcd::Parser{}.parse_adf({buf, sizeof(buf)}, out);
+    CHECK(!r, "ADF entry extending past buffer should fail");
+    CHECK(out.count() == 0, "invalid ADF entry adds no refs");
 }
 
 // ============================================================================
@@ -679,13 +915,22 @@ int main() {
     test_big_endian();
     test_fourcc();
     test_bytes();
+    test_vec_parser_output_heap_indexing();
+    test_vec_parser_output_capacity_overflow();
     test_result();
     test_parse_fork_empty();
     test_parse_fork_too_small();
     test_parse_fork_single_resource();
+    test_parse_fork_many_resources_cross_inline_capacity();
+    test_parse_fork_truncated_ref_list_stops_cleanly();
+    test_parse_fork_invalid_data_offset_leaves_empty_data();
+    test_parse_fork_invalid_name_offset_leaves_empty_name();
+    test_parse_fork_ref_exactly_at_map_boundary();
+    test_parse_fork_overflowing_data_range_fails();
     test_parse_adf_too_small();
     test_parse_adf_bad_magic();
     test_parse_adf_single_entry();
+    test_parse_adf_invalid_entry_range_fails();
     test_fork_view_find();
     test_decode_icon_bw_all_white();
     test_decode_icon_bw_all_black();

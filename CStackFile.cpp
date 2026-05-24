@@ -100,7 +100,7 @@ std::string sanitized_resource_file_name(const std::string& stackName, const std
 		for(char rawCh : text)
 		{
 			const unsigned char ch = static_cast<unsigned char>(rawCh);
-			if((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.')
+			if((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == ':')
 			{
 				result.push_back(static_cast<char>(ch));
 				emitted++;
@@ -224,6 +224,25 @@ std::string mac_roman_string(const CBuf& data, size_t startOffs, size_t endOffs)
 std::string mac_roman_string(const CBuf& data, size_t startOffs)
 {
 	return mac_roman_string(data, startOffs, MacRomanStringEnd(data, startOffs));
+}
+
+static std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
+{
+	std::string result;
+	for(size_t i = 0; i < len; i++)
+	{
+		unsigned char ch = data[i];
+		if(ch >= 128)
+			result.append(reinterpret_cast<const char*>(sMacRomanToUTF8Table[ch - 128]));
+		else if(ch == 0x11)
+		{
+			static unsigned char commandKey[4] = {0xe2, 0x8c, 0x98, 0};
+			result.append(reinterpret_cast<const char*>(commandKey));
+		}
+		else
+			result.push_back(static_cast<char>(ch));
+	}
+	return result;
 }
 
 JsonValue json_rect(int16_t left, int16_t top, int16_t right, int16_t bottom, JsonPoolAllocator& allocator)
@@ -1609,23 +1628,31 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		return true;
 	}
 
+	bool resourceForkHadInvalidResources = false;
 	for (size_t i = 0; i < parsed.count(); i++)
 	{
 		const rsrcd::ResRef& res = parsed.at(i);
 
 		CResourceSummary summary;
-		summary.type.assign(reinterpret_cast<const char*>(res.type.data), 4);
 		summary.id = res.id;
 		summary.flags = res.flags;
-		if (!res.name.empty())
-			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
 		summary.bytes = res.data.size;
 		summary.status = "preserved";
+		if(res.type.size != 4 || res.type.data == nullptr)
+		{
+			summary.type = "????";
+			summary.status = "invalid_type";
+			resourceForkHadInvalidResources = true;
+			mResourceSummaries.push_back(summary);
+			stackimport_emit_diagnosticf( "Warning: Skipping resource with invalid type view at index %zu.\n", i );
+			continue;
+		}
+		summary.type.assign(reinterpret_cast<const char*>(res.type.data), 4);
+		if (!res.name.empty() && res.name.data != nullptr)
+			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
 
-		bool is68K = res.type.size == 4 &&
-			(std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0);
-		bool isPPC = res.type.size == 4 &&
-			(std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0);
+		bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
+		bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
 
 		stackimport::Mac68kDisassemblyResult disassembly;
 		if(is68K)
@@ -1646,7 +1673,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				res.data.size,
 				0);
 		}
-		else if(res.type.size == 4 && std::memcmp(res.type.data, "ICON", 4) == 0)
+		else if(std::memcmp(res.type.data, "ICON", 4) == 0)
 		{
 			if(res.data.size == 128)
 			{
@@ -1670,7 +1697,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 			mResourceSummaries.push_back(summary);
 			continue;
 		}
-		else if(res.type.size == 4 && std::memcmp(res.type.data, "CURS", 4) == 0)
+		else if(std::memcmp(res.type.data, "CURS", 4) == 0)
 		{
 			if(res.data.size >= 68)
 			{
@@ -1695,7 +1722,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 			mResourceSummaries.push_back(summary);
 			continue;
 		}
-		else if(res.type.size == 4 && std::memcmp(res.type.data, "PAT#", 4) == 0)
+		else if(std::memcmp(res.type.data, "PAT#", 4) == 0)
 		{
 			size_t patCount = rsrcd::patlist::count(res.data);
 			int exported = 0;
@@ -1719,6 +1746,59 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				summary.status = "exported";
 				stackimport_emit_infof( "Status: Wrote %d/%zu patterns from PAT# #%d as PNG.\n", exported, patCount, res.id );
 			}
+			mResourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
+		{
+			rsrcd::plte::Palette<64> pal;
+			auto plteResult = rsrcd::plte::parse(res.data, pal);
+			if(plteResult)
+			{
+				StackImportRapidJsonAllocator baseAlloc;
+				JsonPoolAllocator pool(1024, &baseAlloc);
+				JsonDocument doc(&pool, 1024, &baseAlloc);
+				doc.SetObject();
+				JsonPoolAllocator& a = doc.GetAllocator();
+				doc.AddMember("wdef", pal.wdef, a);
+				doc.AddMember("showName", pal.show_name, a);
+				doc.AddMember("selection", pal.selection, a);
+				doc.AddMember("frame", pal.frame, a);
+				doc.AddMember("pictRef", pal.pict_ref, a);
+				doc.AddMember("top", pal.top, a);
+				doc.AddMember("left", pal.left, a);
+
+				JsonValue buttons(rapidjson::kArrayType);
+				for(size_t bi = 0; bi < pal.button_count; bi++)
+				{
+					JsonValue btn(rapidjson::kObjectType);
+					const auto& b = pal.buttons[bi];
+					btn.AddMember("top", b.top, a);
+					btn.AddMember("left", b.left, a);
+					btn.AddMember("bottom", b.bottom, a);
+					btn.AddMember("right", b.right, a);
+					if(!b.message.empty())
+					{
+						std::string msg = mac_roman_from_bytes(b.message.data, b.message.size);
+						btn.AddMember("message", json_string(msg, a), a);
+					}
+					buttons.PushBack(btn, a);
+				}
+				doc.AddMember("buttons", buttons, a);
+
+				char fname[64];
+				snprintf(fname, sizeof(fname), "PLTE_%d.json", res.id);
+				if(write_json_document(OutputPath(fname), doc, baseAlloc))
+				{
+					summary.status = "exported";
+					summary.outputFile = fname;
+					stackimport_emit_infof( "Status: Parsed PLTE #%d (%zu buttons).\n", res.id, pal.button_count);
+				}
+				else
+					summary.status = "export_failed";
+			}
+			else
+				summary.status = "parse_failed";
 			mResourceSummaries.push_back(summary);
 			continue;
 		}
@@ -1756,7 +1836,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		}
 		mResourceSummaries.push_back(summary);
 	}
-	mResourceForkStatus = "ok";
+	mResourceForkStatus = resourceForkHadInvalidResources ? "partial" : "ok";
 	return true;
 }
 
