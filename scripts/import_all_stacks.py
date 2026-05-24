@@ -807,6 +807,8 @@ def kind_for_output(path: Path) -> str:
         return "sound"
     if suffix in {".raw", ".data"}:
         return "raw"
+    if suffix in {".s", ".asm"}:
+        return "assembly"
     return "other"
 
 
@@ -816,7 +818,7 @@ def logical_file_info(rel_path: str) -> tuple[str, int | None]:
         return "printsettings", None
     if name == "source-manifest.json":
         return "source_manifest", None
-    code_resource = re.match(r"^.*_(XCMD|XFCN|xcmd|xfcn|cfrg)_(-?\d+)(?:_.*)?\.txt$", name)
+    code_resource = re.match(r"^.*_(XCMD|XFCN|xcmd|xfcn|cfrg)(?:_(?:mac68k|macppc))?_(-?\d+)(?:_.*)?\.(?:s|asm|txt)$", name)
     if code_resource:
         if code_resource.group(1) == "cfrg":
             logical_kind = "codefragment"
@@ -1459,8 +1461,8 @@ def disassemble_external_code_resources(job: DisassemblyJob) -> DisassemblyResul
         errors="replace",
     )
     disassembly_files = sorted(
-        path for path in output_dir.glob("*.txt")
-        if re.search(r"_(?:XCMD|XFCN|xcmd|xfcn|cfrg)_-?\d+(?:_|\\.)", path.name)
+        path for path in output_dir.iterdir()
+        if path.is_file() and re.search(r"_(?:XCMD|XFCN|xcmd|xfcn|cfrg)(?:_(?:mac68k|macppc))?_-?\d+(?:_|\\.)(?:s|asm|txt)$", path.name)
     )
     provenance = {
         "format": "stackimport.resourceDisassembly.provenance",
@@ -2294,8 +2296,10 @@ def disassembly_resource_index(output_package: Path) -> dict[tuple[str, int], st
     output_dir = output_package / "resource-disassembly"
     if not output_dir.exists():
         return index
-    for path in output_dir.glob("*.txt"):
-        match = re.search(r"_(XCMD|XFCN|xcmd|xfcn|cfrg)_(-?\d+)(?:_|\\.)", path.name)
+    for path in output_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".s", ".asm", ".txt"}:
+            continue
+        match = re.search(r"_(XCMD|XFCN|xcmd|xfcn|cfrg)(?:_(?:mac68k|macppc))?_(-?\d+)(?:_|\\.)", path.name)
         if not match:
             continue
         try:
@@ -2339,7 +2343,14 @@ def index_external_code_resources(
         cfrg_metadata = parse_cfrg_payload(payload) if resource_type == "cfrg" else {}
         cfrg_entries = cfrg_metadata.get("entries") if isinstance(cfrg_metadata, dict) else None
         indexed_entries = cfrg_entries if isinstance(cfrg_entries, list) and cfrg_entries else [None]
-        disassembly_rel_path = disassembly_by_resource.get((resource_type, resource_id), "")
+        disassembly_rel_path = ""
+        manifest_disassembly = resource.get("disassemblyFile")
+        if isinstance(manifest_disassembly, str) and manifest_disassembly:
+            manifest_disassembly_path = output_package / manifest_disassembly
+            if manifest_disassembly_path.exists():
+                disassembly_rel_path = manifest_disassembly
+        if not disassembly_rel_path:
+            disassembly_rel_path = disassembly_by_resource.get((resource_type, resource_id), "")
         output_file_id = None
         if disassembly_rel_path:
             row = conn.execute(

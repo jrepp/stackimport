@@ -83,8 +83,8 @@ scripts/import_all_stacks.py \
   --resource-dasm-jobs 4
 ```
 
-This uses `build/vendor-install/bin/resource_dasm` by default, writes
-`resource-disassembly/*.txt` inside each generated `.xstk` package, and indexes
+The core importer writes embedded disassembly as
+`resource-disassembly/*.s` inside each generated `.xstk` package, and indexes
 those files as code-resource outputs. Keep the generated provenance JSON next to
 the disassembly output.
 

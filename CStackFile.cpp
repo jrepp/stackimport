@@ -1641,7 +1641,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				typeAndArchitecture,
 				summary.id,
 				summary.name,
-				".txt");
+				".s");
 			if(write_text_file(OutputPath(relativePath.c_str()), disassembly.text))
 			{
 				summary.status = "disassembled";
