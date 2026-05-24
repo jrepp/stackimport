@@ -31,7 +31,8 @@ Strict compiler warnings are enabled by default. To make warnings fail the build
 
 Release versions use Semantic Versioning. The canonical release version lives in
 `VERSION.txt`, release tags are `v<VERSION>`, and the release workflow validates that
-the tag and file match before publishing artifacts. See `RELEASE.md`.
+the tag and file match before publishing artifacts. Patch release numbers can be
+generated automatically with the `Patch Release` workflow. See `RELEASE.md`.
 
 Static-analysis hooks are available through CMake when the local tools are
 installed:

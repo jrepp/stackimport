@@ -33,6 +33,24 @@ git push origin v0.1.0
 
 The release workflow rejects tags that do not match `VERSION.txt`.
 
+## Automatic Patch Releases
+
+Use the `Patch Release` workflow to generate the next patch number
+automatically. It reads the current stable `VERSION.txt`, inspects existing
+`vMAJOR.MINOR.PATCH` tags for that same major/minor line, writes the next patch
+number to `VERSION.txt`, commits the bump, tags it, pushes both the branch and
+tag, and dispatches the normal `Release` workflow from that tag.
+
+For example, if `VERSION.txt` is `0.1.0` and the highest existing `v0.1.*` tag
+is `v0.1.3`, the workflow creates:
+
+```text
+VERSION.txt = 0.1.4
+tag = v0.1.4
+```
+
+The patch workflow then starts the normal `Release` workflow.
+
 ## GitHub Release Workflow
 
 `.github/workflows/release.yml` runs for `v*` tags and can also be started

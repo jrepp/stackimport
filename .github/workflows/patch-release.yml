@@ -1,0 +1,76 @@
+name: Patch Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to patch-release from.'
+        required: true
+        default: master
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  patch-release:
+    name: Create next patch tag
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Compute next patch version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/next_release_version.py \
+            --version-file VERSION.txt \
+            --write \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Commit version bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION.txt
+          git commit -m "Release ${{ steps.version.outputs.tag }}"
+
+      - name: Tag release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "${{ steps.version.outputs.tag }}"
+
+      - name: Push branch and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${{ inputs.branch }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Start release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --ref "${{ steps.version.outputs.tag }}" \
+            -f version="${{ steps.version.outputs.version }}"
+
+      - name: Summary
+        shell: bash
+        run: |
+          cat >> "${GITHUB_STEP_SUMMARY}" <<'EOF'
+          Created patch release tag `${{ steps.version.outputs.tag }}`.
+
+          Started the `Release` workflow from that tag.
+          EOF
