@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import json
 import os
@@ -2577,11 +2576,28 @@ def insert_stack_statistics(conn: sqlite3.Connection, stack_id: int, attempt_id:
             insert_stat(conn, stack_id, attempt_id, metric, int(value or 0), str(detail or ""))
 
 
-def write_tsv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames, dialect="excel-tab", extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+def quote_sql_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def write_report_table(
+    conn: sqlite3.Connection,
+    table_name: str,
+    rows: list[dict[str, object]],
+    fieldnames: list[str],
+) -> None:
+    quoted_table = quote_sql_identifier(table_name)
+    conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
+    columns = ", ".join(f"{quote_sql_identifier(field)} TEXT" for field in fieldnames)
+    conn.execute(f"CREATE TABLE {quoted_table}({columns})")
+    if not rows:
+        return
+    placeholders = ", ".join("?" for _ in fieldnames)
+    quoted_columns = ", ".join(quote_sql_identifier(field) for field in fieldnames)
+    conn.executemany(
+        f"INSERT INTO {quoted_table}({quoted_columns}) VALUES ({placeholders})",
+        [[row.get(field) for field in fieldnames] for row in rows],
+    )
 
 
 DISASSEMBLY_LINE_RE = re.compile(
@@ -2603,24 +2619,33 @@ def scan_disassembly_calls(disassembly_path: Path, platform: str) -> list[dict[s
         if not match:
             continue
         mnemonic = match.group("mnemonic").lower()
-        operands = match.group("operands").strip()
+        operands_with_annotation = match.group("operands").strip()
+        operands, _, annotation = operands_with_annotation.partition(" ; stackimport:")
+        operands = operands.strip()
+        annotation = annotation.strip()
         call_kind = ""
         target = ""
 
         if platform == "mac68k":
             if mnemonic == "syscall":
-                call_kind = "toolbox_trap"
+                call_kind = "toolbox_trap" if "Toolbox trap" in annotation else "os_trap"
                 target = operands.split(None, 1)[0] if operands else ""
             elif mnemonic in {"jsr", "jmp", "bsr"}:
-                call_kind = "control_transfer"
+                call_kind = "extension_exit" if "possible extension exit" in annotation else "control_transfer"
                 target = operands
+            elif mnemonic == "rts":
+                call_kind = "extension_return"
+                target = "rts"
         elif platform == "macppc":
             if mnemonic in {"bl", "bla"}:
                 call_kind = "branch_link"
                 target = operands
             elif mnemonic in {"bctrl", "bcctrl", "bclrl", "blrl"}:
-                call_kind = "indirect_branch_link"
+                call_kind = "extension_exit"
                 target = mnemonic
+            elif mnemonic == "blr":
+                call_kind = "extension_return"
+                target = "blr"
             elif mnemonic == "sc":
                 call_kind = "system_call"
                 target = "sc"
@@ -2635,6 +2660,7 @@ def scan_disassembly_calls(disassembly_path: Path, platform: str) -> list[dict[s
                 "target": target,
                 "mnemonic": mnemonic,
                 "operands": operands,
+                "annotation": annotation,
                 "instruction": line.strip(),
             }
         )
@@ -2708,8 +2734,9 @@ def export_disassembly_call_audit(conn: sqlite3.Connection, run_dir: Path, run_i
         summary["resource_count"] = len(resources_seen)
         summary["stack_count"] = len(stacks_seen)
 
-    write_tsv(
-        run_dir / "disassembly-call-audit.tsv",
+    write_report_table(
+        conn,
+        "report_disassembly_call_audit",
         rows,
         [
             "stack_name",
@@ -2726,11 +2753,13 @@ def export_disassembly_call_audit(conn: sqlite3.Connection, run_dir: Path, run_i
             "target",
             "mnemonic",
             "operands",
+            "annotation",
             "instruction",
         ],
     )
-    write_tsv(
-        run_dir / "disassembly-call-usage.tsv",
+    write_report_table(
+        conn,
+        "report_disassembly_call_usage",
         sorted(
             aggregate.values(),
             key=lambda item: (
@@ -2755,7 +2784,7 @@ def export_disassembly_call_audit(conn: sqlite3.Connection, run_dir: Path, run_i
 
 def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None:
     report_queries = {
-        "summary.tsv": (
+        "report_summary": (
             """
             SELECT a.status, a.exit_code, a.warnings, a.errors, a.status_lines, a.blocks, a.resources,
                    s.stack_name, s.card_count_declared, s.card_width, s.card_height,
@@ -2783,7 +2812,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "output_package",
             ],
         ),
-        "diagnostics.tsv": (
+        "report_diagnostics": (
             """
             SELECT d.severity, a.import_input AS input, d.line, d.gap_kind, d.message, a.log_path
             FROM diagnostics d
@@ -2793,7 +2822,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["severity", "input", "line", "gap_kind", "message", "log_path"],
         ),
-        "classifications.tsv": (
+        "report_classifications": (
             """
             SELECT s.rel_path AS archive_input, e.rel_path AS extracted_input, e.bytes, e.extension,
                    e.finder_type, e.binary_type, e.binary_size, e.decision, e.reason
@@ -2814,7 +2843,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "reason",
             ],
         ),
-        "format-gaps.tsv": (
+        "report_format_gaps": (
             """
             SELECT kind, detail, subject, log_path
             FROM format_gaps
@@ -2823,7 +2852,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["kind", "detail", "subject", "log_path"],
         ),
-        "output-files.tsv": (
+        "report_output_files": (
             """
             SELECT s.stack_name, a.import_input, f.rel_path, f.bytes, f.extension,
                    f.kind, f.logical_kind, f.logical_id, f.referenced_by, f.sha256
@@ -2846,7 +2875,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "sha256",
             ],
         ),
-        "json-sections.tsv": (
+        "report_json_sections": (
             """
             SELECT s.stack_name, a.import_input, x.file_rel_path, x.depth, x.tag, x.attrs_json, x.text_size
             FROM json_sections x
@@ -2857,7 +2886,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["stack_name", "import_input", "file_rel_path", "depth", "tag", "attrs_json", "text_size"],
         ),
-        "stacks.tsv": (
+        "report_stacks": (
             """
             SELECT stack_name, import_input, card_count_declared, card_width, card_height,
                    project_user_level, created_by_version, last_compacted_version,
@@ -2884,7 +2913,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "output_package",
             ],
         ),
-        "stack-statistics.tsv": (
+        "report_stack_statistics": (
             """
             SELECT s.stack_name, s.import_input, st.metric, st.detail, st.value
             FROM stack_statistics st
@@ -2894,7 +2923,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["stack_name", "import_input", "metric", "detail", "value"],
         ),
-        "parsed-parts.tsv": (
+        "report_parsed_parts": (
             """
             SELECT s.stack_name, s.import_input, of.rel_path AS file_rel_path,
                    p.container_kind, p.container_id, p.part_id, p.part_type, p.name,
@@ -2933,7 +2962,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "script_bytes",
             ],
         ),
-        "parsed-content.tsv": (
+        "report_parsed_content": (
             """
             SELECT s.stack_name, s.import_input, of.rel_path AS file_rel_path,
                    c.container_kind, c.container_id, c.layer, c.part_id,
@@ -2958,7 +2987,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "sample",
             ],
         ),
-        "binary-chunks.tsv": (
+        "report_binary_chunks": (
             """
             SELECT s.stack_name, a.import_input, c.chunk_type, c.chunk_id, c.chunk_bytes,
                    c.status, c.understood, of.rel_path AS output_file, c.evidence, c.log_line
@@ -2982,7 +3011,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "log_line",
             ],
         ),
-        "embedded-files.tsv": (
+        "report_embedded_files": (
             """
             SELECT s.stack_name, s.import_input, e.rel_path, e.embedded_kind,
                    e.logical_kind, e.logical_id, e.bytes, e.sha256, e.referenced_by,
@@ -3006,7 +3035,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "source_chunk_id",
             ],
         ),
-        "chunk-usage.tsv": (
+        "report_chunk_usage": (
             """
             SELECT c.chunk_type, c.status, c.understood, COUNT(*) AS stack_count,
                    GROUP_CONCAT(DISTINCT s.stack_name) AS stacks
@@ -3018,7 +3047,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["chunk_type", "status", "understood", "stack_count", "stacks"],
         ),
-        "chunk-type-counts.tsv": (
+        "report_chunk_type_counts": (
             """
             SELECT c.chunk_type,
                    COUNT(*) AS chunk_count,
@@ -3051,7 +3080,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "stacks",
             ],
         ),
-        "embedded-file-usage.tsv": (
+        "report_embedded_file_usage": (
             """
             SELECT e.embedded_kind, e.logical_kind, e.sha256, e.bytes, COUNT(*) AS occurrence_count,
                    GROUP_CONCAT(DISTINCT s.stack_name) AS stacks
@@ -3063,7 +3092,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["embedded_kind", "logical_kind", "sha256", "bytes", "occurrence_count", "stacks"],
         ),
-        "external-code-resources.tsv": (
+        "report_external_code_resources": (
             """
             SELECT s.stack_name, s.import_input, c.resource_type, c.resource_id,
                    c.resource_name, c.external_kind, c.platform, c.instruction_format,
@@ -3090,7 +3119,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "disassembly_rel_path",
             ],
         ),
-        "external-code-usage.tsv": (
+        "report_external_code_usage": (
             """
             SELECT platform, instruction_format, container_format, external_kind,
                    COUNT(*) AS occurrence_count,
@@ -3113,7 +3142,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "resource_types",
             ],
         ),
-        "disassembly-summary.tsv": (
+        "report_disassembly_summary": (
             """
             SELECT c.platform, c.instruction_format, c.disassembly_status,
                    COUNT(*) AS resource_count,
@@ -3140,7 +3169,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "disassembly_bytes",
             ],
         ),
-        "disassembly-files-summary.tsv": (
+        "report_disassembly_files_summary": (
             """
             SELECT f.extension, f.kind, f.logical_kind,
                    COUNT(*) AS file_count,
@@ -3162,7 +3191,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "disassembly_bytes",
             ],
         ),
-        "missing-disassemblies.tsv": (
+        "report_missing_disassemblies": (
             """
             SELECT s.stack_name, s.import_input, c.resource_type, c.resource_id,
                    c.resource_name, c.platform, c.instruction_format,
@@ -3186,7 +3215,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "payload_sha256",
             ],
         ),
-        "unindexed-disassembly-files.tsv": (
+        "report_unindexed_disassembly_files": (
             """
             SELECT s.stack_name, s.import_input, f.rel_path, f.bytes, f.sha256,
                    f.logical_kind, f.logical_id
@@ -3208,7 +3237,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "logical_id",
             ],
         ),
-        "external-binary-files.tsv": (
+        "report_external_binary_files": (
             """
             SELECT archive_input, external_input, external_kind, bytes, extension,
                    finder_type, binary_type, binary_size, sha256, classification_reason, path
@@ -3230,7 +3259,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "path",
             ],
         ),
-        "external-binary-usage.tsv": (
+        "report_external_binary_usage": (
             """
             SELECT external_kind, extension, finder_type, binary_type, COUNT(*) AS occurrence_count,
                    COUNT(DISTINCT sha256) AS distinct_hashes,
@@ -3251,9 +3280,9 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             ],
         ),
     }
-    for filename, (query, fieldnames) in report_queries.items():
+    for table_name, (query, fieldnames) in report_queries.items():
         rows = [dict(row) for row in conn.execute(query, (run_id,))]
-        write_tsv(run_dir / filename, rows, fieldnames)
+        write_report_table(conn, table_name, rows, fieldnames)
     export_disassembly_call_audit(conn, run_dir, run_id)
 
     counts = [dict(row) for row in conn.execute(
@@ -3266,7 +3295,8 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
         """,
         (run_id,),
     )]
-    write_tsv(run_dir / "format-gap-counts.tsv", counts, ["kind", "count"])
+    write_report_table(conn, "report_format_gap_counts", counts, ["kind", "count"])
+    conn.commit()
 
 
 def main() -> int:
@@ -3509,29 +3539,16 @@ def main() -> int:
     print()
     print(f"Run directory: {run_dir}")
     print(f"Database: {db_path}")
-    print(f"Summary: {run_dir / 'summary.tsv'}")
-    print(f"Format gaps: {run_dir / 'format-gaps.tsv'}")
-    print(f"Format gap counts: {run_dir / 'format-gap-counts.tsv'}")
-    print(f"Output files: {run_dir / 'output-files.tsv'}")
-    print(f"JSON sections: {run_dir / 'json-sections.tsv'}")
-    print(f"Stacks: {run_dir / 'stacks.tsv'}")
-    print(f"Stack statistics: {run_dir / 'stack-statistics.tsv'}")
-    print(f"Parsed parts: {run_dir / 'parsed-parts.tsv'}")
-    print(f"Parsed content: {run_dir / 'parsed-content.tsv'}")
-    print(f"Binary chunks: {run_dir / 'binary-chunks.tsv'}")
-    print(f"Chunk usage: {run_dir / 'chunk-usage.tsv'}")
-    print(f"Embedded files: {run_dir / 'embedded-files.tsv'}")
-    print(f"Embedded file usage: {run_dir / 'embedded-file-usage.tsv'}")
-    print(f"External code resources: {run_dir / 'external-code-resources.tsv'}")
-    print(f"External code usage: {run_dir / 'external-code-usage.tsv'}")
-    print(f"Disassembly summary: {run_dir / 'disassembly-summary.tsv'}")
-    print(f"Disassembly file summary: {run_dir / 'disassembly-files-summary.tsv'}")
-    print(f"Missing disassemblies: {run_dir / 'missing-disassemblies.tsv'}")
-    print(f"Unindexed disassembly files: {run_dir / 'unindexed-disassembly-files.tsv'}")
-    print(f"Disassembly call audit: {run_dir / 'disassembly-call-audit.tsv'}")
-    print(f"Disassembly call usage: {run_dir / 'disassembly-call-usage.tsv'}")
-    print(f"External binary files: {run_dir / 'external-binary-files.tsv'}")
-    print(f"External binary usage: {run_dir / 'external-binary-usage.tsv'}")
+    print("Report tables: report_summary, report_diagnostics, report_classifications, report_format_gaps")
+    print("Report tables: report_output_files, report_json_sections, report_stacks, report_stack_statistics")
+    print("Report tables: report_parsed_parts, report_parsed_content, report_binary_chunks")
+    print("Report tables: report_chunk_usage, report_chunk_type_counts, report_format_gap_counts")
+    print("Report tables: report_embedded_files, report_embedded_file_usage")
+    print("Report tables: report_external_code_resources, report_external_code_usage")
+    print("Report tables: report_disassembly_summary, report_disassembly_files_summary")
+    print("Report tables: report_missing_disassemblies, report_unindexed_disassembly_files")
+    print("Report tables: report_disassembly_call_audit, report_disassembly_call_usage")
+    print("Report tables: report_external_binary_files, report_external_binary_usage")
     print(
         f"Processed: {processed}, stack ok: {stack_ok}, stack failed: {stack_failed}, "
         f"no-stack inputs: {no_stack}, extract failed: {extract_failed}"

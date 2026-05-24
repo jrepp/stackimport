@@ -120,8 +120,8 @@ classifying and skipping them.
 Prefer contrastive analysis over single-file guesses:
 
 1. Run a focused subset through `scripts/import_all_stacks.py`.
-2. Review `summary.tsv`, diagnostics, logs, and the SQLite database in the run
-   directory.
+2. Review the `report_summary`, `report_diagnostics`, and related report tables
+   in the run SQLite database, plus captured logs in the run directory.
 3. Separate extraction/classification issues from parser issues.
 4. Compare successful and failing stacks with similar block/resource layouts.
 5. Use `--dumprawblocks` on representative inputs.
