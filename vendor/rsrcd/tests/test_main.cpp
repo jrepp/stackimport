@@ -305,6 +305,40 @@ static void test_parse_fork_truncated_ref_list_stops_cleanly() {
     CHECK(out.at(0).data.size == 1 && out.at(0).data.data[0] == 'Z', "complete ref keeps data");
 }
 
+static void test_parse_fork_declared_count_clamps_to_complete_refs() {
+    uint8_t fork[128] = {};
+    uint32_t data_off = 16;
+    uint32_t map_off = 64;
+    uint32_t data_len = 16;
+    uint32_t map_len = 52;
+    write_basic_fork_header(fork, data_off, map_off, data_len, map_len);
+    rsrcd::write_u32be(fork + data_off, 1);
+    fork[data_off + 4] = 'C';
+
+    uint8_t* map = fork + map_off;
+    rsrcd::write_u16be(map + 24, 28);
+    rsrcd::write_u16be(map + 26, 52);
+
+    uint8_t* type_list = map + 28;
+    rsrcd::write_u16be(type_list, 0);
+    std::memcpy(type_list + 2, "CLMP", 4);
+    rsrcd::write_u16be(type_list + 6, 0xFFFF);
+    rsrcd::write_u16be(type_list + 8, 10);
+
+    uint8_t* ref = type_list + 10;
+    rsrcd::write_u16be(ref + 0, 203);
+    rsrcd::write_u16be(ref + 2, 0xFFFF);
+    rsrcd::write_u32be(ref + 4, 0);
+    rsrcd::write_u32be(ref + 8, 0);
+
+    rsrcd::VecParserOutput<2> out;
+    auto r = rsrcd::Parser{}.parse_fork({fork, sizeof(fork)}, out);
+    CHECK_RESULT(r, "parse count clamped fork");
+    CHECK(out.count() == 1, "declared max count clamps to complete refs");
+    CHECK(out.at(0).id == 203, "clamped ref id preserved");
+    CHECK(out.at(0).data.size == 1 && out.at(0).data.data[0] == 'C', "clamped ref data preserved");
+}
+
 static void test_parse_fork_invalid_data_offset_leaves_empty_data() {
     uint8_t fork[160] = {};
     uint32_t data_off = 16;
@@ -923,6 +957,7 @@ int main() {
     test_parse_fork_single_resource();
     test_parse_fork_many_resources_cross_inline_capacity();
     test_parse_fork_truncated_ref_list_stops_cleanly();
+    test_parse_fork_declared_count_clamps_to_complete_refs();
     test_parse_fork_invalid_data_offset_leaves_empty_data();
     test_parse_fork_invalid_name_offset_leaves_empty_name();
     test_parse_fork_ref_exactly_at_map_boundary();

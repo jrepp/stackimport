@@ -408,7 +408,7 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     uint16_t num_types = read_u16be(map.data + type_list_off);
     ++num_types;
 
-    struct InlineType { FourCC type; uint16_t count; uint16_t offset; };
+    struct InlineType { FourCC type; size_t count; uint16_t offset; };
     InlineType types[64];
     size_t type_count = 0;
 
@@ -416,9 +416,11 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
         size_t off = type_list_off + 2 + i * 8;
         if (off + 8 > map.size) break;
         types[i].type = FourCC::from_bytes(map.data + off);
-        types[i].count = read_u16be(map.data + off + 4);
+        types[i].count = static_cast<size_t>(read_u16be(map.data + off + 4)) + 1;
         types[i].offset = read_u16be(map.data + off + 6);
-        ++types[i].count;
+        size_t res_off = type_list_off + types[i].offset;
+        size_t available_refs = res_off <= map.size ? (map.size - res_off) / 12 : 0;
+        types[i].count = std::min(types[i].count, available_refs);
         type_count = i + 1;
     }
 
@@ -432,7 +434,7 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     for (size_t ti = 0; ti < type_count; ++ti) {
         size_t res_off = type_list_off + types[ti].offset;
 
-        for (uint16_t ri = 0; ri < types[ti].count; ++ri) {
+        for (size_t ri = 0; ri < types[ti].count; ++ri) {
             if (!range_in_bounds(res_off, 12, map.size)) break;
 
             ResRef ref{};
