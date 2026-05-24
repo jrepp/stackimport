@@ -29,6 +29,10 @@ Strict compiler warnings are enabled by default. To make warnings fail the build
 
     cmake -S . -B build -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON
 
+Release versions use Semantic Versioning. The canonical release version lives in
+`VERSION`, release tags are `v<VERSION>`, and the release workflow validates that
+the tag and file match before publishing artifacts. See `RELEASE.md`.
+
 Static-analysis hooks are available through CMake when the local tools are
 installed:
 

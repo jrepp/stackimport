@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(stackimport LANGUAGES C CXX)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STACKIMPORT_VERSION_FULL)
+string(STRIP "${STACKIMPORT_VERSION_FULL}" STACKIMPORT_VERSION_FULL)
+if(NOT STACKIMPORT_VERSION_FULL MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$")
+    message(FATAL_ERROR "VERSION must be a SemVer 2.0.0 version")
+endif()
+string(REGEX REPLACE "^([0-9]+\\.[0-9]+\\.[0-9]+).*$" "\\1" STACKIMPORT_VERSION_CORE "${STACKIMPORT_VERSION_FULL}")
+
+project(stackimport VERSION "${STACKIMPORT_VERSION_CORE}" LANGUAGES C CXX)
 
 option(STACKIMPORT_STRICT_WARNINGS "Enable strict compiler warnings" ON)
 option(STACKIMPORT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)

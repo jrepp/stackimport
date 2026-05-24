@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer version to release. Must match VERSION.'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate SemVer metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--version-file VERSION --github-output "${GITHUB_OUTPUT}")
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            args+=(--tag "${GITHUB_REF_NAME}")
+          else
+            args+=(--version "${{ inputs.version }}" --tag "v${{ inputs.version }}")
+          fi
+          python3 scripts/validate_release_version.py "${args[@]}"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            artifact_suffix: linux-amd64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            artifact_suffix: linux-arm64
+          - target: windows-amd64
+            runner: windows-2022
+            artifact_suffix: windows-amd64
+          - target: windows-arm64
+            runner: windows-11-arm
+            artifact_suffix: windows-arm64
+          - target: macos-amd64
+            runner: macos-15-intel
+            artifact_suffix: macos-amd64
+          - target: macos-arm64
+            runner: macos-14
+            artifact_suffix: macos-arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
+          -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
+
+      - name: Build static library, CLI, and tests
+        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          package_name="stackimport-${version}-${{ matrix.artifact_suffix }}"
+          package_dir="artifacts/${package_name}"
+          mkdir -p "${package_dir}/bin" "${package_dir}/lib" "${package_dir}/include"
+
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            cp build/Release/stackimport.exe "${package_dir}/bin/"
+            cp build/Release/stackimport-tests.exe "${package_dir}/bin/"
+            cp build/Release/stackimport.lib "${package_dir}/lib/"
+          else
+            cp build/stackimport "${package_dir}/bin/"
+            cp build/stackimport-tests "${package_dir}/bin/"
+            cp build/libstackimport.a "${package_dir}/lib/"
+          fi
+
+          cp stackimport_c.h "${package_dir}/include/"
+          cp VERSION README.md "${package_dir}/"
+          (cd artifacts && cmake -E tar cf "${package_name}.zip" --format=zip -- "${package_name}")
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stackimport-${{ needs.validate.outputs.version }}-${{ matrix.artifact_suffix }}
+          path: artifacts/stackimport-${{ needs.validate.outputs.version }}-${{ matrix.artifact_suffix }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: stackimport-${{ needs.validate.outputs.version }}-*
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_args=(
+            "${RELEASE_TAG}"
+            dist/*
+            --title "stackimport ${RELEASE_VERSION}"
+            --generate-notes
+          )
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            release_args+=(--verify-tag)
+          else
+            release_args+=(--target "${GITHUB_SHA}")
+          fi
+          if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
