@@ -6,7 +6,16 @@
 #include <cstring>
 #include <string>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#include <malloc.h>
+#else
 #include <unistd.h>
+#endif
+
+#if defined(_WIN32) && !defined(PATH_MAX)
+#define PATH_MAX _MAX_PATH
+#endif
 
 
 void	RunTests();
@@ -22,14 +31,23 @@ void* cli_allocate(size_t size, size_t alignment, void*)
 	void* ptr = nullptr;
 	if(alignment < sizeof(void*))
 		alignment = sizeof(void*);
+#if defined(_WIN32)
+	ptr = _aligned_malloc(size, alignment);
+	return ptr;
+#else
 	if(posix_memalign(&ptr, alignment, size) != 0)
 		return nullptr;
 	return ptr;
+#endif
 }
 
 void cli_deallocate(void* ptr, void*)
 {
+#if defined(_WIN32)
+	_aligned_free(ptr);
+#else
 	free(ptr);
+#endif
 }
 
 void cli_message(uint32_t severity, const char* message, void*)
@@ -54,22 +72,42 @@ int cli_close_file(stackimport_file_handle file, void*)
 
 int cli_make_directory(const char* path, void*)
 {
+#if defined(_WIN32)
+	return _mkdir(path);
+#else
 	return mkdir(path, 0777);
+#endif
 }
 
 std::string absolute_path(const char* path)
 {
 	std::string result(path ? path : "");
-	if(!result.empty() && result[0] == '/')
+	if(!result.empty() && (result[0] == '/'
+#if defined(_WIN32)
+		|| result[0] == '\\' || (result.size() > 1 && result[1] == ':')
+#endif
+		))
 		return result;
 
 	char cwd[PATH_MAX + 1] = {0};
+#if defined(_WIN32)
+	if(!_getcwd(cwd, sizeof(cwd)))
+#else
 	if(!getcwd(cwd, sizeof(cwd)))
+#endif
 		return std::string();
 
 	std::string fullpath = cwd;
-	if(!fullpath.empty() && fullpath[fullpath.size() - 1] != '/')
+	if(!fullpath.empty() && fullpath[fullpath.size() - 1] != '/'
+#if defined(_WIN32)
+		&& fullpath[fullpath.size() - 1] != '\\'
+#endif
+		)
+#if defined(_WIN32)
+		fullpath += '\\';
+#else
 		fullpath += '/';
+#endif
 	fullpath += result;
 	return fullpath;
 }
@@ -77,7 +115,7 @@ std::string absolute_path(const char* path)
 std::string default_output_package_path(const std::string& input_path)
 {
 	std::string package_path(input_path);
-	const std::string::size_type slash = package_path.find_last_of('/');
+	const std::string::size_type slash = package_path.find_last_of("/\\");
 	const std::string::size_type dot = package_path.find_last_of('.');
 	if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
 	{
