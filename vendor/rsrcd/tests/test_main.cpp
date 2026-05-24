@@ -492,12 +492,14 @@ static void test_parse_adf_invalid_entry_range_fails() {
 // ============================================================================
 
 static void test_fork_view_find() {
+    rsrcd::FourCC icon("ICON");
+    rsrcd::FourCC curs("CURS");
     rsrcd::ResRef refs[3] = {};
-    refs[0].type = rsrcd::FourCC("ICON").as_bytes();
+    refs[0].type = icon.as_bytes();
     refs[0].id = 128;
-    refs[1].type = rsrcd::FourCC("CURS").as_bytes();
+    refs[1].type = curs.as_bytes();
     refs[1].id = 256;
-    refs[2].type = rsrcd::FourCC("ICON").as_bytes();
+    refs[2].type = icon.as_bytes();
     refs[2].id = 129;
 
     rsrcd::ForkView view{};
