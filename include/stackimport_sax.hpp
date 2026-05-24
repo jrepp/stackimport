@@ -8,6 +8,7 @@
 // - Non-owning references (BlockRef) - owns nothing
 // - parse_view: zero-copy path, payload is a view into caller's buffer
 // - parse: streaming path, payload read from IStackReader during callback
+// - resource payload callbacks let clients opt into native or converted data
 // - Strong domain types for block type/id
 
 #pragma once
@@ -99,6 +100,40 @@ struct BlockRef {
 };
 
 // ============================================================================
+// Resource streaming references - non-owning, no allocation
+// ============================================================================
+
+enum class ResourcePayloadFormat : uint8_t {
+    Native = 0,
+    Rgba32 = 1,
+    JsonUtf8 = 2,
+    TextUtf8 = 3,
+};
+
+struct ResourceRef {
+    rsrcd::FourCC type;
+    int32_t id;
+    rsrcd::Bytes name;
+    uint8_t flags;
+    uint32_t order;
+    size_t native_size;
+};
+
+struct ResourcePayload {
+    ResourceRef resource;
+    ResourcePayloadFormat format;
+    rsrcd::Bytes data;
+    uint32_t variant_index;
+    uint32_t width;
+    uint32_t height;
+    uint32_t row_bytes;
+    int32_t hotspot_x;
+    int32_t hotspot_y;
+    const char* media_type;
+    const char* description;
+};
+
+// ============================================================================
 // Well-known block types
 // ============================================================================
 
@@ -157,6 +192,194 @@ public:
 
     virtual auto on_block(const BlockRef& block, IStackReader& reader) -> bool = 0;
     virtual auto on_error(const char* msg) -> bool = 0;
+};
+
+// ============================================================================
+// IResourceOutput - callback interface for native and converted resources
+//
+// The importer first calls wants_resource_payload with a descriptor whose data
+// may be empty. Returning false lets the client skip conversion and delivery.
+// on_resource_payload receives a non-owning view valid only for the callback.
+// ============================================================================
+
+class IResourceOutput {
+public:
+    virtual ~IResourceOutput() = default;
+
+    virtual auto wants_resource_payload(const ResourcePayload& payload) -> bool {
+        (void)payload;
+        return true;
+    }
+    virtual auto on_resource_payload(const ResourcePayload& payload) -> bool = 0;
+    virtual auto on_resource_error(const ResourceRef& resource, const char* msg) -> bool {
+        (void)resource;
+        (void)msg;
+        return true;
+    }
+};
+
+struct ResourceWalkOptions {
+    bool emit_native;
+    bool emit_converted;
+
+    constexpr ResourceWalkOptions() : emit_native(true), emit_converted(true) {}
+};
+
+inline auto resource_ref_from_resref(const rsrcd::ResRef& res) -> ResourceRef {
+    ResourceRef ref{};
+    if (res.type.size == 4 && res.type.data != nullptr) {
+        ref.type = rsrcd::FourCC::from_bytes(res.type.data);
+    }
+    ref.id = res.id;
+    ref.name = res.name;
+    ref.flags = res.flags;
+    ref.order = res.order;
+    ref.native_size = res.data.size;
+    return ref;
+}
+
+inline void swap_resource_bgra_to_rgba(uint8_t* data, size_t pixel_count) {
+    for (size_t i = 0; i < pixel_count; ++i) {
+        uint8_t tmp = data[i * 4];
+        data[i * 4] = data[i * 4 + 2];
+        data[i * 4 + 2] = tmp;
+    }
+}
+
+inline auto emit_resource_payload(IResourceOutput& output, ResourcePayload payload) -> bool {
+    ResourcePayload descriptor = payload;
+    descriptor.data.data = nullptr;
+    if (!output.wants_resource_payload(descriptor)) {
+        return true;
+    }
+    return output.on_resource_payload(payload);
+}
+
+class ResourceForkParser {
+public:
+    auto parse_fork(rsrcd::Bytes buf,
+                    IResourceOutput& output,
+                    ResourceWalkOptions options = ResourceWalkOptions{}) -> rsrcd::Result {
+        rsrcd::VecParserOutput<256> parsed;
+        auto result = rsrcd::Parser{}.parse_fork(buf, parsed);
+        if (!result) {
+            ResourceRef empty{};
+            output.on_resource_error(empty, result.message());
+            return result;
+        }
+
+        for (size_t i = 0; i < parsed.count(); ++i) {
+            const rsrcd::ResRef& res = parsed.at(i);
+            if (res.type.size != 4 || res.type.data == nullptr) {
+                ResourceRef invalid{};
+                invalid.id = res.id;
+                invalid.flags = res.flags;
+                invalid.order = res.order;
+                invalid.native_size = res.data.size;
+                if (!output.on_resource_error(invalid, "invalid resource type")) {
+                    break;
+                }
+                continue;
+            }
+
+            const ResourceRef ref = resource_ref_from_resref(res);
+            if (options.emit_native) {
+                ResourcePayload native{};
+                native.resource = ref;
+                native.format = ResourcePayloadFormat::Native;
+                native.data = res.data;
+                native.media_type = "application/octet-stream";
+                native.description = "native resource data";
+                if (!emit_resource_payload(output, native)) {
+                    break;
+                }
+            }
+
+            if (!options.emit_converted) {
+                continue;
+            }
+
+            if (res.type.size == 4 && std::memcmp(res.type.data, "ICON", 4) == 0 && res.data.size == 128) {
+                ResourcePayload descriptor{};
+                descriptor.resource = ref;
+                descriptor.format = ResourcePayloadFormat::Rgba32;
+                descriptor.data = rsrcd::Bytes{nullptr, 32u * 32u * 4u};
+                descriptor.width = 32;
+                descriptor.height = 32;
+                descriptor.row_bytes = 32 * 4;
+                descriptor.media_type = "image/x-rgba32";
+                descriptor.description = "decoded 32x32 ICON pixels";
+                if (output.wants_resource_payload(descriptor)) {
+                    uint8_t rgba[32 * 32 * 4];
+                    rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+                    if (rsrcd::img::decode_icon_bw(res.data, dst)) {
+                        swap_resource_bgra_to_rgba(rgba, 32u * 32u);
+                        descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+                        if (!output.on_resource_payload(descriptor)) {
+                            break;
+                        }
+                    }
+                }
+            } else if (res.type.size == 4 && std::memcmp(res.type.data, "CURS", 4) == 0 && res.data.size >= 68) {
+                ResourcePayload descriptor{};
+                descriptor.resource = ref;
+                descriptor.format = ResourcePayloadFormat::Rgba32;
+                descriptor.data = rsrcd::Bytes{nullptr, 16u * 16u * 4u};
+                descriptor.width = 16;
+                descriptor.height = 16;
+                descriptor.row_bytes = 16 * 4;
+                descriptor.media_type = "image/x-rgba32";
+                descriptor.description = "decoded 16x16 CURS pixels";
+                if (output.wants_resource_payload(descriptor)) {
+                    uint8_t rgba[16 * 16 * 4];
+                    rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+                    int16_t hot_x = 0;
+                    int16_t hot_y = 0;
+                    if (rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y)) {
+                        swap_resource_bgra_to_rgba(rgba, 16u * 16u);
+                        descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+                        descriptor.hotspot_x = hot_x;
+                        descriptor.hotspot_y = hot_y;
+                        if (!output.on_resource_payload(descriptor)) {
+                            break;
+                        }
+                    }
+                }
+            } else if (res.type.size == 4 && std::memcmp(res.type.data, "PAT#", 4) == 0) {
+                const size_t pat_count = rsrcd::patlist::count(res.data);
+                for (size_t pi = 0; pi < pat_count; ++pi) {
+                    rsrcd::Bytes pat = rsrcd::patlist::pattern_at(res.data, pi);
+                    if (pat.size != 8) {
+                        continue;
+                    }
+                    ResourcePayload descriptor{};
+                    descriptor.resource = ref;
+                    descriptor.format = ResourcePayloadFormat::Rgba32;
+                    descriptor.data = rsrcd::Bytes{nullptr, 8u * 8u * 4u};
+                    descriptor.variant_index = static_cast<uint32_t>(pi);
+                    descriptor.width = 8;
+                    descriptor.height = 8;
+                    descriptor.row_bytes = 8 * 4;
+                    descriptor.media_type = "image/x-rgba32";
+                    descriptor.description = "decoded 8x8 PAT# pattern pixels";
+                    if (!output.wants_resource_payload(descriptor)) {
+                        continue;
+                    }
+                    uint8_t rgba[8 * 8 * 4];
+                    rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+                    if (rsrcd::img::decode_pat(pat, dst)) {
+                        swap_resource_bgra_to_rgba(rgba, 8u * 8u);
+                        descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+                        if (!output.on_resource_payload(descriptor)) {
+                            return rsrcd::Result::ok();
+                        }
+                    }
+                }
+            }
+        }
+
+        return rsrcd::Result::ok();
+    }
 };
 
 // ============================================================================
@@ -233,10 +456,13 @@ public:
                 break;
             }
 
-            if (payload_bytes > 0) {
-                if (!input.seek(input.position() + payload_bytes)) {
-                    output.on_error("seek failed after payload");
-                    return BlockErr::ReadFailed;
+            {
+                size_t next_pos = file_offset + HEADER_SIZE + payload_bytes;
+                if (input.position() != next_pos) {
+                    if (!input.seek(next_pos)) {
+                        output.on_error("seek failed after payload");
+                        return BlockErr::ReadFailed;
+                    }
                 }
             }
         }

@@ -7,7 +7,7 @@
 #include <limits>
 #include <map>
 
-#if STACKIMPORT_HAS_RESOURCE_DASM
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 #include <resource_file/Emulators/M68KEmulator.hh>
 #include <resource_file/Emulators/PPC32Emulator.hh>
 #include <resource_file/TrapInfo.hh>
@@ -25,7 +25,7 @@ Mac68kDisassemblyResult disassembly_error(const char* message)
 	return result;
 }
 
-#if !STACKIMPORT_HAS_RESOURCE_DASM
+#if !defined(STACKIMPORT_HAS_RESOURCE_DASM) || !STACKIMPORT_HAS_RESOURCE_DASM
 void append_word_line(std::string& text, uint32_t address, uint16_t word)
 {
 	char line[32] = {};
@@ -42,6 +42,8 @@ void append_byte_line(std::string& text, uint32_t address, uint8_t byte)
 	if(len > 0)
 		text.append(line, static_cast<size_t>(len));
 }
+
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 
 std::string trim_copy(std::string text)
 {
@@ -121,8 +123,9 @@ std::string annotate_mac68k_line(const std::string& line)
 		if(!first_opcode_word(opcodeBytes, op))
 			return line;
 		uint16_t trapNumber = 0;
-		uint8_t flags = 0;
 		bool autoPop = false;
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+		uint8_t flags = 0;
 		if((op & 0x0800u) != 0)
 		{
 			trapNumber = static_cast<uint16_t>(op & 0x0BFFu);
@@ -133,9 +136,20 @@ std::string annotate_mac68k_line(const std::string& line)
 			trapNumber = static_cast<uint16_t>(op & 0x00FFu);
 			flags = static_cast<uint8_t>((op >> 8u) & 7u);
 		}
+#else
+		if((op & 0x0800u) != 0)
+		{
+			trapNumber = static_cast<uint16_t>(op & 0x0BFFu);
+			autoPop = (op & 0x0400u) != 0;
+		}
+		else
+		{
+			trapNumber = static_cast<uint16_t>(op & 0x00FFu);
+		}
+#endif
 		const char* trapSpace = trapNumber >= 0x0800u ? "Toolbox" : "OS";
 		std::string trapName = operands;
-#if STACKIMPORT_HAS_RESOURCE_DASM
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 		if(const ResourceDASM::TrapInfo* info = ResourceDASM::info_for_68k_trap(trapNumber, flags))
 			trapName = info->name;
 #endif
@@ -202,6 +216,8 @@ std::string annotate_disassembly_text(const std::string& text, bool powerpc)
 	return result;
 }
 
+#endif
+
 }
 
 Mac68kDisassemblyResult DisassembleMac68kCodeResource(
@@ -221,7 +237,7 @@ Mac68kDisassemblyResult DisassembleMac68kCodeResource(
 	Mac68kDisassemblyResult result = {};
 	result.ok = true;
 
-#if STACKIMPORT_HAS_RESOURCE_DASM
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 	std::multimap<uint32_t, std::string> labels;
 	labels.emplace(displayAddress, "start");
 	result.text = annotate_disassembly_text(ResourceDASM::M68KEmulator::disassemble(code.data(), code.size(), displayAddress, &labels), false);
@@ -265,7 +281,7 @@ Mac68kDisassemblyResult DisassemblePowerPCCodeResource(
 	Mac68kDisassemblyResult result = {};
 	result.ok = true;
 
-#if STACKIMPORT_HAS_RESOURCE_DASM
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 	std::multimap<uint32_t, std::string> labels;
 	labels.emplace(displayAddress, "start");
 	result.text = annotate_disassembly_text(ResourceDASM::PPC32Emulator::disassemble(code.data(), instructionBytes, displayAddress, &labels), true);

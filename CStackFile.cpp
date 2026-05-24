@@ -175,6 +175,56 @@ bool write_json_document(const std::string& path, JsonDocument& document, StackI
 	return write_json_file(path, jsonBuffer.GetString(), jsonBuffer.GetSize());
 }
 
+stackimport::ResourceRef resource_ref_from_rsrcd(const rsrcd::ResRef& res)
+{
+	stackimport::ResourceRef ref{};
+	ref.type = rsrcd::FourCC::from_bytes(res.type.data);
+	ref.id = res.id;
+	ref.name = res.name;
+	ref.flags = res.flags;
+	ref.order = res.order;
+	ref.native_size = res.data.size;
+	return ref;
+}
+
+bool emit_resource_payload(stackimport::IResourceOutput* output, const stackimport::ResourcePayload& payload)
+{
+	if(!output)
+		return true;
+	stackimport::ResourcePayload descriptor = payload;
+	descriptor.data.data = nullptr;
+	if(!output->wants_resource_payload(descriptor))
+		return true;
+	return output->on_resource_payload(payload);
+}
+
+stackimport::ResourcePayload native_resource_payload(const stackimport::ResourceRef& ref, rsrcd::Bytes data)
+{
+	stackimport::ResourcePayload payload{};
+	payload.resource = ref;
+	payload.format = stackimport::ResourcePayloadFormat::Native;
+	payload.data = data;
+	payload.media_type = "application/octet-stream";
+	payload.description = "native resource data";
+	return payload;
+}
+
+stackimport::ResourcePayload converted_resource_payload(
+	const stackimport::ResourceRef& ref,
+	stackimport::ResourcePayloadFormat format,
+	rsrcd::Bytes data,
+	const char* mediaType,
+	const char* description)
+{
+	stackimport::ResourcePayload payload{};
+	payload.resource = ref;
+	payload.format = format;
+	payload.data = data;
+	payload.media_type = mediaType;
+	payload.description = description;
+	return payload;
+}
+
 JsonValue json_output_ref(
 	const char* kind,
 	int32_t id,
@@ -354,6 +404,7 @@ void	NumVersionToStr( const unsigned char numVersion[4], char outStr[16] )
 
 CStackFile::CStackFile()
 	: mDumpRawBlockData(false), mStatusMessages(true), mProgressMessages(true), mDecodeGraphics(true),
+	mResourceOutput(nullptr),
 	mListBlockID(-1), mFontTableBlockID(-1), mStyleTableBlockID(-1), mStackID(-1),
 	mStackCardCount(0), mFirstCardID(0), mUserLevel(0), mCardWidth(512), mCardHeight(342),
 	mStackCantModify(false), mStackCantDelete(false), mStackPrivateAccess(false),
@@ -1629,6 +1680,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 	}
 
 	bool resourceForkHadInvalidResources = false;
+	bool resourceStreamingStopped = false;
 	for (size_t i = 0; i < parsed.count(); i++)
 	{
 		const rsrcd::ResRef& res = parsed.at(i);
@@ -1650,6 +1702,10 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		summary.type.assign(reinterpret_cast<const char*>(res.type.data), 4);
 		if (!res.name.empty() && res.name.data != nullptr)
 			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
+
+		const stackimport::ResourceRef resourceRef = resource_ref_from_rsrcd(res);
+		if(!resourceStreamingStopped && !emit_resource_payload(mResourceOutput, native_resource_payload(resourceRef, res.data)))
+			resourceStreamingStopped = true;
 
 		bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
 		bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
@@ -1682,6 +1738,19 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				if(rsrcd::img::decode_icon_bw(res.data, dst))
 				{
 					swap_bgra_to_rgba(bgra, 32 * 32);
+					if(!resourceStreamingStopped)
+					{
+						auto payload = converted_resource_payload(resourceRef,
+							stackimport::ResourcePayloadFormat::Rgba32,
+							rsrcd::Bytes{bgra, sizeof(bgra)},
+							"image/x-rgba32",
+							"decoded 32x32 ICON pixels");
+						payload.width = 32;
+						payload.height = 32;
+						payload.row_bytes = 32 * 4;
+						if(!emit_resource_payload(mResourceOutput, payload))
+							resourceStreamingStopped = true;
+					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "ICON_%d.png", res.id);
 					if(stbi_write_png(OutputPath(fname).c_str(), 32, 32, 4, bgra, 32 * 4))
@@ -1707,6 +1776,21 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				if(rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y))
 				{
 					swap_bgra_to_rgba(bgra, 16 * 16);
+					if(!resourceStreamingStopped)
+					{
+						auto payload = converted_resource_payload(resourceRef,
+							stackimport::ResourcePayloadFormat::Rgba32,
+							rsrcd::Bytes{bgra, sizeof(bgra)},
+							"image/x-rgba32",
+							"decoded 16x16 CURS pixels");
+						payload.width = 16;
+						payload.height = 16;
+						payload.row_bytes = 16 * 4;
+						payload.hotspot_x = hot_x;
+						payload.hotspot_y = hot_y;
+						if(!emit_resource_payload(mResourceOutput, payload))
+							resourceStreamingStopped = true;
+					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "CURS_%d.png", res.id);
 					if(stbi_write_png(OutputPath(fname).c_str(), 16, 16, 4, bgra, 16 * 4))
@@ -1735,6 +1819,20 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 					rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
 					rsrcd::img::decode_pat(pat, dst);
 					swap_bgra_to_rgba(bgra, 8 * 8);
+					if(!resourceStreamingStopped)
+					{
+						auto payload = converted_resource_payload(resourceRef,
+							stackimport::ResourcePayloadFormat::Rgba32,
+							rsrcd::Bytes{bgra, sizeof(bgra)},
+							"image/x-rgba32",
+							"decoded 8x8 PAT# pattern pixels");
+						payload.variant_index = static_cast<uint32_t>(pi);
+						payload.width = 8;
+						payload.height = 8;
+						payload.row_bytes = 8 * 4;
+						if(!emit_resource_payload(mResourceOutput, payload))
+							resourceStreamingStopped = true;
+					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "PAT#_%d_%02zu.png", res.id, pi);
 					if(stbi_write_png(OutputPath(fname).c_str(), 8, 8, 4, bgra, 8 * 4))
@@ -1786,9 +1884,23 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 				}
 				doc.AddMember("buttons", buttons, a);
 
+				JsonStringBuffer jsonBuffer(&baseAlloc);
+				JsonWriter writer(jsonBuffer, &baseAlloc);
+				doc.Accept(writer);
+				if(!resourceStreamingStopped)
+				{
+					auto payload = converted_resource_payload(resourceRef,
+						stackimport::ResourcePayloadFormat::JsonUtf8,
+						rsrcd::Bytes{reinterpret_cast<const uint8_t*>(jsonBuffer.GetString()), jsonBuffer.GetSize()},
+						"application/json",
+						"parsed PLTE palette metadata");
+					if(!emit_resource_payload(mResourceOutput, payload))
+						resourceStreamingStopped = true;
+				}
+
 				char fname[64];
 				snprintf(fname, sizeof(fname), "PLTE_%d.json", res.id);
-				if(write_json_document(OutputPath(fname), doc, baseAlloc))
+				if(write_json_file(OutputPath(fname), jsonBuffer.GetString(), jsonBuffer.GetSize()))
 				{
 					summary.status = "exported";
 					summary.outputFile = fname;
@@ -1810,6 +1922,16 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 
 		if(disassembly.ok)
 		{
+			if(!resourceStreamingStopped)
+			{
+				auto payload = converted_resource_payload(resourceRef,
+					stackimport::ResourcePayloadFormat::TextUtf8,
+					rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()},
+					"text/x-asm; charset=utf-8",
+					is68K ? "Mac 68K disassembly" : "PowerPC disassembly");
+				if(!emit_resource_payload(mResourceOutput, payload))
+					resourceStreamingStopped = true;
+			}
 			const std::string typeAndArchitecture = summary.type + "_" + summary.architecture;
 			const std::string relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(
 				mFileName,

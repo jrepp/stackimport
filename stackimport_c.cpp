@@ -5,9 +5,11 @@
 #include "stackimport_platform_internal.h"
 
 #include <new>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -109,6 +111,78 @@ stackimport_context make_context(const stackimport_platform& platform, bool allo
 	return stackimport_context{CStackFile(), platform, internal_platform, allocator_owns_context};
 }
 
+uint32_t api_resource_payload_format(stackimport::ResourcePayloadFormat format)
+{
+	switch(format)
+	{
+		case stackimport::ResourcePayloadFormat::Native:
+			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_NATIVE);
+		case stackimport::ResourcePayloadFormat::Rgba32:
+			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_RGBA32);
+		case stackimport::ResourcePayloadFormat::JsonUtf8:
+			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_JSON_UTF8);
+		case stackimport::ResourcePayloadFormat::TextUtf8:
+			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8);
+	}
+	return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_NATIVE);
+}
+
+stackimport_resource_payload api_resource_payload(const stackimport::ResourcePayload& payload)
+{
+	stackimport_resource_payload apiPayload = {};
+	apiPayload.struct_size = sizeof(stackimport_resource_payload);
+	std::memcpy(apiPayload.type, payload.resource.type.v, sizeof(apiPayload.type));
+	apiPayload.id = payload.resource.id;
+	apiPayload.resource_flags = payload.resource.flags;
+	apiPayload.order = payload.resource.order;
+	apiPayload.name = payload.resource.name.data;
+	apiPayload.name_size = payload.resource.name.size;
+	apiPayload.native_size = payload.resource.native_size;
+	apiPayload.format = api_resource_payload_format(payload.format);
+	apiPayload.variant_index = payload.variant_index;
+	apiPayload.width = payload.width;
+	apiPayload.height = payload.height;
+	apiPayload.row_bytes = payload.row_bytes;
+	apiPayload.hotspot_x = payload.hotspot_x;
+	apiPayload.hotspot_y = payload.hotspot_y;
+	apiPayload.media_type = payload.media_type;
+	apiPayload.description = payload.description;
+	apiPayload.payload_size = payload.data.size;
+	return apiPayload;
+}
+
+class CApiResourceOutput final : public stackimport::IResourceOutput {
+public:
+	explicit CApiResourceOutput(const stackimport_import_options& options)
+		: options_(options)
+	{}
+
+	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
+	{
+		if(!options_.resource_payload)
+			return false;
+		const bool converted = payload.format != stackimport::ResourcePayloadFormat::Native;
+		const uint32_t wantedFlag = converted ? STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED : STACKIMPORT_RESOURCE_PAYLOADS_NATIVE;
+		if((options_.resource_payload_flags & wantedFlag) == 0)
+			return false;
+		if(!options_.resource_wants)
+			return true;
+		const stackimport_resource_payload apiPayload = api_resource_payload(payload);
+		return options_.resource_wants(&apiPayload, options_.resource_user_data) != 0;
+	}
+
+	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
+	{
+		if(!options_.resource_payload)
+			return true;
+		const stackimport_resource_payload apiPayload = api_resource_payload(payload);
+		return options_.resource_payload(&apiPayload, payload.data.data, payload.data.size, options_.resource_user_data) != 0;
+	}
+
+private:
+	stackimport_import_options options_;
+};
+
 }
 
 uint32_t stackimport_api_version(void)
@@ -163,6 +237,7 @@ void stackimport_import_options_init(stackimport_import_options* options)
 		return;
 	*options = {};
 	options->struct_size = sizeof(stackimport_import_options);
+	options->resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_ALL;
 }
 
 size_t stackimport_context_size(void)
@@ -256,7 +331,7 @@ stackimport_status stackimport_import(
 {
 	if(!context ||
 		!options ||
-		options->struct_size < sizeof(stackimport_import_options) ||
+		options->struct_size < offsetof(stackimport_import_options, resource_payload_flags) ||
 		!options->input_path ||
 		!options->output_package_path)
 		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
@@ -270,6 +345,12 @@ stackimport_status stackimport_import(
 	context->stack.SetStatusMessages((options->flags & STACKIMPORT_IMPORT_NO_STATUS) == 0);
 	context->stack.SetProgressMessages((options->flags & STACKIMPORT_IMPORT_NO_PROGRESS) == 0);
 	context->stack.SetDecodeGraphics((options->flags & STACKIMPORT_IMPORT_RAW_GRAPHICS) == 0);
+	stackimport_import_options resourceOptions = {};
+	if(options->struct_size >= sizeof(stackimport_import_options))
+		resourceOptions = *options;
+	CApiResourceOutput resourceOutput(resourceOptions);
+	if(options->struct_size >= sizeof(stackimport_import_options) && options->resource_payload)
+		context->stack.SetResourceOutput(&resourceOutput);
 
 	if(!context->stack.LoadFile(options->input_path, options->output_package_path))
 		return STACKIMPORT_STATUS_IMPORT_FAILED;

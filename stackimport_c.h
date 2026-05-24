@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define STACKIMPORT_API_VERSION 3u
+#define STACKIMPORT_API_VERSION 4u
 
 typedef struct stackimport_context stackimport_context;
 
@@ -35,6 +35,49 @@ typedef stackimport_file_handle (*stackimport_open_file_fn)(const char* path, co
 typedef size_t (*stackimport_write_file_fn)(stackimport_file_handle file, const void* data, size_t size, void* user_data);
 typedef int (*stackimport_close_file_fn)(stackimport_file_handle file, void* user_data);
 typedef int (*stackimport_make_directory_fn)(const char* path, void* user_data);
+
+typedef enum stackimport_resource_payload_format {
+	STACKIMPORT_RESOURCE_PAYLOAD_NATIVE = 0,
+	STACKIMPORT_RESOURCE_PAYLOAD_RGBA32 = 1,
+	STACKIMPORT_RESOURCE_PAYLOAD_JSON_UTF8 = 2,
+	STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8 = 3
+} stackimport_resource_payload_format;
+
+typedef enum stackimport_resource_payload_flags {
+	STACKIMPORT_RESOURCE_PAYLOADS_NONE = 0,
+	STACKIMPORT_RESOURCE_PAYLOADS_NATIVE = 1u << 0,
+	STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED = 1u << 1,
+	STACKIMPORT_RESOURCE_PAYLOADS_ALL = STACKIMPORT_RESOURCE_PAYLOADS_NATIVE | STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED
+} stackimport_resource_payload_flags;
+
+typedef struct stackimport_resource_payload {
+	uint32_t struct_size;
+	char type[4];
+	int32_t id;
+	uint32_t resource_flags;
+	uint32_t order;
+	const void* name;
+	size_t name_size;
+	size_t native_size;
+	uint32_t format;
+	uint32_t variant_index;
+	uint32_t width;
+	uint32_t height;
+	uint32_t row_bytes;
+	int32_t hotspot_x;
+	int32_t hotspot_y;
+	const char* media_type;
+	const char* description;
+	size_t payload_size;
+} stackimport_resource_payload;
+
+/*
+ * Resource callbacks are synchronous. Pointers in stackimport_resource_payload,
+ * including name and payload data, are valid only for the callback invocation.
+ * resource_wants is called before resource_payload; return 0 to skip delivery.
+ */
+typedef int (*stackimport_resource_wants_fn)(const stackimport_resource_payload* payload, void* user_data);
+typedef int (*stackimport_resource_payload_fn)(const stackimport_resource_payload* payload, const void* data, size_t size, void* user_data);
 
 typedef enum stackimport_message_severity {
 	STACKIMPORT_MESSAGE_INFO = 0,
@@ -68,6 +111,11 @@ typedef struct stackimport_import_options {
 	/* Callers own path resolution and output package naming. */
 	const char* input_path;
 	const char* output_package_path;
+	/* Optional native/converted resource payload stream. */
+	uint32_t resource_payload_flags;
+	stackimport_resource_wants_fn resource_wants;
+	stackimport_resource_payload_fn resource_payload;
+	void* resource_user_data;
 } stackimport_import_options;
 
 uint32_t stackimport_api_version(void);
