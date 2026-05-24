@@ -109,8 +109,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--disassemble-code-resources",
         action=argparse.BooleanOptionalAction,
-        default=os.environ.get("DISASSEMBLE_CODE_RESOURCES", "1").lower() not in {"0", "false", "no"},
-        help="Run resource_dasm for XCMD/XFCN resources after stack imports. Default: true",
+        default=os.environ.get("DISASSEMBLE_CODE_RESOURCES", "0").lower() not in {"0", "false", "no"},
+        help="Run the legacy external resource_dasm fallback after stack imports. Default: false; stackimport disassembles code resources directly.",
     )
     parser.add_argument(
         "--resource-dasm-jobs",
@@ -1320,6 +1320,62 @@ def parse_resource_fork(data: bytes) -> dict[str, object]:
     }
 
 
+def merge_core_resource_fork_metadata(
+    parsed_resource_fork: dict[str, object],
+    core_resource_fork: object,
+) -> dict[str, object]:
+    if not isinstance(core_resource_fork, dict):
+        return parsed_resource_fork
+    core_resources = core_resource_fork.get("resources")
+    parsed_resources = parsed_resource_fork.get("resources")
+    if not isinstance(core_resources, list) or not isinstance(parsed_resources, list):
+        return parsed_resource_fork
+
+    core_by_identity: dict[tuple[str, int, str], dict[str, object]] = {}
+    core_by_type_id: dict[tuple[str, int], dict[str, object]] = {}
+    for resource in core_resources:
+        if not isinstance(resource, dict):
+            continue
+        resource_type = resource.get("type")
+        resource_id = resource.get("id")
+        resource_name = resource.get("name")
+        if isinstance(resource_type, str) and isinstance(resource_id, int):
+            core_by_type_id[(resource_type, resource_id)] = resource
+            if isinstance(resource_name, str):
+                core_by_identity[(resource_type, resource_id, resource_name)] = resource
+
+    for parsed_resource in parsed_resources:
+        if not isinstance(parsed_resource, dict):
+            continue
+        resource_type = parsed_resource.get("type")
+        resource_id = parsed_resource.get("id")
+        resource_name = parsed_resource.get("name")
+        if not isinstance(resource_type, str) or not isinstance(resource_id, int):
+            continue
+        core_resource = None
+        if isinstance(resource_name, str):
+            core_resource = core_by_identity.get((resource_type, resource_id, resource_name))
+        if core_resource is None:
+            core_resource = core_by_type_id.get((resource_type, resource_id))
+        if core_resource is None:
+            continue
+        for key in ("architecture", "disassemblyFile"):
+            value = core_resource.get(key)
+            if isinstance(value, str) and value:
+                parsed_resource[key] = value
+        core_status = core_resource.get("status")
+        if isinstance(core_status, str) and core_status.startswith("disassembly"):
+            parsed_resource["disassemblyStatus"] = core_status
+
+    core_status = core_resource_fork.get("status")
+    if isinstance(core_status, str):
+        parsed_resource_fork["coreStatus"] = core_status
+    core_bytes = core_resource_fork.get("bytes")
+    if isinstance(core_bytes, int):
+        parsed_resource_fork.setdefault("bytes", core_bytes)
+    return parsed_resource_fork
+
+
 def write_source_manifest(
     *,
     run_id: str,
@@ -1353,10 +1409,12 @@ def write_source_manifest(
         data_fork["parser"] = "scripts.import_all_stacks"
 
     resource_fork_path = Path(str(import_path) + "/..namedfork/rsrc")
+    core_resource_fork = core_manifest.get("resourceFork")
     resource_fork: dict[str, object]
     if resource_fork_path.exists() and resource_fork_path.stat().st_size > 0:
         resource_fork = parse_resource_fork(resource_fork_path.read_bytes())
         resource_fork["path"] = str(resource_fork_path)
+        resource_fork = merge_core_resource_fork_metadata(resource_fork, core_resource_fork)
     else:
         resource_fork = {
             "path": str(resource_fork_path),
@@ -1366,6 +1424,8 @@ def write_source_manifest(
             "resources": [],
             "resourceTypeCounts": {},
         }
+        if isinstance(core_resource_fork, dict):
+            resource_fork = merge_core_resource_fork_metadata(resource_fork, core_resource_fork)
 
     manifest = {
         "format": "stackimport.sourceStackManifest",
