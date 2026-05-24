@@ -25,15 +25,14 @@
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
 #include "stackimport_rapidjson_allocator.h"
+#include "include/stackimport_sax.hpp"
 #include "vendor/snd2wav/snd2wav/snd2wav.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
-
-#if STACKIMPORT_HAS_RESOURCE_DASM
-#include <resource_file/IndexFormats/Formats.hh>
-#include <resource_file/ResourceTypes.hh>
-#endif
 
 
 // Table of C-strings for converting the non-ASCII MacRoman characters (above 127)
@@ -91,16 +90,6 @@ JsonValue json_string(const std::string& value, JsonPoolAllocator& allocator)
 	return result;
 }
 
-std::string four_char_type(uint32_t type)
-{
-	std::string result;
-	result.push_back(static_cast<char>((type >> 24u) & 0xFFu));
-	result.push_back(static_cast<char>((type >> 16u) & 0xFFu));
-	result.push_back(static_cast<char>((type >> 8u) & 0xFFu));
-	result.push_back(static_cast<char>(type & 0xFFu));
-	return result;
-}
-
 std::string sanitized_resource_file_name(const std::string& stackName, const std::string& type, int32_t id, const std::string& name, const char* extension)
 {
 	std::string result;
@@ -148,6 +137,16 @@ bool write_text_file(const std::string& path, const std::string& text)
 		return false;
 	file.write(text.data(), static_cast<std::streamsize>(text.size()));
 	return static_cast<bool>(file);
+}
+
+static void swap_bgra_to_rgba(uint8_t* data, int pixel_count)
+{
+	for(int i = 0; i < pixel_count; i++)
+	{
+		uint8_t tmp = data[i * 4];
+		data[i * 4] = data[i * 4 + 2];
+		data[i * 4 + 2] = tmp;
+	}
 }
 
 JsonValue json_string(const char* value, JsonPoolAllocator& allocator)
@@ -455,6 +454,8 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 		item.AddMember("architecture", json_string(resource.architecture, allocator), allocator);
 		if(!resource.disassemblyFile.empty())
 			item.AddMember("disassemblyFile", json_string(resource.disassemblyFile, allocator), allocator);
+		if(!resource.outputFile.empty())
+			item.AddMember("outputFile", json_string(resource.outputFile, allocator), allocator);
 		resources.PushBack(item, allocator);
 		resourceTypeCounts[resource.type]++;
 	}
@@ -1590,11 +1591,13 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		return true;
 	}
 
-#if STACKIMPORT_HAS_RESOURCE_DASM
-	ResourceDASM::ResourceFile parsed = ResourceDASM::parse_resource_fork(resourceForkData);
-	if(parsed.empty())
+	rsrcd::VecParserOutput<256> parsed;
+	auto parseResult = rsrcd::Parser{}.parse_fork(
+		rsrcd::Bytes{reinterpret_cast<const uint8_t*>(resourceForkData.data()), resourceForkData.size()},
+		parsed);
+	if(!parseResult || parsed.count() == 0)
 	{
-		mResourceForkStatus = "empty";
+		mResourceForkStatus = parsed.count() == 0 ? "empty" : "parse_failed";
 		return true;
 	}
 
@@ -1606,40 +1609,118 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		return true;
 	}
 
-	const uint32_t xcmdType = ResourceDASM::resource_type("xcmd");
-	const uint32_t xfcnType = ResourceDASM::resource_type("xfcn");
-	for(const auto& resourceId : parsed.all_resources())
+	for (size_t i = 0; i < parsed.count(); i++)
 	{
-		std::shared_ptr<const ResourceDASM::ResourceFile::Resource> resource = parsed.get_resource(resourceId.first, resourceId.second);
-		if(!resource)
-			continue;
+		const rsrcd::ResRef& res = parsed.at(i);
 
 		CResourceSummary summary;
-		summary.type = four_char_type(resource->type);
-		summary.id = resource->id;
-		summary.flags = resource->flags;
-		summary.name = resource->name;
-		summary.bytes = resource->data.size();
+		summary.type.assign(reinterpret_cast<const char*>(res.type.data), 4);
+		summary.id = res.id;
+		summary.flags = res.flags;
+		if (!res.name.empty())
+			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
+		summary.bytes = res.data.size;
 		summary.status = "preserved";
 
+		bool is68K = res.type.size == 4 &&
+			(std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0);
+		bool isPPC = res.type.size == 4 &&
+			(std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0);
+
 		stackimport::Mac68kDisassemblyResult disassembly;
-		if(resource->type == ResourceDASM::RESOURCE_TYPE_XCMD || resource->type == ResourceDASM::RESOURCE_TYPE_XFCN)
+		if(is68K)
 		{
 			summary.architecture = "mac68k";
 			disassembly = stackimport::DisassembleMac68kCodeResource(
-				std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(resource->data.data()), resource->data.size()),
+				std::span<const uint8_t>(res.data.data, res.data.size),
 				0,
-				resource->data.size(),
+				res.data.size,
 				0);
 		}
-		else if(resource->type == xcmdType || resource->type == xfcnType)
+		else if(isPPC)
 		{
 			summary.architecture = "macppc";
 			disassembly = stackimport::DisassemblePowerPCCodeResource(
-				std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(resource->data.data()), resource->data.size()),
+				std::span<const uint8_t>(res.data.data, res.data.size),
 				0,
-				resource->data.size(),
+				res.data.size,
 				0);
+		}
+		else if(res.type.size == 4 && std::memcmp(res.type.data, "ICON", 4) == 0)
+		{
+			if(res.data.size == 128)
+			{
+				uint8_t bgra[32 * 32 * 4];
+				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
+				if(rsrcd::img::decode_icon_bw(res.data, dst))
+				{
+					swap_bgra_to_rgba(bgra, 32 * 32);
+					char fname[64];
+					snprintf(fname, sizeof(fname), "ICON_%d.png", res.id);
+					if(stbi_write_png(OutputPath(fname).c_str(), 32, 32, 4, bgra, 32 * 4))
+					{
+						summary.status = "exported";
+						summary.outputFile = fname;
+						stackimport_emit_infof( "Status: Wrote ICON #%d as PNG.\n", res.id );
+					}
+					else
+						summary.status = "export_failed";
+				}
+			}
+			mResourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(res.type.size == 4 && std::memcmp(res.type.data, "CURS", 4) == 0)
+		{
+			if(res.data.size >= 68)
+			{
+				uint8_t bgra[16 * 16 * 4];
+				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
+				int16_t hot_x = 0, hot_y = 0;
+				if(rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y))
+				{
+					swap_bgra_to_rgba(bgra, 16 * 16);
+					char fname[64];
+					snprintf(fname, sizeof(fname), "CURS_%d.png", res.id);
+					if(stbi_write_png(OutputPath(fname).c_str(), 16, 16, 4, bgra, 16 * 4))
+					{
+						summary.status = "exported";
+						summary.outputFile = fname;
+						stackimport_emit_infof( "Status: Wrote CURS #%d as PNG (hotspot %u,%u).\n", res.id, static_cast<unsigned>(hot_x), static_cast<unsigned>(hot_y) );
+					}
+					else
+						summary.status = "export_failed";
+				}
+			}
+			mResourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(res.type.size == 4 && std::memcmp(res.type.data, "PAT#", 4) == 0)
+		{
+			size_t patCount = rsrcd::patlist::count(res.data);
+			int exported = 0;
+			for(size_t pi = 0; pi < patCount; pi++)
+			{
+				rsrcd::Bytes pat = rsrcd::patlist::pattern_at(res.data, pi);
+				if(pat.size == 8)
+				{
+					uint8_t bgra[8 * 8 * 4];
+					rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
+					rsrcd::img::decode_pat(pat, dst);
+					swap_bgra_to_rgba(bgra, 8 * 8);
+					char fname[64];
+					snprintf(fname, sizeof(fname), "PAT#_%d_%02zu.png", res.id, pi);
+					if(stbi_write_png(OutputPath(fname).c_str(), 8, 8, 4, bgra, 8 * 4))
+						exported++;
+				}
+			}
+			if(exported > 0)
+			{
+				summary.status = "exported";
+				stackimport_emit_infof( "Status: Wrote %d/%zu patterns from PAT# #%d as PNG.\n", exported, patCount, res.id );
+			}
+			mResourceSummaries.push_back(summary);
+			continue;
 		}
 		else
 		{
@@ -1676,9 +1757,6 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		mResourceSummaries.push_back(summary);
 	}
 	mResourceForkStatus = "ok";
-#else
-	mResourceForkStatus = "resource_dasm_unavailable";
-#endif
 	return true;
 }
 
@@ -1878,20 +1956,14 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 		slashPos += 1;
 	mFileName = fpath.substr(slashPos, std::string::npos);
 	const uint64_t dataForkBytes = FileSizeBytes(fpath);
-	std::ifstream		theFile( fpath.c_str(), std::ios::binary );
-	if( !theFile.is_open() )
-	{
-		stackimport_emit_diagnosticf( "Error: Couldn't open file '%s'\n", fpath.c_str() );
-		return false;
-	}
-	
+
 	std::string				packagePath( outputPackagePath );
 	if( stackimport_internal_make_directory( packagePath.c_str() ) != 0 && errno != EEXIST )
 	{
 		stackimport_emit_diagnosticf( "Error: Couldn't create output package directory '%s'\n", packagePath.c_str() );
 		return false;
 	}
-	
+
 	mBasePath = packagePath;
 		
   #if MAC_CODE
@@ -1917,106 +1989,27 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	
 	if( mStatusMessages )
 		stackimport_emit_infof( "Status: Output package name is '%s'\n", mBasePath.c_str() );
-	
-	char		vBlockType[5] = { 0 };
-	uint32_t	vBlockSize = 0;
-	int32_t		vBlockID = 0;
-	int			numBlocks = 0;
-	bool		success = true;
+
 	std::string	sourceStreamStatus("ok");
-	uint64_t	sourceOffset = 0;
-	
-	// Read all blocks so we can random-access them. Yes, I know there are more
-	//	efficient ways, but honestly, who cares?
-	while( true )
-	{
-		memset( vBlockType, 0, sizeof(vBlockType) );
-		theFile.read( reinterpret_cast<char*>(&vBlockSize), sizeof(vBlockSize) );
-		const std::streamsize blockSizeBytesRead = theFile.gcount();
-		if( blockSizeBytesRead == 0 && theFile.eof() )	// Couldn't read because we hit end of file.
-			break;
-		if( blockSizeBytesRead != static_cast<std::streamsize>(sizeof(vBlockSize)) )
-		{
-			stackimport_emit_diagnosticf( "Error: Could not read complete block size.\n" );
-			sourceStreamStatus = "truncated_header";
-			success = false;
-			break;
-		}
-		
-		vBlockSize = ReadBEUInt32Bytes(reinterpret_cast<const char*>(&vBlockSize));
-		theFile.read( vBlockType, 4 );
-		theFile.read( reinterpret_cast<char*>(&vBlockID), sizeof(vBlockID) );
-		if( !theFile )
-		{
-			stackimport_emit_diagnosticf( "Error: Could not read complete block header.\n" );
-			sourceStreamStatus = "truncated_header";
-			success = false;
-			break;
-		}
-		vBlockID = static_cast<int32_t>(ReadBEUInt32Bytes(reinterpret_cast<const char*>(&vBlockID)));
-		
-		numBlocks++;
-		CSourceBlockSummary sourceBlock;
-		sourceBlock.type = vBlockType;
-		sourceBlock.id = vBlockID;
-		sourceBlock.offset = sourceOffset;
-		sourceBlock.size = vBlockSize;
-		sourceBlock.payloadOffset = sourceOffset + 12;
-		sourceBlock.payloadBytes = vBlockSize >= 12 ? vBlockSize - 12 : 0;
-		sourceBlock.status = "ok";
-		if( vBlockSize < 12 )
-		{
-			stackimport_emit_diagnosticf( "Error: Invalid block size %u for '%4s' #%d.\n", vBlockSize, vBlockType, vBlockID );
-			sourceBlock.status = "invalid_size";
-			mSourceBlocks.push_back(sourceBlock);
-			sourceStreamStatus = "invalid_block_size";
-			success = false;
-			break;
-		}
-		
-		if( strcmp(vBlockType,"TAIL") == 0 && vBlockID == -1 )	// End marker block?
-		{
-			mSourceBlocks.push_back(sourceBlock);
-			sourceOffset += vBlockSize;
-			break;
-		}
-		else if( strcmp(vBlockType,"FREE") == 0 )	// Not a free, reusable block?
-		{
-			if( mStatusMessages )
-				stackimport_emit_infof( "Status: Skipping '%4s' #%d (%u bytes)\n", vBlockType, vBlockID, vBlockSize );
-			theFile.ignore( vBlockSize -12 );	// Skip rest of block data.
-			if( !theFile )
-			{
-				stackimport_emit_diagnosticf( "Error: Could not skip complete 'FREE' block #%d.\n", vBlockID );
-				sourceBlock.status = "truncated_payload";
-				mSourceBlocks.push_back(sourceBlock);
-				sourceStreamStatus = "truncated_payload";
-				success = false;
-				break;
-			}
-			mSourceBlocks.push_back(sourceBlock);
-		}
-		else
-		{
-			CBuf		blockData( vBlockSize -12 );
-			theFile.read( blockData.buf(0,vBlockSize -12), vBlockSize -12 );
-			if( !theFile )
-			{
-				stackimport_emit_diagnosticf( "Error: Could not read complete '%4s' block #%d.\n", vBlockType, vBlockID );
-				sourceBlock.status = "truncated_payload";
-				mSourceBlocks.push_back(sourceBlock);
-				sourceStreamStatus = "truncated_payload";
-				success = false;
-				break;
-			}
-			CStackBlockIdentifier	theTypeAndID(vBlockType,vBlockID);
-			mBlockMap[theTypeAndID] = blockData;
-			mSourceBlocks.push_back(sourceBlock);
-	//			if( mStatusMessages )
-	//				stackimport_emit_infof( "Status: Located block %s %d - (%lu)\n", vBlockType, vBlockID, mBlockMap.size() );
-		}
-		sourceOffset += vBlockSize;
+
+	// Use streaming BlockParser instead of manual block reading loop
+	stackimport::FileStackReader fileReader;
+	if (!fileReader.open(fpath.c_str())) {
+		stackimport_emit_diagnosticf("Error: Couldn't open file '%s'\n", fpath.c_str());
+		return false;
 	}
+
+	CStackBlockOutput blockOutput(mBlockMap, mSourceBlocks, sourceStreamStatus);
+	stackimport::BlockParser parser;
+
+	auto parseResult = parser.parse(fileReader, blockOutput);
+	if (parseResult != stackimport::BlockErr::None) {
+		stackimport_emit_diagnosticf("Error: Block parsing failed\n");
+		return false;
+	}
+
+	int numBlocks = blockOutput.num_blocks();
+	bool success = true;
 	
 	if( mStatusMessages )
 		stackimport_emit_infof( "Status: Found %d blocks in file.\n", numBlocks);

@@ -395,9 +395,10 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     auto map = buf.slice(map_off, map_len);
     if (map.size < 30) return Error::invalid_data("map too small");
 
-    uint16_t type_list_off = read_u16be(map.data + 18);
-    uint16_t name_list_off = read_u16be(map.data + 20);
-    uint16_t num_types = read_u16be(map.data + 22);
+    uint16_t type_list_off = read_u16be(map.data + 24);
+    uint16_t name_list_off = read_u16be(map.data + 26);
+    if (type_list_off + 2 > map.size) return Error::invalid_data("type list out of bounds");
+    uint16_t num_types = read_u16be(map.data + type_list_off);
     ++num_types;
 
     struct InlineType { FourCC type; uint16_t count; uint16_t offset; };
@@ -405,7 +406,7 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     size_t type_count = 0;
 
     for (uint16_t i = 0; i < num_types && i < 64; ++i) {
-        size_t off = type_list_off + i * 8;
+        size_t off = type_list_off + 2 + i * 8;
         if (off + 8 > map.size) break;
         types[i].type = FourCC::from_bytes(map.data + off);
         types[i].count = read_u16be(map.data + off + 4);
@@ -422,13 +423,13 @@ inline Result Parser::parse_fork(Bytes buf, IParserOutput& output) {
     size_t order = 0;
 
     for (size_t ti = 0; ti < type_count; ++ti) {
-        size_t res_off = types[ti].offset;
+        size_t res_off = type_list_off + types[ti].offset;
 
         for (uint16_t ri = 0; ri < types[ti].count; ++ri) {
             if (res_off + 14 > map.size) break;
 
             ResRef ref;
-            ref.type = types[ti].type.as_bytes();
+            ref.type = Bytes{map.data + type_list_off + 2 + ti * 8, 4};
             ref.id = read_i16be(map.data + res_off);
             uint16_t name_off = read_u16be(map.data + res_off + 2);
             uint32_t packed = read_u32be(map.data + res_off + 4);
@@ -561,6 +562,8 @@ constexpr void put_bgra(MutableBytes& out, uint32_t c) {
     out.data[1] = static_cast<uint8_t>(c >> 8);
     out.data[2] = static_cast<uint8_t>(c >> 16);
     out.data[3] = static_cast<uint8_t>(c >> 24);
+    out.data += 4;
+    out.size -= 4;
 }
 
 // 1-bit icon decode
@@ -610,7 +613,265 @@ inline void decode_8bit(const Bytes& src, const Bytes& mask, int w, int h, Mutab
     }
 }
 
+// Decode plain ICON resource (128 bytes, 32x32 1-bit, no mask).
+// out must be 32*32*4 = 4096 bytes.
+inline auto decode_icon_bw(Bytes data, MutableBytes out) -> Result {
+    constexpr int w = 32, h = 32;
+    constexpr size_t expected = 128;
+    constexpr size_t bgra_size = static_cast<size_t>(w * h * 4);
+    if (data.size < expected) return Error::unexpected_end();
+    if (out.size < bgra_size) return Error::bounds();
+
+    uint8_t all_ones[128];
+    for (auto& b : all_ones) b = 0xFF;
+    Bytes mask{all_ones, expected};
+    decode_1bit(data, mask, w, h, out);
+    return Result::ok();
+}
+
+// Decode CURS resource (68 bytes: 32 bitmap + 32 mask + 2 hotspot_y + 2 hotspot_x).
+// out must be 16*16*4 = 1024 bytes.
+inline auto decode_curs(Bytes data, MutableBytes out,
+                        int16_t& hot_x, int16_t& hot_y) -> Result {
+    constexpr int w = 16, h = 16;
+    constexpr size_t expected = 68;
+    constexpr size_t bgra_size = static_cast<size_t>(w * h * 4);
+    if (data.size < expected) return Error::unexpected_end();
+    if (out.size < bgra_size) return Error::bounds();
+
+    Bytes bitmap{data.data, 32};
+    Bytes mask{data.data + 32, 32};
+    decode_1bit(bitmap, mask, w, h, out);
+    hot_y = read_i16be(data.data + 64);
+    hot_x = read_i16be(data.data + 66);
+    return Result::ok();
+}
+
+// Decode single 8x8 1-bit pattern (8 bytes) to BGRA (8*8*4 = 256 bytes).
+inline auto decode_pat(Bytes data, MutableBytes out) -> Result {
+    constexpr int w = 8, h = 8;
+    constexpr size_t bgra_size = static_cast<size_t>(w * h * 4);
+    if (data.size < 8) return Error::unexpected_end();
+    if (out.size < bgra_size) return Error::bounds();
+
+    for (int y = 0; y < h; ++y) {
+        uint8_t row = data.data[y];
+        for (int x = 0; x < w; ++x) {
+            bool black = (row >> (7 - x)) & 1;
+            uint32_t c = black ? 0xFF000000u : 0xFFFFFFFFu;
+            put_bgra(out, c);
+        }
+    }
+    return Result::ok();
+}
+
 } // namespace img
+
+// ============================================================================
+// AddColor resource parser (HCcd / HCbg)
+// ============================================================================
+
+namespace ac {
+
+enum ObjType : uint8_t {
+    ObjButton    = 0x01,
+    ObjField     = 0x02,
+    ObjRect      = 0x03,
+    ObjPictRes   = 0x04,
+    ObjPictFile  = 0x05,
+};
+
+struct RGBColor {
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+};
+
+struct QDRect {
+    int16_t top;
+    int16_t left;
+    int16_t bottom;
+    int16_t right;
+};
+
+struct Object {
+    ObjType  type;
+    bool     hidden;
+    int16_t  part_id;
+    int16_t  bevel;
+    RGBColor color;
+    QDRect   rect;
+    bool     transparent;
+    Bytes    name;
+};
+
+template<size_t InlineCapacity = 32>
+class ObjectList {
+public:
+    auto add(const Object& obj) -> Result {
+        if (count_ < InlineCapacity) {
+            objects_[count_++] = obj;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many AddColor objects");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Object& { return objects_[i]; }
+    auto begin() const -> const Object* { return objects_; }
+    auto end() const -> const Object* { return objects_ + count_; }
+
+private:
+    Object objects_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<typename Output>
+auto parse(Bytes data, Output& output) -> Result {
+    size_t i = 0;
+    while (i < data.size) {
+        uint8_t header = data[i];
+        auto otype = static_cast<ObjType>(header & 0x7F);
+        bool hidden = (header & 0x80) != 0;
+
+        Object obj{};
+        obj.type = otype;
+        obj.hidden = hidden;
+        obj.transparent = false;
+
+        switch (otype) {
+        case ObjButton:
+        case ObjField: {
+            if (i + 11 > data.size) return Error::unexpected_end();
+            obj.part_id = read_i16be(data.data + i + 1);
+            obj.bevel   = read_i16be(data.data + i + 3);
+            obj.color.red   = read_u16be(data.data + i + 5);
+            obj.color.green = read_u16be(data.data + i + 7);
+            obj.color.blue  = read_u16be(data.data + i + 9);
+            i += 11;
+            break;
+        }
+        case ObjRect: {
+            if (i + 17 > data.size) return Error::unexpected_end();
+            obj.rect.top    = read_i16be(data.data + i + 1);
+            obj.rect.left   = read_i16be(data.data + i + 3);
+            obj.rect.bottom = read_i16be(data.data + i + 5);
+            obj.rect.right  = read_i16be(data.data + i + 7);
+            obj.bevel       = read_i16be(data.data + i + 9);
+            obj.color.red   = read_u16be(data.data + i + 11);
+            obj.color.green = read_u16be(data.data + i + 13);
+            obj.color.blue  = read_u16be(data.data + i + 15);
+            i += 17;
+            break;
+        }
+        case ObjPictRes:
+        case ObjPictFile: {
+            if (i + 11 > data.size) return Error::unexpected_end();
+            obj.rect.top    = read_i16be(data.data + i + 1);
+            obj.rect.left   = read_i16be(data.data + i + 3);
+            obj.rect.bottom = read_i16be(data.data + i + 5);
+            obj.rect.right  = read_i16be(data.data + i + 7);
+            obj.transparent = data.data[i + 9] != 0;
+            uint8_t name_len = data.data[i + 10];
+            if (i + 11 + name_len > data.size) return Error::unexpected_end();
+            obj.name = data.slice(i + 11, name_len);
+            i += 11 + name_len;
+            break;
+        }
+        default:
+            return Error::invalid_format("unknown AddColor object type");
+        }
+
+        if (auto r = output.add(obj); !r) return r;
+    }
+    return Result::ok();
+}
+
+} // namespace ac
+
+// ============================================================================
+// PLTE (Palette) resource parser
+// ============================================================================
+
+namespace plte {
+
+struct PaletteButton {
+    int16_t top;
+    int16_t left;
+    int16_t bottom;
+    int16_t right;
+    Bytes   message;
+};
+
+template<size_t InlineCapacity = 64>
+struct Palette {
+    uint16_t wdef;
+    bool     show_name;
+    int16_t  selection;
+    bool     frame;
+    uint16_t pict_ref;
+    int16_t  top;
+    int16_t  left;
+    PaletteButton buttons[InlineCapacity];
+    size_t   button_count = 0;
+};
+
+template<size_t Cap = 64>
+auto parse(Bytes data, Palette<Cap>& pal) -> Result {
+    if (data.size < 24) return Error::unexpected_end();
+
+    uint16_t raw2 = read_u16be(data.data + 2);
+    pal.wdef       = raw2 / 16;
+    pal.show_name  = (raw2 % 16 & 1) != 0;
+    pal.selection  = read_i16be(data.data + 4);
+    pal.frame      = read_u16be(data.data + 6) != 0;
+    pal.pict_ref   = read_u16be(data.data + 8);
+    pal.top        = read_i16be(data.data + 10);
+    pal.left       = read_i16be(data.data + 12);
+
+    uint16_t count = read_u16be(data.data + 22);
+    size_t i = 24;
+
+    for (uint16_t b = 0; b < count; ++b) {
+        if (i + 11 > data.size) return Error::unexpected_end();
+        if (pal.button_count >= Cap) return Error::invalid_data("too many palette buttons");
+
+        auto& btn = pal.buttons[pal.button_count++];
+        btn.top    = read_i16be(data.data + i);
+        btn.left   = read_i16be(data.data + i + 2);
+        btn.bottom = read_i16be(data.data + i + 4);
+        btn.right  = read_i16be(data.data + i + 6);
+
+        uint8_t msg_len = data.data[i + 10];
+        if (i + 11 + msg_len > data.size) return Error::unexpected_end();
+        btn.message = data.slice(i + 11, msg_len);
+
+        size_t entry_size = 11 + msg_len + 1 - (msg_len % 2);
+        i += entry_size;
+    }
+    return Result::ok();
+}
+
+} // namespace plte
+
+// ============================================================================
+// PAT# (Pattern List) helpers
+// ============================================================================
+
+namespace patlist {
+
+inline auto count(Bytes data) -> size_t {
+    if (data.size < 2) return 0;
+    return read_u16be(data.data);
+}
+
+inline auto pattern_at(Bytes data, size_t index) -> Bytes {
+    if (data.size < 2 || index >= read_u16be(data.data)) return {};
+    size_t off = 2 + index * 8;
+    if (off + 8 > data.size) return {};
+    return data.slice(off, 8);
+}
+
+} // namespace patlist
 
 // ============================================================================
 // I/O helpers - client can override

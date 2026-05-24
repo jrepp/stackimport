@@ -31,6 +31,8 @@
 #endif
 #include <cstring>
 
+#include "include/stackimport_sax.hpp"
+
 
 class CStackBlockIdentifier
 {
@@ -139,6 +141,7 @@ struct CResourceSummary
 	std::string	status;
 	std::string	disassemblyFile;
 	std::string	architecture;
+	std::string	outputFile;
 };
 
 class CStyleEntry
@@ -243,4 +246,72 @@ protected:
 	ResFileRefNum	mResRefNum;
 #endif
 	std::map<int16_t,CStyleEntry>	mStyles;
+
+public:
+	class CStackBlockOutput : public stackimport::IBlockOutput {
+	public:
+		CStackBlockOutput(CBlockMap& block_map,
+		                 std::vector<CSourceBlockSummary>& source_blocks,
+		                 std::string& source_stream_status)
+			: block_map_(block_map)
+			, source_blocks_(source_blocks)
+			, source_stream_status_(source_stream_status)
+			, position_(0)
+			, num_blocks_(0)
+			, stopped_(false)
+		{}
+
+		auto on_block(const stackimport::BlockRef& block,
+		              stackimport::IStackReader& reader) -> bool override {
+			if (stopped_) return false;
+
+			if (block.payload_bytes > 0) {
+				CBuf value(block.payload_bytes);
+				size_t r = reader.read(reinterpret_cast<uint8_t*>(value.buf()),
+				                      block.payload_bytes);
+				if (r != block.payload_bytes) {
+					source_stream_status_ = "truncated_payload";
+					stopped_ = true;
+					return false;
+				}
+
+				CStackBlockIdentifier key(reinterpret_cast<const char*>(block.type.v),
+				                         block.id.get());
+				block_map_[key] = value;
+			}
+
+			CSourceBlockSummary summary;
+			summary.type.assign(4, '\0');
+			std::memcpy(summary.type.data(), block.type.v, 4);
+			summary.id = block.id.get();
+			summary.offset = position_;
+			summary.size = block.size();
+			summary.payloadOffset = position_ + 12;
+			summary.payloadBytes = block.payload_bytes;
+			summary.status = "ok";
+			source_blocks_.push_back(summary);
+
+			position_ += 12 + block.payload_bytes;
+			num_blocks_++;
+
+			return true;
+		}
+
+		auto on_error(const char* msg) -> bool override {
+			source_stream_status_ = msg;
+			stopped_ = true;
+			return false;
+		}
+
+		auto num_blocks() const -> int { return num_blocks_; }
+		auto stopped() const -> bool { return stopped_; }
+
+	private:
+		CBlockMap& block_map_;
+		std::vector<CSourceBlockSummary>& source_blocks_;
+		std::string& source_stream_status_;
+		uint64_t position_;
+		int num_blocks_;
+		bool stopped_;
+	};
 };
