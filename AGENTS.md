@@ -95,7 +95,7 @@ scripts/convert_embedded_files.py --run-db import-runs/<run-id>/run.db
 
 The converter currently turns embedded PBM/P4 images into PNG files, writes a
 `embedded_conversions` table to the run database, emits
-`embedded-conversions/embedded-conversions.tsv`, and writes per-file
+`embedded-conversions/embedded-conversions.json`, and writes per-file
 `*.provenance.json` sidecars. Preserve those sidecars; they record stack,
 archive, source hash, converter, target hash, and conversion status metadata.
 

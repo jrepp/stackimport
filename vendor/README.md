@@ -73,13 +73,13 @@ needs deeper analysis.
 ## Importer Integration
 
 The bulk importer catalogs external binary data even before these converters are
-called. See these run outputs:
+called. See the run database report tables:
 
-- `external-binary-files.tsv`
-- `external-binary-usage.tsv`
-- `embedded-files.tsv`
-- `embedded-file-usage.tsv`
-- `binary-chunks.tsv`
+- `report_external_binary_files`
+- `report_external_binary_usage`
+- `report_embedded_files`
+- `report_embedded_file_usage`
+- `report_binary_chunks`
 
-These files make it possible to decide which vendored converter should be used
+These tables make it possible to decide which vendored converter should be used
 for each external artifact or embedded output.

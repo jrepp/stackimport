@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import json
 import os
@@ -512,47 +511,30 @@ def convert_row(row: sqlite3.Row, run_db: Path, output_dir: Path) -> dict[str, o
 
 
 def write_manifest(output_dir: Path, rows: list[dict[str, object]]) -> Path:
-    manifest_path = output_dir / "embedded-conversions.tsv"
+    manifest_path = output_dir / "embedded-conversions.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "embedded_file_id",
-        "stack_name",
-        "import_input",
-        "source_rel_path",
-        "embedded_kind",
-        "logical_kind",
-        "logical_id",
-        "source_bytes",
-        "source_sha256",
-        "status",
-        "target_format",
-        "target_path",
-        "target_sha256",
-        "message",
-    ]
-    with manifest_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
-        writer.writeheader()
-        for result in rows:
-            row = result["row"]
-            writer.writerow(
-                {
-                    "embedded_file_id": row["embedded_file_id"],
-                    "stack_name": row["stack_name"],
-                    "import_input": row["import_input"],
-                    "source_rel_path": row["rel_path"],
-                    "embedded_kind": row["embedded_kind"],
-                    "logical_kind": row["logical_kind"],
-                    "logical_id": "" if row["logical_id"] is None else row["logical_id"],
-                    "source_bytes": row["bytes"],
-                    "source_sha256": row["sha256"],
-                    "status": result["status"],
-                    "target_format": result["target_format"],
-                    "target_path": "" if result["target_path"] is None else result["target_path"],
-                    "target_sha256": "" if result["target_sha256"] is None else result["target_sha256"],
-                    "message": result["message"],
-                }
-            )
+    manifest_rows = []
+    for result in rows:
+        row = result["row"]
+        manifest_rows.append(
+            {
+                "embedded_file_id": row["embedded_file_id"],
+                "stack_name": row["stack_name"],
+                "import_input": row["import_input"],
+                "source_rel_path": row["rel_path"],
+                "embedded_kind": row["embedded_kind"],
+                "logical_kind": row["logical_kind"],
+                "logical_id": row["logical_id"],
+                "source_bytes": row["bytes"],
+                "source_sha256": row["sha256"],
+                "status": result["status"],
+                "target_format": result["target_format"],
+                "target_path": None if result["target_path"] is None else str(result["target_path"]),
+                "target_sha256": result["target_sha256"],
+                "message": result["message"],
+            }
+        )
+    manifest_path.write_text(json.dumps(manifest_rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path
 
 

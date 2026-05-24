@@ -19,6 +19,7 @@
 */
 
 #include "snd2wav.h"
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <math.h>
@@ -26,28 +27,28 @@
 
 #ifndef S2W_FLIP_16
 #define S2W_FLIP_16(value) \
-        (((((u_int16_t)(value))<<8) & 0xFF00)   | \
-         ((((u_int16_t)(value))>>8) & 0x00FF))
+        (((((uint16_t)(value))<<8) & 0xFF00)   | \
+         ((((uint16_t)(value))>>8) & 0x00FF))
 #endif
 
 #ifndef S2W_FLIP_32
 #define S2W_FLIP_32(value) \
-        (((((u_int32_t)(value))<<24) & 0xFF000000)  | \
-         ((((u_int32_t)(value))<< 8) & 0x00FF0000)  | \
-         ((((u_int32_t)(value))>> 8) & 0x0000FF00)  | \
-         ((((u_int32_t)(value))>>24) & 0x000000FF))
+        (((((uint32_t)(value))<<24) & 0xFF000000)  | \
+         ((((uint32_t)(value))<< 8) & 0x00FF0000)  | \
+         ((((uint32_t)(value))>> 8) & 0x0000FF00)  | \
+         ((((uint32_t)(value))>>24) & 0x000000FF))
 #endif
 
 #ifndef S2W_FLIP_64
 #define S2W_FLIP_64(value) \
-		(((((u_int64_t)(value))<<56) & 0xFF00000000000000)  | \
-         ((((u_int64_t)(value))<<40) & 0x00FF000000000000)  | \
-         ((((u_int64_t)(value))<<24) & 0x0000FF0000000000)  | \
-         ((((u_int64_t)(value))<< 8) & 0x000000FF00000000)  | \
-         ((((u_int64_t)(value))>> 8) & 0x00000000FF000000)  | \
-         ((((u_int64_t)(value))>>24) & 0x0000000000FF0000)  | \
-         ((((u_int64_t)(value))>>40) & 0x000000000000FF00)  | \
-         ((((u_int64_t)(value))>>56) & 0x00000000000000FF))
+		(((((uint64_t)(value))<<56) & 0xFF00000000000000)  | \
+         ((((uint64_t)(value))<<40) & 0x00FF000000000000)  | \
+         ((((uint64_t)(value))<<24) & 0x0000FF0000000000)  | \
+         ((((uint64_t)(value))<< 8) & 0x000000FF00000000)  | \
+         ((((uint64_t)(value))>> 8) & 0x00000000FF000000)  | \
+         ((((uint64_t)(value))>>24) & 0x0000000000FF0000)  | \
+         ((((uint64_t)(value))>>40) & 0x000000000000FF00)  | \
+         ((((uint64_t)(value))>>56) & 0x00000000000000FF))
 #endif
 
 

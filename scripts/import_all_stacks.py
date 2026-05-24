@@ -23,7 +23,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STACKS_DIR = Path("/Users/jrepp/d/pantechnicon/stacks")
 ARCHIVE_SUFFIXES = (".sit", ".hqx")
-IGNORED_INPUT_NAMES = {".mirror-manifest.tsv", ".mirror.log", ".DS_Store"}
+IGNORED_INPUT_NAMES = {".mirror-manifest.json", ".mirror.log", ".DS_Store"}
 CODE_RESOURCE_TYPES = {"XCMD", "XFCN", "xcmd", "xfcn"}
 EXECUTABLE_RESOURCE_TYPES = CODE_RESOURCE_TYPES | {"cfrg"}
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")

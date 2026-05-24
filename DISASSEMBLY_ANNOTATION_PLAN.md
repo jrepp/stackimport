@@ -90,7 +90,7 @@
 
 ## Implementation Order
 
-1. Move report TSVs into SQLite report tables.
+1. Keep report data in SQLite report tables.
 2. Stabilize the call-audit schema and add category/confidence columns.
 3. Add trap taxonomy.
 4. Add per-resource summaries and behavior tags.

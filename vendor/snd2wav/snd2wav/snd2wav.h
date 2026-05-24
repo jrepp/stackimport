@@ -9,6 +9,7 @@
 #ifndef snd2wav_h
 #define snd2wav_h
 
+#include <cstdint>
 #include <fstream>
 #include <string>
 
