@@ -102,26 +102,38 @@ std::string four_char_type(uint32_t type)
 std::string sanitized_resource_file_name(const std::string& stackName, const std::string& type, int32_t id, const std::string& name, const char* extension)
 {
 	std::string result;
-	result.reserve(stackName.size() + type.size() + name.size() + 32);
-	auto append_sanitized = [&result](const std::string& text) {
-		for(char ch : text)
+	result.reserve((stackName.size() + type.size() + name.size()) * 3 + 32);
+	auto append_escaped = [&result](const std::string& text) {
+		static const char hex[] = "0123456789ABCDEF";
+		size_t emitted = 0;
+		for(char rawCh : text)
 		{
-			const unsigned char uch = static_cast<unsigned char>(ch);
-			if((uch >= 'A' && uch <= 'Z') || (uch >= 'a' && uch <= 'z') || (uch >= '0' && uch <= '9') || ch == '-' || ch == '_')
-				result.push_back(ch);
-			else if(ch == ' ' || ch == '.')
-				result.push_back('_');
+			const unsigned char ch = static_cast<unsigned char>(rawCh);
+			if((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.')
+			{
+				result.push_back(static_cast<char>(ch));
+				emitted++;
+			}
+			else
+			{
+				result.push_back('%');
+				result.push_back(hex[(ch >> 4u) & 0x0Fu]);
+				result.push_back(hex[ch & 0x0Fu]);
+				emitted += 3;
+			}
 		}
+		if(emitted == 0)
+			result += "unnamed";
 	};
-	append_sanitized(stackName);
+	append_escaped(stackName);
 	result.push_back('_');
-	append_sanitized(type);
+	append_escaped(type);
 	result.push_back('_');
 	result += std::to_string(id);
 	if(!name.empty())
 	{
 		result.push_back('_');
-		append_sanitized(name);
+		append_escaped(name);
 	}
 	result += extension;
 	return result;

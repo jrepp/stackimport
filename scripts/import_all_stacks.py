@@ -576,8 +576,28 @@ def mac_roman_text(data: bytes) -> str:
     return data.decode("macroman", errors="replace")
 
 
+SAFE_FILENAME_BYTES = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+
+
+def filesystem_escape(value: str, *, max_bytes: int = 180) -> str:
+    escaped_parts: list[str] = []
+    for byte in value.encode("utf-8", errors="surrogateescape"):
+        if byte in SAFE_FILENAME_BYTES:
+            escaped_parts.append(chr(byte))
+        else:
+            escaped_parts.append(f"%{byte:02X}")
+    escaped = "".join(escaped_parts).strip(".")
+    if not escaped or escaped in {".", ".."}:
+        escaped = "unnamed"
+    if len(escaped.encode("utf-8")) > max_bytes:
+        digest = hashlib.sha1(value.encode("utf-8", errors="surrogateescape")).hexdigest()[:12]
+        encoded = escaped.encode("utf-8")[: max_bytes - 13]
+        escaped = encoded.decode("utf-8", errors="ignore").rstrip("%") + f"-{digest}"
+    return escaped
+
+
 def log_stem_for(rel_path: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", rel_path).strip("_") or "input"
+    safe = filesystem_escape(rel_path)
     digest = hashlib.sha1(rel_path.encode("utf-8", errors="surrogateescape")).hexdigest()[:12]
     return f"{digest}-{safe}"
 
@@ -792,9 +812,8 @@ def chunk_status_from_log(line: str) -> tuple[str, str, int | None, int | None] 
 
 
 def output_package_for(import_path: Path) -> Path:
-    if import_path.suffix:
-        return import_path.with_suffix(".xstk")
-    return import_path.with_name(f"{import_path.name}.xstk")
+    package_name = filesystem_escape(import_path.stem if import_path.suffix else import_path.name)
+    return import_path.with_name(f"{package_name}.xstk")
 
 
 def kind_for_output(path: Path) -> str:
@@ -926,7 +945,8 @@ def run_stackimport(
     disassemble_code_resources: bool,
     classified: ClassifiedFile | None = None,
 ) -> ImportResult:
-    command = [str(stackimport_bin), *stackimport_args, str(import_path)]
+    output_package = output_package_for(import_path)
+    command = [str(stackimport_bin), *stackimport_args, "--output", str(output_package), str(import_path)]
     completed = run_command(command, use_pty=stackimport_pty)
     captured_output = completed.stdout or ""
     plain_output = strip_ansi(captured_output) if stackimport_pty else captured_output
@@ -971,7 +991,6 @@ def run_stackimport(
     blocks = first_status_number(lines, re.compile(r"Status: Found ([0-9]+) blocks in file\."))
     resources = first_status_number(lines, re.compile(r"Status: Found ([0-9]+) resources in file\."))
     status = "ok" if completed.returncode == 0 else "failed"
-    output_package = output_package_for(import_path)
     output_package_text = str(output_package) if output_package.exists() else None
 
     cursor = conn.execute(
