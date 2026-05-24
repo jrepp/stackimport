@@ -46,12 +46,6 @@
 
 using namespace std;
 
-
-inline int __min(int x, int y)
-{
-	return (x > y) ? y : x;
-}
-
 static size_t size_from_nonnegative_int(int value)
 {
 	return value > 0 ? static_cast<size_t>(value) : 0;

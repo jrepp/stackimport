@@ -5,6 +5,10 @@
 #include <cstdlib>
 #include <cstdio>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#include <malloc.h>
+#endif
 
 namespace {
 
@@ -13,14 +17,23 @@ void* default_allocate(size_t size, size_t alignment, void*)
 	void* ptr = nullptr;
 	if(alignment < sizeof(void*))
 		alignment = sizeof(void*);
+#if defined(_WIN32)
+	ptr = _aligned_malloc(size, alignment);
+	return ptr;
+#else
 	if(posix_memalign(&ptr, alignment, size) != 0)
 		return nullptr;
 	return ptr;
+#endif
 }
 
 void default_deallocate(void* ptr, void*)
 {
+#if defined(_WIN32)
+	_aligned_free(ptr);
+#else
 	free(ptr);
+#endif
 }
 
 void default_message(uint32_t severity, const char* message, void*)
@@ -45,7 +58,11 @@ int default_close_file(stackimport_file_handle file, void*)
 
 int default_make_directory(const char* path, void*)
 {
+#if defined(_WIN32)
+	return _mkdir(path);
+#else
 	return mkdir(path, 0777);
+#endif
 }
 
 const stackimport_internal_platform kDefaultPlatform = {

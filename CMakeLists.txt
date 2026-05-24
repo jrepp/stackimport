@@ -167,6 +167,12 @@ foreach(target stackimport_static stackimport stackimport-tests)
     stackimport_disable_exceptions(${target})
 endforeach()
 
+if(WIN32)
+    foreach(target stackimport_static stackimport stackimport-tests)
+        target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+    endforeach()
+endif()
+
 enable_testing()
 add_test(NAME stackimport-tests COMMAND stackimport-tests)
 

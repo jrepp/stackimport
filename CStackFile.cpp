@@ -16,7 +16,9 @@
 #include <memory>
 #include <span>
 #include <sys/stat.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"

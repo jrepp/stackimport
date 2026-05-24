@@ -9,6 +9,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#include <malloc.h>
+#endif
 
 struct stackimport_context {
 	CStackFile stack;
@@ -38,14 +42,23 @@ void* libc_allocate(size_t size, size_t alignment, void*)
 	void* ptr = nullptr;
 	if(alignment < sizeof(void*))
 		alignment = sizeof(void*);
+#if defined(_WIN32)
+	ptr = _aligned_malloc(size, alignment);
+	return ptr;
+#else
 	if(posix_memalign(&ptr, alignment, size) != 0)
 		return nullptr;
 	return ptr;
+#endif
 }
 
 void libc_deallocate(void* ptr, void*)
 {
+#if defined(_WIN32)
+	_aligned_free(ptr);
+#else
 	free(ptr);
+#endif
 }
 
 void libc_message(uint32_t severity, const char* message, void*)
@@ -70,7 +83,11 @@ int libc_close_file(stackimport_file_handle file, void*)
 
 int libc_make_directory(const char* path, void*)
 {
+#if defined(_WIN32)
+	return _mkdir(path);
+#else
 	return mkdir(path, 0777);
+#endif
 }
 
 bool valid_platform(const stackimport_platform* platform)
