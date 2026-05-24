@@ -3,6 +3,24 @@ include(ExternalProject)
 option(STACKIMPORT_BUILD_VENDOR_TOOLS "Enable local builds for vendored conversion tools" ON)
 option(STACKIMPORT_VENDOR_STRICT_WARNINGS "Build vendored tools with stricter compiler warnings where supported" ON)
 
+find_package(Threads REQUIRED)
+
+add_library(vendor_quill INTERFACE)
+target_include_directories(vendor_quill SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/quill/include")
+target_compile_features(vendor_quill INTERFACE cxx_std_23)
+target_compile_definitions(vendor_quill INTERFACE
+    QUILL_NO_EXCEPTIONS
+    QUILL_DISABLE_NON_PREFIXED_MACROS
+)
+target_link_libraries(vendor_quill INTERFACE Threads::Threads)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    target_compile_options(vendor_quill INTERFACE -Wno-gnu-zero-variadic-macro-arguments)
+endif()
+
+add_library(vendor_rang INTERFACE)
+target_include_directories(vendor_rang SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/rang/include")
+target_compile_features(vendor_rang INTERFACE cxx_std_23)
+
 add_library(vendor_stb_image_write INTERFACE)
 target_include_directories(vendor_stb_image_write INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/stb")
 target_compile_features(vendor_stb_image_write INTERFACE c_std_17 cxx_std_23)

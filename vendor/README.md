@@ -12,6 +12,8 @@ local integration targets, and modification status.
 
 | Path | Project | Purpose | License |
 | --- | --- | --- | --- |
+| `quill/` | Quill 11.1.0 | Header-only C++ logging library used by stackimport diagnostics | MIT, see `quill/LICENSE` |
+| `rang/` | rang 3.2 | Header-only terminal color support for log and dump formatting | Unlicense, see `rang/LICENSE` |
 | `resource_dasm/` | `resource_dasm` / `libresource_file` | Classic Mac resource fork parsing, PICT/image/audio/code resource conversion and disassembly helpers | MIT, see `resource_dasm/LICENSE` |
 | `phosg/` | `phosg` | Required dependency for `resource_dasm` | MIT, see `phosg/src/LICENSE` |
 | `deark/` | Deark 1.7.2 | Broad legacy file/container decoder, including MacBinary, resource forks, BinHex, StuffIt, and PICT coverage | MIT-style, see `deark/COPYING`; bundled third-party notices live in `deark/foreign/` |

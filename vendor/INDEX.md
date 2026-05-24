@@ -8,6 +8,8 @@ locally patched.
 
 | Path | Dependency | Role | License | Local Integration | Local Modifications |
 | --- | --- | --- | --- | --- | --- |
+| `quill/` | Quill 11.1.0 | Header-only C++ logging backend used by stackimport diagnostics | MIT, see `quill/LICENSE` | `vendor_quill` interface target; linked into `stackimport_static`; stackimport's logging facade uses Quill console sinks | No upstream source changes. Added `quill/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. |
+| `rang/` | rang 3.2 | Header-only terminal color support for log/dump formatting | Unlicense, see `rang/LICENSE` | `vendor_rang` interface target; linked into `stackimport_static` for terminal color helpers | No upstream source changes. Added `rang/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. |
 | `rapidjson/` | RapidJSON 1.1.0 | Header-only JSON DOM/writer used by `stackimport_static` | MIT, see `rapidjson/license.txt` | `vendor_rapidjson` interface target; linked into `stackimport_static` | No upstream source changes. Added `rapidjson/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. |
 | `resource_dasm/` | `resource_dasm` / `libresource_file` snapshot | Classic Mac resource fork and resource conversion reference implementation | MIT, see `resource_dasm/LICENSE` | Built by `vendor_resource_dasm` external project; included in `stackimport-vendor-static` | No upstream source changes intended. Local integration is through the top-level vendor CMake wrapper and strict build flags. |
 | `phosg/` | `phosg` snapshot | Required support library for `resource_dasm` | MIT, see `phosg/src/LICENSE` | Built by `vendor_phosg` external project before `vendor_resource_dasm` | No upstream source changes intended. Local integration is through the top-level vendor CMake wrapper and strict build flags. |
@@ -24,6 +26,8 @@ The main vendor entry points are defined in `vendor/CMakeLists.txt`:
 | Target | Purpose |
 | --- | --- |
 | `vendor-header-libraries` | Makes header-only interface targets available. |
+| `vendor_quill` | Exposes the vendored Quill logging headers with stackimport's no-exceptions configuration. |
+| `vendor_rang` | Exposes the vendored rang terminal color header. |
 | `vendor_ppcd` | Builds the vendored PPCD PowerPC disassembler as a static library. |
 | `vendor_snd2wav` | Builds the vendored local `snd2wav` helper as a static library. |
 | `vendor-tools` | Builds header-only targets plus Deark, phosg, and resource_dasm. |
