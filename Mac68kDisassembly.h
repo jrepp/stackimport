@@ -19,4 +19,10 @@ Mac68kDisassemblyResult DisassembleMac68kCodeResource(
 	size_t size,
 	uint32_t displayAddress = 0);
 
+Mac68kDisassemblyResult DisassemblePowerPCCodeResource(
+	std::span<const uint8_t> resource,
+	size_t start,
+	size_t size,
+	uint32_t displayAddress = 0);
+
 }

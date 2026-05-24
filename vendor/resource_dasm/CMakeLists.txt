@@ -7,13 +7,22 @@ cmake_minimum_required(VERSION 3.22)
 project(resource_dasm)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+option(DISABLE_SDL "Disable SDL-dependent audio playback tools" OFF)
+option(RESOURCE_DASM_WARNINGS_AS_ERRORS "Treat resource_dasm compiler warnings as errors" OFF)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_EXTENSIONS OFF)
 if (MSVC)
-  add_compile_options(/W4 /WX)
+  add_compile_options(/W4)
+  if(RESOURCE_DASM_WARNINGS_AS_ERRORS)
+    add_compile_options(/WX)
+  endif()
 else()
-  add_compile_options(-Wall -Wextra -Werror -Wno-strict-aliasing -O2)
+  add_compile_options(-Wall -Wextra -Wno-strict-aliasing)
+  if(RESOURCE_DASM_WARNINGS_AS_ERRORS)
+    add_compile_options(-Werror)
+  endif()
 endif()
 
 find_package(phosg REQUIRED PATHS ${CMAKE_INSTALL_FULL_LIBDIR})
@@ -25,7 +34,7 @@ endif()
 
 # Library and executable definitions
 
-add_library(resource_file
+add_library(resource_file STATIC
   src/AudioCodecs.cc
   src/Audio/AAFArchive.cc
   src/Audio/Constants.cc
@@ -103,7 +112,7 @@ foreach(ExecutableName IN ITEMS gcmasm gcmdump gvmdump rcfdump vrfsdump)
 endforeach()
 foreach(ExecutableName IN ITEMS smsdumpbanks smssynth modsynth)
   add_executable(${ExecutableName} src/Audio/${ExecutableName}.cc)
-  target_link_libraries(${ExecutableName} phosg::phosg resource_file)
+  target_link_libraries(${ExecutableName} resource_file)
 endforeach()
 
 if(SDL3_FOUND)

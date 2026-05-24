@@ -4,7 +4,7 @@
 - Snapshot commit: `58f7e6df284fa4cd5a9a734b7a44d1851dcdaf16`
 - Retrieved: 2026-05-23
 - License: CC0-1.0, see `LICENSE`
-- Local integration: `vendor_ppcd` static library target in `vendor/CMakeLists.txt`
+- Local integration: `vendor_ppcd` static library target in `vendor/CMakeLists.txt`, built with required C++23 and compiler extensions disabled
 - Included upstream files: `ppcd.cpp`, `ppcd.h`, `CommonDefs.h` contents stored as `Commondefs.h`, `README.md`, `LICENSE`
 - Local source modifications: one const-correctness fix in `ppcd.cpp`
   changes a local string-literal pointer from `char *` to `const char *` so the

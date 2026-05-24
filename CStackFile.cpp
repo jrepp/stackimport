@@ -9,9 +9,12 @@
 
 
 #include "CStackFile.h"
+#include "Mac68kDisassembly.h"
 #include <cerrno>
 #include <iostream>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "picture.h"
@@ -24,6 +27,11 @@
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
+
+#if STACKIMPORT_HAS_RESOURCE_DASM
+#include <resource_file/IndexFormats/Formats.hh>
+#include <resource_file/ResourceTypes.hh>
+#endif
 
 
 // Table of C-strings for converting the non-ASCII MacRoman characters (above 127)
@@ -79,6 +87,53 @@ JsonValue json_string(const std::string& value, JsonPoolAllocator& allocator)
 	JsonValue result;
 	result.SetString(value.c_str(), static_cast<rapidjson::SizeType>(value.size()), allocator);
 	return result;
+}
+
+std::string four_char_type(uint32_t type)
+{
+	std::string result;
+	result.push_back(static_cast<char>((type >> 24u) & 0xFFu));
+	result.push_back(static_cast<char>((type >> 16u) & 0xFFu));
+	result.push_back(static_cast<char>((type >> 8u) & 0xFFu));
+	result.push_back(static_cast<char>(type & 0xFFu));
+	return result;
+}
+
+std::string sanitized_resource_file_name(const std::string& stackName, const std::string& type, int32_t id, const std::string& name, const char* extension)
+{
+	std::string result;
+	result.reserve(stackName.size() + type.size() + name.size() + 32);
+	auto append_sanitized = [&result](const std::string& text) {
+		for(char ch : text)
+		{
+			const unsigned char uch = static_cast<unsigned char>(ch);
+			if((uch >= 'A' && uch <= 'Z') || (uch >= 'a' && uch <= 'z') || (uch >= '0' && uch <= '9') || ch == '-' || ch == '_')
+				result.push_back(ch);
+			else if(ch == ' ' || ch == '.')
+				result.push_back('_');
+		}
+	};
+	append_sanitized(stackName);
+	result.push_back('_');
+	append_sanitized(type);
+	result.push_back('_');
+	result += std::to_string(id);
+	if(!name.empty())
+	{
+		result.push_back('_');
+		append_sanitized(name);
+	}
+	result += extension;
+	return result;
+}
+
+bool write_text_file(const std::string& path, const std::string& text)
+{
+	std::ofstream file(path.c_str(), std::ios::binary);
+	if(!file.is_open())
+		return false;
+	file.write(text.data(), static_cast<std::streamsize>(text.size()));
+	return static_cast<bool>(file);
 }
 
 JsonValue json_string(const char* value, JsonPoolAllocator& allocator)
@@ -271,6 +326,7 @@ CStackFile::CStackFile()
 	mStackCardCount(0), mFirstCardID(0), mUserLevel(0), mCardWidth(512), mCardHeight(342),
 	mStackCantModify(false), mStackCantDelete(false), mStackPrivateAccess(false),
 	mStackCantAbort(false), mStackCantPeek(false), mCardBlockSize(-1),
+	mResourceForkStatus("not_checked"), mResourceForkBytes(0),
 	mCurrentProgress(0), mMaxProgress(0)
 {
 	
@@ -369,8 +425,34 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 	document.AddMember("dataFork", dataFork, allocator);
 
 	JsonValue resourceFork(rapidjson::kObjectType);
-	resourceFork.AddMember("status", json_string("not_read_by_core_importer", allocator), allocator);
-	resourceFork.AddMember("resources", JsonValue(rapidjson::kArrayType), allocator);
+	resourceFork.AddMember("status", json_string(mResourceForkStatus, allocator), allocator);
+	resourceFork.AddMember("bytes", JsonValue().SetUint64(mResourceForkBytes), allocator);
+	JsonValue resources(rapidjson::kArrayType);
+	std::map<std::string,int32_t> resourceTypeCounts;
+	for( const CResourceSummary& resource : mResourceSummaries )
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("type", json_string(resource.type, allocator), allocator);
+		item.AddMember("id", resource.id, allocator);
+		item.AddMember("flags", resource.flags, allocator);
+		item.AddMember("name", json_string(resource.name, allocator), allocator);
+		item.AddMember("bytes", JsonValue().SetUint64(resource.bytes), allocator);
+		item.AddMember("status", json_string(resource.status, allocator), allocator);
+		item.AddMember("architecture", json_string(resource.architecture, allocator), allocator);
+		if(!resource.disassemblyFile.empty())
+			item.AddMember("disassemblyFile", json_string(resource.disassemblyFile, allocator), allocator);
+		resources.PushBack(item, allocator);
+		resourceTypeCounts[resource.type]++;
+	}
+	resourceFork.AddMember("resources", resources, allocator);
+
+	JsonValue resourceCounts(rapidjson::kObjectType);
+	for( const auto& count : resourceTypeCounts )
+	{
+		JsonValue name = json_string(count.first, allocator);
+		resourceCounts.AddMember(name, count.second, allocator);
+	}
+	resourceFork.AddMember("resourceTypeCounts", resourceCounts, allocator);
 	document.AddMember("resourceFork", resourceFork, allocator);
 
 	if( !write_json_document(OutputPath("source-manifest.json"), document, baseAllocator) )
@@ -1472,6 +1554,120 @@ bool	CStackFile::LoadPowerPCResources()
 }
 #endif //MAC_CODE
 
+bool	CStackFile::LoadResourceFork( const std::string& fpath )
+{
+	mResourceSummaries.clear();
+	mResourceForkBytes = 0;
+
+	const std::string resourceForkPath = fpath + "/..namedfork/rsrc";
+	std::ifstream resourceFile(resourceForkPath.c_str(), std::ios::binary);
+	if(!resourceFile.is_open())
+	{
+		mResourceForkStatus = "missing_or_empty";
+		return true;
+	}
+	std::string resourceForkData(
+		(std::istreambuf_iterator<char>(resourceFile)),
+		std::istreambuf_iterator<char>());
+	mResourceForkBytes = static_cast<uint64_t>(resourceForkData.size());
+	if(resourceForkData.empty())
+	{
+		mResourceForkStatus = "missing_or_empty";
+		return true;
+	}
+
+#if STACKIMPORT_HAS_RESOURCE_DASM
+	ResourceDASM::ResourceFile parsed = ResourceDASM::parse_resource_fork(resourceForkData);
+	if(parsed.empty())
+	{
+		mResourceForkStatus = "empty";
+		return true;
+	}
+
+	const std::string outputDir = OutputPath("resource-disassembly");
+	if(stackimport_internal_make_directory(outputDir.c_str()) != 0 && errno != EEXIST)
+	{
+		stackimport_emit_diagnosticf( "Warning: Couldn't create resource disassembly directory '%s'.\n", outputDir.c_str() );
+		mResourceForkStatus = "output_directory_failed";
+		return true;
+	}
+
+	const uint32_t xcmdType = ResourceDASM::resource_type("xcmd");
+	const uint32_t xfcnType = ResourceDASM::resource_type("xfcn");
+	for(const auto& resourceId : parsed.all_resources())
+	{
+		std::shared_ptr<const ResourceDASM::ResourceFile::Resource> resource = parsed.get_resource(resourceId.first, resourceId.second);
+		if(!resource)
+			continue;
+
+		CResourceSummary summary;
+		summary.type = four_char_type(resource->type);
+		summary.id = resource->id;
+		summary.flags = resource->flags;
+		summary.name = resource->name;
+		summary.bytes = resource->data.size();
+		summary.status = "preserved";
+
+		stackimport::Mac68kDisassemblyResult disassembly;
+		if(resource->type == ResourceDASM::RESOURCE_TYPE_XCMD || resource->type == ResourceDASM::RESOURCE_TYPE_XFCN)
+		{
+			summary.architecture = "mac68k";
+			disassembly = stackimport::DisassembleMac68kCodeResource(
+				std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(resource->data.data()), resource->data.size()),
+				0,
+				resource->data.size(),
+				0);
+		}
+		else if(resource->type == xcmdType || resource->type == xfcnType)
+		{
+			summary.architecture = "macppc";
+			disassembly = stackimport::DisassemblePowerPCCodeResource(
+				std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(resource->data.data()), resource->data.size()),
+				0,
+				resource->data.size(),
+				0);
+		}
+		else
+		{
+			mResourceSummaries.push_back(summary);
+			continue;
+		}
+
+		if(disassembly.ok)
+		{
+			const std::string typeAndArchitecture = summary.type + "_" + summary.architecture;
+			const std::string relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(
+				mFileName,
+				typeAndArchitecture,
+				summary.id,
+				summary.name,
+				".txt");
+			if(write_text_file(OutputPath(relativePath.c_str()), disassembly.text))
+			{
+				summary.status = "disassembled";
+				summary.disassemblyFile = relativePath;
+				stackimport_emit_infof( "Status: Wrote %s disassembly for '%s' #%d.\n", summary.architecture.c_str(), summary.type.c_str(), summary.id );
+			}
+			else
+			{
+				summary.status = "disassembly_write_failed";
+				stackimport_emit_diagnosticf( "Warning: Could not write disassembly for '%s' #%d.\n", summary.type.c_str(), summary.id );
+			}
+		}
+		else
+		{
+			summary.status = "disassembly_failed";
+			stackimport_emit_diagnosticf( "Warning: Could not disassemble '%s' #%d: %s\n", summary.type.c_str(), summary.id, disassembly.error.c_str() );
+		}
+		mResourceSummaries.push_back(summary);
+	}
+	mResourceForkStatus = "ok";
+#else
+	mResourceForkStatus = "resource_dasm_unavailable";
+#endif
+	return true;
+}
+
 
 bool	CStackFile::WriteJsonIndexes() const
 {
@@ -1839,6 +2035,8 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 		return false;
 	}
 	success = LoadStackBlock( -1, stackItty->second );
+	if( success && !LoadResourceFork(fpath) )
+		return false;
 	if( success && !WriteSourceManifest(dataForkBytes, sourceStreamStatus.c_str()) )
 		return false;
 	if( success )

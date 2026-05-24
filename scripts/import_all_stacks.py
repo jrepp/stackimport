@@ -2759,6 +2759,39 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["chunk_type", "status", "understood", "stack_count", "stacks"],
         ),
+        "chunk-type-counts.tsv": (
+            """
+            SELECT c.chunk_type,
+                   COUNT(*) AS chunk_count,
+                   COUNT(DISTINCT c.stack_id) AS stack_count,
+                   SUM(CASE WHEN c.understood = 1 THEN 1 ELSE 0 END) AS understood_count,
+                   SUM(CASE WHEN c.understood = 0 THEN 1 ELSE 0 END) AS not_understood_count,
+                   SUM(CASE WHEN c.status = 'parsed' THEN 1 ELSE 0 END) AS parsed_count,
+                   SUM(CASE WHEN c.status = 'derived_from_output' THEN 1 ELSE 0 END) AS derived_from_output_count,
+                   SUM(CASE WHEN c.status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count,
+                   SUM(CASE WHEN c.status = 'unhandled' THEN 1 ELSE 0 END) AS unhandled_count,
+                   COALESCE(SUM(c.chunk_bytes), 0) AS total_chunk_bytes,
+                   GROUP_CONCAT(DISTINCT s.stack_name) AS stacks
+            FROM binary_chunks c
+            JOIN stacks s ON s.id = c.stack_id
+            WHERE s.run_id = ?
+            GROUP BY c.chunk_type
+            ORDER BY c.chunk_type
+            """,
+            [
+                "chunk_type",
+                "chunk_count",
+                "stack_count",
+                "understood_count",
+                "not_understood_count",
+                "parsed_count",
+                "derived_from_output_count",
+                "skipped_count",
+                "unhandled_count",
+                "total_chunk_bytes",
+                "stacks",
+            ],
+        ),
         "embedded-file-usage.tsv": (
             """
             SELECT e.embedded_kind, e.logical_kind, e.sha256, e.bytes, COUNT(*) AS occurrence_count,

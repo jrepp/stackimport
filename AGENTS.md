@@ -69,22 +69,24 @@ For corpus runs, use:
 scripts/import_all_stacks.py --stackimport-bin build/stackimport
 ```
 
-The script extracts `.sit` and `.hqx` archives with `unar`, fingerprints
+`scripts/import_all_stacks.py` carries a `#!/usr/bin/env -S uv run --script`
+shebang, so run it directly from the repository root; `uv` supplies the script
+runtime. The script extracts `.sit` and `.hqx` archives with `unar`, fingerprints
 extracted files, runs `stackimport` only against files classified as stacks, and
 writes logs, reports, output packages, and a SQLite index under `import-runs/`.
-To emit 68K assembly listings for XCMD/XFCN resources preserved in resource
-forks, add:
+Code-resource disassembly is enabled by default for XCMD/XFCN/xcmd/xfcn/cfrg
+resources. To tune the worker count, use:
 
 ```sh
 scripts/import_all_stacks.py \
   --stackimport-bin build/stackimport \
-  --disassemble-code-resources
+  --resource-dasm-jobs 4
 ```
 
 This uses `build/vendor-install/bin/resource_dasm` by default, writes
 `resource-disassembly/*.txt` inside each generated `.xstk` package, and indexes
-those files as `externalcommand` or `externalfunction` outputs. Keep the
-generated provenance JSON next to the disassembly output.
+those files as code-resource outputs. Keep the generated provenance JSON next to
+the disassembly output.
 
 For embedded output conversion, run the converter against a completed importer
 database:

@@ -129,6 +129,18 @@ struct CSourceBlockSummary
 	std::string	status;
 };
 
+struct CResourceSummary
+{
+	std::string	type;
+	int32_t		id;
+	uint32_t	flags;
+	std::string	name;
+	size_t		bytes;
+	std::string	status;
+	std::string	disassemblyFile;
+	std::string	architecture;
+};
+
 class CStyleEntry
 {
 public:
@@ -176,6 +188,7 @@ protected:
 	bool	LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& blockData, uint8_t inFlags );	// Card or Bkgd.
 	std::string	OutputPath( const char* fileName ) const;
 	bool	WriteSourceManifest( uint64_t dataForkBytes, const char* streamStatus ) const;
+	bool	LoadResourceFork( const std::string& fpath );
 	bool	WriteJsonIndexes() const;
 	
 #if MAC_CODE
@@ -214,6 +227,9 @@ protected:
 	int32_t			mCardBlockSize;		// Size of the card entries in PAGE blocks, read from LIST block.
 	CBlockMap		mBlockMap;			// Associative map of type/id -> block data mappings for random access to blocks when actually parsing their contents.
 	std::vector<CSourceBlockSummary>	mSourceBlocks;
+	std::vector<CResourceSummary>	mResourceSummaries;
+	std::string		mResourceForkStatus;
+	uint64_t		mResourceForkBytes;
 	int				mCurrentProgress;	// Current value for progress output.
 	int				mMaxProgress;		// Maximum value for progress output.
 	CBtnIDsPerBgMap	mButtonIDsPerBg;	// Table that holds the IDs of all BG buttons on each background. Used to detect what card-level button contents entries are actually sharedHighlight entries for a bg button.

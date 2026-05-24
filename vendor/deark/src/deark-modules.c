@@ -137,7 +137,7 @@ static void de_register_modules_internal(deark *c)
 
 	num_modules = DE_ARRAYCOUNT(infofunc_list);
 
-	c->module_info = de_mallocarray(c, num_modules, sizeof(struct deark_module_info));
+	c->module_info = de_mallocarray(c, (i64)num_modules, sizeof(struct deark_module_info));
 
 	for(i=0; i<num_modules; i++) {
 		register_a_module(c, infofunc_list[i]);

@@ -122,6 +122,15 @@ High-level CLI example:
 The output package contains generated JSON metadata, decoded media, and raw block
 data by default.
 
+Corpus import runner:
+
+    scripts/import_all_stacks.py
+
+The runner has a `#!/usr/bin/env -S uv run --script` shebang, so it can be run
+directly from the repository root. It scans the default Pantechnicon mirror,
+extracts `.sit`/`.hqx` archives, imports files classified as stacks, and writes
+reports under `import-runs/<run-id>/`.
+
 High-level C API example:
 
     #include "stackimport_c.h"

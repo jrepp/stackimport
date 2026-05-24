@@ -40,9 +40,20 @@ That target builds:
 The vendored tool path is optional and separate from the default `stackimport`
 library/executable build.
 
-The wrapper builds CMake-based vendored projects with C++23, C17, required
-standards, and disabled compiler extensions. Deark is Make-based, so the wrapper
-passes C17 and stricter warning flags through `CFLAGS`.
+The wrapper builds compiled vendored C++ with required C++23 and disabled
+compiler extensions, and compiled vendored C with C17 where the dependency has C
+sources. `STACKIMPORT_VENDOR_STRICT_WARNINGS` enables the shared vendor warning
+baseline; `STACKIMPORT_VENDOR_WARNINGS_AS_ERRORS` follows the top-level
+`STACKIMPORT_WARNINGS_AS_ERRORS` setting by default.
+
+Header-only vendored dependencies are exposed as system include directories so
+third-party implementation details do not leak warning noise into stackimport
+targets. Legacy vendored snapshots keep targeted compatibility suppressions in
+the wrapper instead of weakening the main project warning policy.
+
+Deark is Make-based, so the wrapper passes C17 and strict warning flags through
+`CFLAGS`. CMake-based vendored projects receive the same standard, extension,
+warning, and warnings-as-errors policy through `ExternalProject_Add` arguments.
 
 Static-analysis options from the top-level CMake build are forwarded to
 CMake-based vendored projects:

@@ -23,7 +23,7 @@ file(REMOVE "${OUTPUT}")
 if(APPLE)
     find_program(LIBTOOL_EXECUTABLE NAMES libtool REQUIRED)
     execute_process(
-        COMMAND "${LIBTOOL_EXECUTABLE}" -static -o "${OUTPUT}" ${INPUT_LIST}
+        COMMAND "${LIBTOOL_EXECUTABLE}" -static -no_warning_for_no_symbols -o "${OUTPUT}" ${INPUT_LIST}
         RESULT_VARIABLE combine_result
     )
 else()
