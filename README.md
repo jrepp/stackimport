@@ -92,16 +92,20 @@ How to use this
 
 Once you have built the stackimport command line tool, just use it. Syntax is
 
-    stackimport [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
+    stackimport [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
 
 where originalStackPath is the HyperCard stack you want to convert.
+If `--output` is omitted, stackimport creates a sibling `.xstk` directory next
+to the input stack, replacing the input extension when one is present.
 
 Where the options are:
 
-dumprawblocks - Create files containing the raw data from each block in the stack,
-don't just create the clear-text output. This is useful if you want to extract some
-information this program doesn't yet recognize. It'd be appreciated if you could contribute
-any additional knowledge you have about HyperCard's file format back to the authors of this.
+dumprawblocks - Create files containing the raw data from each block in the stack.
+This is enabled by default so a normal run preserves evidence for structures the
+parser does not fully understand yet.
+
+nodumprawblocks - Do not write per-block raw `.data` files. This is useful for a
+small output package when you only need decoded JSON/media.
 
 nostatus - Don't output status messages while converting the file. These are mostly useful
 if you are displaying a progress UI, or if conversion aborts and you need to know what bock
@@ -113,12 +117,10 @@ updating the progress bar in a progress UI.
 High-level CLI example:
 
     cmake --build build --target stackimport
-    build/stackimport --noprogress --nostatus \
-      --output /tmp/MyStack.xstk \
-      /path/to/MyStack
+    build/stackimport --output /tmp/MyStack.xstk /path/to/MyStack
 
-The output package contains generated JSON metadata and any media files decoded
-from the stack.
+The output package contains generated JSON metadata, decoded media, and raw block
+data by default.
 
 High-level C API example:
 

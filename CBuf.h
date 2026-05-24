@@ -9,13 +9,13 @@
 
 #pragma once
 
-#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
 
 #include "stackimport_c.h"
+#include "stackimport_logging.h"
 
 
 struct shared_buffer
@@ -65,7 +65,7 @@ public:
 	
 	void			tofile( const std::string& fpath );
 	
-	void			debug_print()		{ if( !mShared ) printf( "NULL\n" ); else { printf("CBuf %p { size = %zd, refCount = %d, \"%-*s\" }\n", static_cast<const void*>(this), mShared->mSize, mShared->mRefCount, static_cast<int>(mShared->mSize), mShared->mBuffer ); } }
+	void			debug_print()		{ if( !mShared ) stackimport_quill_log_message(STACKIMPORT_MESSAGE_INFO, "NULL"); else { stackimport_quill_logf(STACKIMPORT_MESSAGE_INFO, "CBuf %p { size = %zu, refCount = %d, \"%-*s\" }", static_cast<const void*>(this), mShared->mSize, mShared->mRefCount, static_cast<int>(mShared->mSize), mShared->mBuffer ); } }
 	
 	CBuf&			operator = ( const CBuf& inTemplate );
 

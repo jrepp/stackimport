@@ -33,7 +33,9 @@
 
 
 #if DEBUGOUTPUT
-#include <iostream>
+#include <sstream>
+#include "stackimport_logging.h"
+#define WOBA_DEBUG(expr) do { std::ostringstream stackimportWobaDebugStream; stackimportWobaDebugStream << expr; stackimport_quill_log_message(STACKIMPORT_MESSAGE_INFO, stackimportWobaDebugStream.str().c_str()); } while(false)
 #endif
 #include "picture.h"
 #include "woba.h"
@@ -93,7 +95,7 @@ static int32_t ReadBEInt32(const char* data, size_t pos)
 void woba_decode(picture & p, char * woba)
 {
 	#if DEBUGOUTPUT
-	std::cout << "===== NEXT BMAP =====" << endl;
+	WOBA_DEBUG("===== NEXT BMAP =====");
 	#endif
 	
 	int totalRectTop = 0,
@@ -156,11 +158,11 @@ void woba_decode(picture & p, char * woba)
 		pictureDataLength = ReadBEInt32(woba,48);
 		
 		#if DEBUGOUTPUT
-		std::cout << "Total Rect: " << totalRectLeft << "," << totalRectTop << "," << totalRectRight << "," << totalRectBottom << endl;
-		std::cout << "Bitmap Rect: " << pictureBoundRectLeft << "," << pictureBoundRectTop << "," << pictureBoundRectRight << "," << pictureBoundRectBottom << endl;
-		std::cout << "Mask Rect: " << maskBoundRectLeft << "," << maskBoundRectTop << "," << maskBoundRectRight << "," << maskBoundRectBottom << endl;
-		std::cout << "Bitmap Size: " << pictureDataLength << endl;
-		std::cout << "Mask Size: " << maskDataLength << endl;
+		WOBA_DEBUG("Total Rect: " << totalRectLeft << "," << totalRectTop << "," << totalRectRight << "," << totalRectBottom);
+		WOBA_DEBUG("Bitmap Rect: " << pictureBoundRectLeft << "," << pictureBoundRectTop << "," << pictureBoundRectRight << "," << pictureBoundRectBottom);
+		WOBA_DEBUG("Mask Rect: " << maskBoundRectLeft << "," << maskBoundRectTop << "," << maskBoundRectRight << "," << maskBoundRectBottom);
+		WOBA_DEBUG("Bitmap Size: " << pictureDataLength);
+		WOBA_DEBUG("Mask Size: " << maskDataLength);
 		#endif
 		
 		p.reinit( totalRectRight -totalRectLeft, totalRectBottom -totalRectTop, 1, false);
@@ -190,9 +192,9 @@ void woba_decode(picture & p, char * woba)
 			j = 0;
 			
 			#if DEBUGOUTPUT
-			std::cout << "DECODE MASK:" << endl;
-			std::cout << "BX8: " << bx8 << endl << "BX: " << bx << endl << "X: " << x << endl << "Y: " << y << endl;
-			std::cout << "RW8: " << rowwidth8 << endl << "RW: " << rowwidth << endl << "H: " << height << endl;
+			WOBA_DEBUG("DECODE MASK:");
+			WOBA_DEBUG("BX8: " << bx8 << endl << "BX: " << bx << endl << "X: " << x << endl << "Y: " << y);
+			WOBA_DEBUG("RW8: " << rowwidth8 << endl << "RW: " << rowwidth << endl << "H: " << height);
 			#endif
 			
 			while( j < maskDataLength )
@@ -200,11 +202,11 @@ void woba_decode(picture & p, char * woba)
 				opcode = static_cast<unsigned char>(woba[i]);
 				
 				#if DEBUGOUTPUT
-				std::cout << "Opcode: " << __hex(opcode) << endl;
-				std::cout << "Repeat: " << repeat << endl;
-				std::cout << "i: " << i << endl << "j: " << j << endl;
-				std::cout << "x: " << x << endl << "y: " << y << endl;
-				std::cout << "dx: " << dx << endl << "dy: " << dy << endl;
+				WOBA_DEBUG("Opcode: " << __hex(opcode));
+				WOBA_DEBUG("Repeat: " << repeat);
+				WOBA_DEBUG("i: " << i << endl << "j: " << j);
+				WOBA_DEBUG("x: " << x << endl << "y: " << y);
+				WOBA_DEBUG("dx: " << dx << endl << "dy: " << dy);
 				#endif
 				
 				i++; j++;
@@ -215,7 +217,7 @@ void woba_decode(picture & p, char * woba)
 					numberOfZeroBytes = opcode & 15;	// nz = number of zeroes?
 					
 					#if DEBUGOUTPUT
-					std::cout << "nd: " << numberOfDataBytes << endl << "nz: " << numberOfZeroBytes << endl;
+					WOBA_DEBUG("nd: " << numberOfDataBytes << endl << "nz: " << numberOfZeroBytes);
 					#endif
 					
 					if( numberOfDataBytes )
@@ -242,7 +244,7 @@ void woba_decode(picture & p, char * woba)
 					/* opcode & 1F * 8 bytes of data */
 					numberOfDataBytes = (opcode & 0x1F) * 8;
 					#if DEBUGOUTPUT
-					std::cout << "nd: " << numberOfDataBytes << endl;
+					WOBA_DEBUG("nd: " << numberOfDataBytes);
 					#endif
 					if (numberOfDataBytes)
 					{
@@ -262,7 +264,7 @@ void woba_decode(picture & p, char * woba)
 					/* opcode & 1F * 16 bytes of zero */
 					numberOfZeroBytes = (opcode & 0x1F)*16;
 					#if DEBUGOUTPUT
-					std::cout << "nz: " << numberOfZeroBytes << endl;
+					WOBA_DEBUG("nz: " << numberOfZeroBytes);
 					#endif
 					while( repeat )
 					{
@@ -323,7 +325,7 @@ void woba_decode(picture & p, char * woba)
 						case 0x83: /* pattern */
 						operand = static_cast<unsigned char>(woba[i]);
 							#if DEBUGOUTPUT
-							std::cout << "patt: " << __hex(operand) << endl;
+							WOBA_DEBUG("patt: " << __hex(operand));
 							#endif
 							i++; j++;
 							x = 0;
@@ -343,7 +345,7 @@ void woba_decode(picture & p, char * woba)
 							{
 								operand = patternbuffer[y & 7];
 								#if DEBUGOUTPUT
-								std::cout << "patt: " << __hex(operand) << endl;
+								WOBA_DEBUG("patt: " << __hex(operand));
 								#endif
 								p.maskmemfill(char_from_byte_value(operand), bx8, y, rowwidth);
 								y++;
@@ -488,20 +490,20 @@ void woba_decode(picture & p, char * woba)
 			j = 0;
 			
 			#if DEBUGOUTPUT
-			std::cout << "DECODE BITMAP:" << endl;
-			std::cout << "BX8: " << bx8 << endl << "BX: " << bx << endl << "X: " << x << endl << "Y: " << y << endl;
-			std::cout << "RW8: " << rowwidth8 << endl << "RW: " << rowwidth << endl << "H: " << height << endl;
+			WOBA_DEBUG("DECODE BITMAP:");
+			WOBA_DEBUG("BX8: " << bx8 << endl << "BX: " << bx << endl << "X: " << x << endl << "Y: " << y);
+			WOBA_DEBUG("RW8: " << rowwidth8 << endl << "RW: " << rowwidth << endl << "H: " << height);
 			#endif
 			
 			while( j < pictureDataLength )
 			{
 				opcode = static_cast<unsigned char>(woba[i]);
 				#if DEBUGOUTPUT
-				std::cout << "Opcode: " << __hex(opcode) << endl;
-				std::cout << "Repeat: " << repeat << endl;
-				std::cout << "i: " << i << endl << "j: " << j << endl;
-				std::cout << "x: " << x << endl << "y: " << y << endl;
-				std::cout << "dx: " << dx << endl << "dy: " << dy << endl;
+				WOBA_DEBUG("Opcode: " << __hex(opcode));
+				WOBA_DEBUG("Repeat: " << repeat);
+				WOBA_DEBUG("i: " << i << endl << "j: " << j);
+				WOBA_DEBUG("x: " << x << endl << "y: " << y);
+				WOBA_DEBUG("dx: " << dx << endl << "dy: " << dy);
 				#endif
 				i++; j++;
 				if( (opcode & 0x80) == 0 )
@@ -511,7 +513,7 @@ void woba_decode(picture & p, char * woba)
 					numberOfZeroBytes = opcode & 15;
 					
 					#if DEBUGOUTPUT
-					std::cout << "nd: " << numberOfDataBytes << endl << "nz: " << numberOfZeroBytes << endl;
+					WOBA_DEBUG("nd: " << numberOfDataBytes << endl << "nz: " << numberOfZeroBytes);
 					#endif
 					
 					if( numberOfDataBytes )
@@ -537,7 +539,7 @@ void woba_decode(picture & p, char * woba)
 					/* opcode & 1F * 8 bytes of data */
 					numberOfDataBytes = (opcode & 0x1F) * 8;
 					#if DEBUGOUTPUT
-					std::cout << "nd: " << numberOfDataBytes << endl;
+					WOBA_DEBUG("nd: " << numberOfDataBytes);
 					#endif
 					if( numberOfDataBytes )
 					{
@@ -557,7 +559,7 @@ void woba_decode(picture & p, char * woba)
 					/* opcode & 1F * 16 bytes of zero */
 					numberOfZeroBytes = (opcode & 0x1F) * 16;
 					#if DEBUGOUTPUT
-					std::cout << "nz: " << numberOfZeroBytes << endl;
+					WOBA_DEBUG("nz: " << numberOfZeroBytes);
 					#endif
 					while( repeat )
 					{
@@ -618,7 +620,7 @@ void woba_decode(picture & p, char * woba)
 						case 0x83: /* pattern */
 						operand = static_cast<unsigned char>(woba[i]);
 							#if DEBUGOUTPUT
-							std::cout << "patt: " << __hex(operand) << endl;
+							WOBA_DEBUG("patt: " << __hex(operand));
 							#endif
 							i++; j++;
 							x = 0;
@@ -638,7 +640,7 @@ void woba_decode(picture & p, char * woba)
 							{
 								operand = patternbuffer[y & 7];
 								#if DEBUGOUTPUT
-								std::cout << "patt: " << __hex(operand) << endl;
+								WOBA_DEBUG("patt: " << __hex(operand));
 								#endif
 								p.memfill( char_from_byte_value(operand), bx8, y, rowwidth );
 								y++;

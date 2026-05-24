@@ -1,6 +1,7 @@
 #include "stackimport_c.h"
 
 #include "CStackFile.h"
+#include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
 
 #include <new>
@@ -49,8 +50,7 @@ void libc_deallocate(void* ptr, void*)
 
 void libc_message(uint32_t severity, const char* message, void*)
 {
-	FILE* stream = severity >= STACKIMPORT_MESSAGE_WARNING ? stderr : stdout;
-	fprintf(stream, "%s\n", message ? message : "");
+	stackimport_quill_log_message(severity, message);
 }
 
 stackimport_file_handle libc_open_file(const char* path, const char* mode, void*)

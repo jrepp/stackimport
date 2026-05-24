@@ -206,9 +206,9 @@ char*	CBuf::buf( size_t offs, size_t amount )
 	static char		dummy[2048] = {0};
 	if( amount == 0 )
 		return dummy;
-	assert( mShared->mBuffer != nullptr );
 	if( !hasdata( offs, amount ) )
 		return dummy;
+	assert( mShared->mBuffer != nullptr );
 	
 	make_buffer_exclusive();
 	return mShared->mBuffer + offs;
@@ -222,9 +222,9 @@ const char*	CBuf::buf( size_t offs, size_t amount ) const
 		amount = offs <= mShared->mSize ? mShared->mSize -offs : 0;
 	if( amount == 0 )
 		return dummy;
-	assert( mShared->mBuffer != nullptr );
 	if( !hasdata( offs, amount ) )
 		return dummy;
+	assert( mShared->mBuffer != nullptr );
 	
 	return mShared->mBuffer + offs;
 }
@@ -234,10 +234,10 @@ void	CBuf::xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amo
 {
 	if( amount == 0 )
 		return;
-	assert( mShared->mBuffer != nullptr);
-	assert( (amount +dstOffs) <= mShared->mSize );
 	if( !src || !hasdata( dstOffs, amount ) )
 		return;
+	assert( mShared->mBuffer != nullptr);
+	assert( (amount +dstOffs) <= mShared->mSize );
 	make_buffer_exclusive();
 	::xornstr( mShared->mBuffer +dstOffs, src +srcOffs, amount );
 }
@@ -247,10 +247,10 @@ void	CBuf::xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amou
 {
 	if( amount == 0 )
 		return;
-	assert( mShared->mBuffer != nullptr );
-	assert( (amount +dstOffs) <= mShared->mSize );
 	if( !hasdata( dstOffs, amount ) || !src.hasdata( srcOffs, amount ) )
 		return;
+	assert( mShared->mBuffer != nullptr );
+	assert( (amount +dstOffs) <= mShared->mSize );
 	make_buffer_exclusive();
 	::xornstr( mShared->mBuffer +dstOffs, src.buf(srcOffs,amount), amount );
 }
@@ -260,10 +260,10 @@ void	CBuf::shiftnstr( size_t dstOffs, size_t amount, int shiftAmount )
 {
 	if( amount == 0 )
 		return;
-	assert( mShared->mBuffer != nullptr );
-	assert( (dstOffs +amount) <= mShared->mSize );
 	if( dstOffs > mShared->mSize || amount > (mShared->mSize -dstOffs) )
 		return;
+	assert( mShared->mBuffer != nullptr );
+	assert( (dstOffs +amount) <= mShared->mSize );
 	make_buffer_exclusive();
 	::shiftnstr( mShared->mBuffer +dstOffs, amount, shiftAmount );
 }

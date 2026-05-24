@@ -14,11 +14,11 @@
 
 ## Checksums
 
-SHA-256 checksums of included upstream files at the snapshot commit:
+SHA-256 checksums of checked-in files:
 
 | File | SHA-256 |
 | --- | --- |
-| `ppcd.cpp` | `2ac58f015f582e1168aa8716d203e56912c697b77f25f44c658311b21a3e8c3f` |
+| `ppcd.cpp` | `c92f5a47aaa5a4936faf6c27dda2a5b8b2f6f86dcbe29b41451dfb928024de0f` |
 | `ppcd.h` | `dd50e835b86ade0a0af7ce559f47d2f755880812aa97a98c9661d8c2dd17ed09` |
 | `CommonDefs.h` | `0de207d099b5abecf9cb55477bcf267491ad8e15b999b081b5cdc27a72ad0e6d` |
 | `LICENSE` | `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499` |

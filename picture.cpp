@@ -31,9 +31,11 @@
 #include <fstream>
 #include <algorithm>
 #include <climits>
+#include <string>
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"
+#include "stackimport_logging.h"
 
 using namespace std;
 
@@ -390,23 +392,27 @@ void	picture::debugprint()
 	int	x = 0, y = 0;
 	for( y = 0; y < width; y++ )
 	{
+		std::string row;
+		row.reserve(static_cast<size_t>(width));
 		for( x = 0; x < width; x++ )
 		{
-			printf( "%c", getpixel( x, y ) ? 'X' : ' ' );
+			row += getpixel( x, y ) ? 'X' : ' ';
 		}
-		printf("\n");
+		stackimport_quill_log_message(STACKIMPORT_MESSAGE_INFO, row.c_str());
 	}
 	
 	for( y = 0; y < width; y++ )
 	{
+		std::string row;
+		row.reserve(static_cast<size_t>(width));
 		for( x = 0; x < width; x++ )
 		{
-			printf( "%c", maskgetpixel( x, y ) ? 'X' : ' ' );
+			row += maskgetpixel( x, y ) ? 'X' : ' ';
 		}
-		printf("\n");
+		stackimport_quill_log_message(STACKIMPORT_MESSAGE_INFO, row.c_str());
 	}
 	
-	printf("\n");
+	stackimport_quill_log_message(STACKIMPORT_MESSAGE_INFO, "");
 }
 
 

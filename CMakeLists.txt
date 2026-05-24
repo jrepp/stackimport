@@ -75,6 +75,7 @@ set(STACKIMPORT_SOURCES
     CBuf.cpp
     byteutils.cpp
     stackimport_c.cpp
+    stackimport_logging.cpp
     stackimport_platform_internal.cpp
 )
 
@@ -88,7 +89,7 @@ set_target_properties(stackimport_static PROPERTIES
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
-    target_link_libraries(stackimport_static PUBLIC vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav)
+    target_link_libraries(stackimport_static PUBLIC vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav)
 endif()
 
 add_executable(stackimport main.cpp)

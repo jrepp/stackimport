@@ -17,6 +17,7 @@
 #include "picture.h"
 #include "woba.h"
 #include "CBuf.h"
+#include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
 #include "stackimport_rapidjson_allocator.h"
 #include "vendor/snd2wav/snd2wav/snd2wav.h"
@@ -222,6 +223,14 @@ uint32_t	ReadBEUInt32Bytes( const char bytes[4] )
 		| static_cast<uint32_t>(unsignedBytes[3]));
 }
 
+uint64_t	FileSizeBytes( const std::string& path )
+{
+	struct stat fileInfo = {};
+	if( stat( path.c_str(), &fileInfo ) != 0 || fileInfo.st_size < 0 )
+		return 0;
+	return static_cast<uint64_t>(fileInfo.st_size);
+}
+
 
 void	NumVersionToStr( const unsigned char numVersion[4], char outStr[16] )
 {
@@ -276,11 +285,107 @@ std::string CStackFile::OutputPath( const char* fileName ) const
 	return result;
 }
 
+bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* streamStatus ) const
+{
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(1024, &baseAllocator);
+	JsonDocument document(&pool, 1024, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.sourceStackManifest", allocator), allocator);
+	document.AddMember("generator", json_string("stackimport.core", allocator), allocator);
+	document.AddMember("sourcePath", json_string(mFileName, allocator), allocator);
+	document.AddMember("outputPackage", json_string(mBasePath, allocator), allocator);
+
+	JsonValue dataFork(rapidjson::kObjectType);
+	dataFork.AddMember("bytes", JsonValue().SetUint64(dataForkBytes), allocator);
+	dataFork.AddMember("streamStatus", json_string(streamStatus ? streamStatus : "ok", allocator), allocator);
+
+	JsonValue blocks(rapidjson::kArrayType);
+	std::map<std::string,int32_t> blockTypeCounts;
+	for( const CSourceBlockSummary& block : mSourceBlocks )
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("type", json_string(block.type, allocator), allocator);
+		item.AddMember("id", block.id, allocator);
+		item.AddMember("offset", JsonValue().SetUint64(block.offset), allocator);
+		item.AddMember("size", block.size, allocator);
+		item.AddMember("payloadOffset", JsonValue().SetUint64(block.payloadOffset), allocator);
+		item.AddMember("payloadBytes", block.payloadBytes, allocator);
+		item.AddMember("status", json_string(block.status, allocator), allocator);
+		blocks.PushBack(item, allocator);
+		blockTypeCounts[block.type]++;
+	}
+	dataFork.AddMember("blocks", blocks, allocator);
+
+	JsonValue counts(rapidjson::kObjectType);
+	for( const auto& count : blockTypeCounts )
+	{
+		JsonValue name = json_string(count.first, allocator);
+		counts.AddMember(name, count.second, allocator);
+	}
+	dataFork.AddMember("blockTypeCounts", counts, allocator);
+
+	JsonValue stakReferences(rapidjson::kObjectType);
+	if( mStackID != -1 )
+	{
+		stakReferences.AddMember("cardCount", mStackCardCount, allocator);
+		stakReferences.AddMember("firstCardId", mFirstCardID, allocator);
+		stakReferences.AddMember("listBlockId", mListBlockID, allocator);
+		stakReferences.AddMember("fontTableBlockId", mFontTableBlockID, allocator);
+		stakReferences.AddMember("styleTableBlockId", mStyleTableBlockID, allocator);
+		stakReferences.AddMember("cardHeight", mCardHeight, allocator);
+		stakReferences.AddMember("cardWidth", mCardWidth, allocator);
+	}
+	dataFork.AddMember("stakReferences", stakReferences, allocator);
+
+	JsonValue missing(rapidjson::kArrayType);
+	struct ReferencedBlock
+	{
+		const char* key;
+		const char* type;
+		int32_t id;
+	};
+	const ReferencedBlock references[] = {
+		{ "listBlockId", "LIST", mListBlockID },
+		{ "fontTableBlockId", "FTBL", mFontTableBlockID },
+		{ "styleTableBlockId", "STBL", mStyleTableBlockID },
+	};
+	for( const ReferencedBlock& reference : references )
+	{
+		if( reference.id < 0 )
+			continue;
+		if( mBlockMap.find(CStackBlockIdentifier(reference.type, reference.id)) != mBlockMap.end() )
+			continue;
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("type", json_string(reference.type, allocator), allocator);
+		item.AddMember("id", reference.id, allocator);
+		std::string referencedBy = "STAK.";
+		referencedBy += reference.key;
+		item.AddMember("referencedBy", json_string(referencedBy, allocator), allocator);
+		missing.PushBack(item, allocator);
+	}
+	dataFork.AddMember("missingReferencedBlocks", missing, allocator);
+	document.AddMember("dataFork", dataFork, allocator);
+
+	JsonValue resourceFork(rapidjson::kObjectType);
+	resourceFork.AddMember("status", json_string("not_read_by_core_importer", allocator), allocator);
+	resourceFork.AddMember("resources", JsonValue(rapidjson::kArrayType), allocator);
+	document.AddMember("resourceFork", resourceFork, allocator);
+
+	if( !write_json_document(OutputPath("source-manifest.json"), document, baseAllocator) )
+	{
+		stackimport_emit_diagnosticf( "Error: Couldn't create source manifest JSON at '%s'\n", OutputPath("source-manifest.json").c_str() );
+		return false;
+	}
+	return true;
+}
+
 
 bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'STAK' #-1 (%lu bytes)\n", blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'STAK' #-1 (%lu bytes)\n", blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -338,7 +443,7 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	mStackScript = mac_roman_string( blockData, 1524 );
 	
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
 	return true;
 }
@@ -348,7 +453,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 {
 	int32_t	vBlockSize = static_cast<int32_t>(blockData.size());
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'STBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
+		stackimport_emit_infof( "Status: Processing 'STBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
 	
 	if( mDumpRawBlockData )
 	{
@@ -361,7 +466,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 
 	if( blockData.size() < 12 )
 	{
-		fprintf( stderr, "Warning: 'STBL' #%d is too short (%lu bytes); using an empty style table.\n", blockID, blockData.size() );
+		stackimport_emit_diagnosticf( "Warning: 'STBL' #%d is too short (%lu bytes); using an empty style table.\n", blockID, blockData.size() );
 		char vFileName[256] = { 0 };
 		snprintf( vFileName, sizeof(vFileName), "stylesheet_%d.css", blockID );
 		mStyleSheetName = vFileName;
@@ -372,7 +477,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 			fclose( vStylesheetFile );
 		}
 		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+			stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 		return true;
 	}
 	
@@ -477,7 +582,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	fclose( vStylesheetFile );
 	
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
 	return true;
 }
@@ -486,13 +591,13 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 {
 	uint32_t	vBlockSize = static_cast<uint32_t>(blockData.size());
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'FTBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
+		stackimport_emit_infof( "Status: Processing 'FTBL' #%d %X (%d bytes)\n", blockID, blockID, vBlockSize );
 
 	if( blockData.size() < 8 )
 	{
-		fprintf( stderr, "Warning: 'FTBL' #%d is too short (%lu bytes); using an empty font table.\n", blockID, blockData.size() );
+		stackimport_emit_diagnosticf( "Warning: 'FTBL' #%d is too short (%lu bytes); using an empty font table.\n", blockID, blockData.size() );
 		if( mProgressMessages )
-			fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+			stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 		return true;
 	}
 
@@ -518,7 +623,7 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 	}
 	
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
 	return true;
 }
@@ -526,7 +631,7 @@ bool	CStackFile::LoadFontTable( int32_t blockID, CBuf& blockData )
 bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'MAST' #%d (%lu bytes)\n", blockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'MAST' #%d (%lu bytes)\n", blockID, blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -563,12 +668,12 @@ bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 	document.AddMember("references", references, allocator);
 	if( !write_json_document(filePath, document, baseAllocator) )
 	{
-		fprintf( stderr, "Error: Couldn't create master JSON at '%s'\n", filePath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't create master JSON at '%s'\n", filePath.c_str() );
 		return false;
 	}
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
 	return true;
 }
@@ -576,7 +681,7 @@ bool	CStackFile::LoadMasterBlock( int32_t blockID, CBuf& blockData )
 bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'PRNT' #%d (%lu bytes)\n", blockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'PRNT' #%d (%lu bytes)\n", blockID, blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -620,12 +725,12 @@ bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 
 	if( !write_json_document(filePath, document, baseAllocator) )
 	{
-		fprintf( stderr, "Error: Couldn't create print settings JSON at '%s'\n", filePath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't create print settings JSON at '%s'\n", filePath.c_str() );
 		return false;
 	}
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
 	return true;
 }
@@ -633,7 +738,7 @@ bool	CStackFile::LoadPrintBlock( int32_t blockID, CBuf& blockData )
 bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'PRST' #%d (%lu bytes)\n", blockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'PRST' #%d (%lu bytes)\n", blockID, blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -694,12 +799,12 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 
 	if( !write_json_document(filePath, document, baseAllocator) )
 	{
-		fprintf( stderr, "Error: Couldn't create page setup JSON at '%s'\n", filePath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't create page setup JSON at '%s'\n", filePath.c_str() );
 		return false;
 	}
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
 	return true;
 }
@@ -707,7 +812,7 @@ bool	CStackFile::LoadPageSetupBlock( int32_t blockID, CBuf& blockData )
 bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'PRFT' #%d (%lu bytes)\n", blockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'PRFT' #%d (%lu bytes)\n", blockID, blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -806,12 +911,12 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 
 	if( !write_json_document(filePath, document, baseAllocator) )
 	{
-		fprintf( stderr, "Error: Couldn't create report template JSON at '%s'\n", filePath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't create report template JSON at '%s'\n", filePath.c_str() );
 		return false;
 	}
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
 	return true;
 }
@@ -832,7 +937,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	std::string	vLayerFilePath = OutputPath( vFileName );
 	
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing '%4s' #%d %X (%d bytes)\n", vBlockType, blockID, blockID, vBlockSize );
+		stackimport_emit_infof( "Status: Processing '%4s' #%d %X (%d bytes)\n", vBlockType, blockID, blockID, vBlockSize );
 	
 	if( mDumpRawBlockData )
 	{
@@ -892,9 +997,24 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	document.AddMember("contentCount", numContents, allocator);
 	std::vector<int32_t>	buttonIDs;
 	JsonValue parts(rapidjson::kArrayType);
+	if( numParts < 0 )
+	{
+		stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid part count %d; treating as 0.\n", vBlockType, blockID, numParts );
+		numParts = 0;
+	}
 	for( int n = 0; n < numParts; n++ )
 	{
+		if( !blockData.hasdata(currOffsIntoData, 30) )
+		{
+			stackimport_emit_diagnosticf( "Warning: Premature end of '%4s' #%d part records.\n", vBlockType, blockID );
+			break;
+		}
 		int16_t	partLength = ReadBEInt16(blockData, currOffsIntoData);
+		if( partLength < 30 || !blockData.hasdata(currOffsIntoData, static_cast<size_t>(partLength)) )
+		{
+			stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid part length %d at part index %d.\n", vBlockType, blockID, partLength, n );
+			break;
+		}
 		size_t	partRecordLength = static_cast<size_t>(partLength);
 		int16_t	partID = ReadBEInt16(blockData, currOffsIntoData +2);
 		int16_t	flagsAndType = ReadBEInt16(blockData, currOffsIntoData +4);
@@ -1043,10 +1163,25 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 
 	JsonValue contents(rapidjson::kArrayType);
 	size_t totalTextBytes = 0;
+	if( numContents < 0 )
+	{
+		stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid content count %d; treating as 0.\n", vBlockType, blockID, numContents );
+		numContents = 0;
+	}
 	for( int n = 0; n < numContents; n++ )
 	{
+		if( !blockData.hasdata(currOffsIntoData, 4) )
+		{
+			stackimport_emit_diagnosticf( "Warning: Premature end of '%4s' #%d content records.\n", vBlockType, blockID );
+			break;
+		}
 		int16_t	partID = ReadBEInt16(blockData, currOffsIntoData);
 		int16_t	partLength = ReadBEInt16(blockData, currOffsIntoData +2);
+		if( partLength < 0 || !blockData.hasdata(currOffsIntoData +4, static_cast<size_t>(partLength)) )
+		{
+			stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid content length %d at content index %d.\n", vBlockType, blockID, partLength, n );
+			break;
+		}
 		bool	isBgButtonContents = false;
 		JsonValue content(rapidjson::kObjectType);
 		CBuf	theText, theStyles;
@@ -1059,12 +1194,22 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
+				if( stylesLength < 2 || stylesLength > static_cast<uint16_t>(partLength) )
+				{
+					stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid style length %u at content index %d.\n", vBlockType, blockID, stylesLength, n );
+					break;
+				}
 				theStyles.resize( stylesLength -2 );
 				theStyles.memcpy( 0, blockData, currOffsIntoData +6, stylesLength -2 );
 			}
 			else
 				stylesLength = 0;
 			int textLength = partLength -static_cast<int>(stylesLength);
+			if( textLength < 0 )
+			{
+				stackimport_emit_diagnosticf( "Warning: '%4s' #%d has negative text length %d at content index %d.\n", vBlockType, blockID, textLength, n );
+				break;
+			}
 			theText.resize( static_cast<size_t>(textLength +1) );
 			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, static_cast<size_t>(textLength) );
 			theText[theText.size()-1] = 0;
@@ -1077,12 +1222,22 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			if( stylesLength > 32767 )
 			{
 				stylesLength = stylesLength -32768;
+				if( stylesLength < 2 || stylesLength > static_cast<uint16_t>(partLength) )
+				{
+					stackimport_emit_diagnosticf( "Warning: '%4s' #%d has invalid style length %u at content index %d.\n", vBlockType, blockID, stylesLength, n );
+					break;
+				}
 				theStyles.resize( stylesLength -2 );
 				theStyles.memcpy( 0, blockData, currOffsIntoData +6, stylesLength -2 );
 			}
 			else
 				stylesLength = 0;
 			int textLength = partLength -static_cast<int>(stylesLength);
+			if( textLength < 0 )
+			{
+				stackimport_emit_diagnosticf( "Warning: '%4s' #%d has negative text length %d at content index %d.\n", vBlockType, blockID, textLength, n );
+				break;
+			}
 			theText.resize( static_cast<size_t>(textLength +1) );
 			theText.memcpy( 0, blockData, currOffsIntoData +4 +stylesLength, static_cast<size_t>(textLength) );
 			theText[theText.size()-1] = 0;
@@ -1152,7 +1307,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	});
 	
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 
 	return write_json_document(vLayerFilePath, document, baseAllocator);
 }
@@ -1163,7 +1318,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 	bool	success = true;
 	
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'PAGE' #%d (%lu bytes)\n", blockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'PAGE' #%d (%lu bytes)\n", blockID, blockData.size() );
 
 	if( mDumpRawBlockData )
 	{
@@ -1172,7 +1327,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 		blockData.tofile( OutputPath(sfn) );
 	}
 	
-	if( mCardBlockSize != -1 )
+	if( mCardBlockSize > 0 )
 	{
 		size_t		currDataOffs = 12;
 		CPageSummary page;
@@ -1182,7 +1337,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 		{
 			if( !blockData.hasdata( currDataOffs, sizeof(int32_t) ) )
 			{
-				fprintf( stderr, "Warning: Premature end of 'PAGE' #%d (%lu bytes)\n", blockID, blockData.size() );
+				stackimport_emit_diagnosticf( "Warning: Premature end of 'PAGE' #%d (%lu bytes)\n", blockID, blockData.size() );
 				break;
 			}
 			
@@ -1192,17 +1347,21 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 			uint8_t		cardFlags = static_cast<uint8_t>(blockData[currDataOffs +4]);
 			page.cardIDs.push_back(currCardID);
 			
-			success = LoadLayerBlock( "CARD", currCardID, mBlockMap[CStackBlockIdentifier("CARD",currCardID)], cardFlags );
+			CBlockMap::iterator cardItty = mBlockMap.find(CStackBlockIdentifier("CARD",currCardID));
+			if( cardItty != mBlockMap.end() )
+				success = LoadLayerBlock( "CARD", currCardID, cardItty->second, cardFlags );
+			else
+				stackimport_emit_diagnosticf( "Warning: 'PAGE' #%d references missing 'CARD' #%d.\n", blockID, currCardID );
 			
 			currDataOffs += static_cast<size_t>(mCardBlockSize);
 		}
 		mPageSummaries.push_back(page);
 	}
 	else
-		fprintf( stderr, "Warning: Couldn't parse 'PAGE' #%d (%lu bytes) because it preceded the page table list.\n", blockID, blockData.size() );
+		stackimport_emit_diagnosticf( "Warning: Couldn't parse 'PAGE' #%d (%lu bytes) because it preceded the page table list.\n", blockID, blockData.size() );
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
 	return success;
 }
@@ -1211,7 +1370,7 @@ bool	CStackFile::LoadPageTable( int32_t blockID, CBuf& blockData, int16_t pageEn
 bool	CStackFile::LoadListBlock( CBuf& blockData )
 {
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Processing 'LIST' #%d (%lu bytes)\n", mListBlockID, blockData.size() );
+		stackimport_emit_infof( "Status: Processing 'LIST' #%d (%lu bytes)\n", mListBlockID, blockData.size() );
 	
 	if( mDumpRawBlockData )
 	{
@@ -1220,17 +1379,37 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 		blockData.tofile( OutputPath(sfn) );
 	}
 
-	size_t		currDataOffs = 4;
-	int32_t		numPageTables = ReadBEInt32(blockData, currDataOffs);
-	currDataOffs += 12;
-	mCardBlockSize = ReadBEInt16(blockData, currDataOffs);
-	currDataOffs += 18;
+	if( blockData.size() < 42 )
+	{
+		stackimport_emit_diagnosticf( "Warning: 'LIST' #%d is too short (%lu bytes).\n", mListBlockID, blockData.size() );
+		if( mProgressMessages )
+			stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		return true;
+	}
+
+	const int32_t maxPossiblePageTables = static_cast<int32_t>(blockData.size() / 6);
+	int32_t		numPageTables = ReadBEInt32(blockData, 4);
+	size_t		currDataOffs = 34;
+	mCardBlockSize = ReadBEInt16(blockData, 16);
+	if( (numPageTables <= 0 || numPageTables > maxPossiblePageTables)
+		&& ReadBEInt32(blockData, 0) > 0
+		&& ReadBEInt32(blockData, 0) <= maxPossiblePageTables )
+	{
+		numPageTables = ReadBEInt32(blockData, 0);
+		mCardBlockSize = ReadBEInt16(blockData, 12);
+		stackimport_emit_diagnosticf( "Warning: 'LIST' #%d uses compact page table layout; inferred %d page table(s) and card entry size %d.\n", mListBlockID, numPageTables, mCardBlockSize );
+	}
+	if( mCardBlockSize <= 0 )
+	{
+		stackimport_emit_diagnosticf( "Warning: 'LIST' #%d has invalid card entry size %d; page table cards will not be expanded.\n", mListBlockID, mCardBlockSize );
+		mCardBlockSize = -1;
+	}
 	for( int32_t r = 0; r < numPageTables; r++ )
 	{
 		currDataOffs += 2;
 		if( !blockData.hasdata( currDataOffs, sizeof(int32_t) ) )
 		{
-			fprintf( stderr, "Warning: Premature end of 'LIST' #%d (%lu bytes)\n", mListBlockID, blockData.size() );
+			stackimport_emit_diagnosticf( "Warning: Premature end of 'LIST' #%d (%lu bytes)\n", mListBlockID, blockData.size() );
 			break;
 		}
 		
@@ -1239,13 +1418,17 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 		if( blockData.hasdata( currDataOffs +4, sizeof(int16_t) ) )
 			pageEntryCount = ReadBEInt16( blockData, currDataOffs +4 );
 		
-		LoadPageTable( currPagetableID, mBlockMap[CStackBlockIdentifier("PAGE",currPagetableID)], pageEntryCount );
+		CBlockMap::iterator pageItty = mBlockMap.find(CStackBlockIdentifier("PAGE",currPagetableID));
+		if( pageItty != mBlockMap.end() )
+			LoadPageTable( currPagetableID, pageItty->second, pageEntryCount );
+		else
+			stackimport_emit_diagnosticf( "Warning: 'LIST' #%d references missing 'PAGE' #%d.\n", mListBlockID, currPagetableID );
 		
 		currDataOffs += 4;
 	}
 
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 	
 	return true;
 }
@@ -1254,37 +1437,37 @@ bool	CStackFile::LoadListBlock( CBuf& blockData )
 #if MAC_CODE
 bool	CStackFile::LoadBWIcons()
 {
-	fprintf( stderr, "Warning: Mac resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: Mac resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 
 bool	CStackFile::LoadPictures()
 {
-	fprintf( stderr, "Warning: PICT resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: PICT resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 
 bool	CStackFile::LoadCursors()
 {
-	fprintf( stderr, "Warning: Cursor resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: Cursor resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 
 bool	CStackFile::LoadSounds()
 {
-	fprintf( stderr, "Warning: Sound resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: Sound resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 
 bool	CStackFile::Load68000Resources()
 {
-	fprintf( stderr, "Warning: 68K code resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: 68K code resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 
 bool	CStackFile::LoadPowerPCResources()
 {
-	fprintf( stderr, "Warning: PowerPC code resource import is not implemented in the RapidJSON output path.\n" );
+	stackimport_emit_diagnosticf( "Warning: PowerPC code resource import is not implemented in the RapidJSON output path.\n" );
 	return true;
 }
 #endif //MAC_CODE
@@ -1474,7 +1657,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 {
 	if( outputPackagePath.empty() )
 	{
-		fprintf( stderr, "Error: Missing output package path.\n" );
+		stackimport_emit_diagnosticf( "Error: Missing output package path.\n" );
 		return false;
 	}
 
@@ -1484,17 +1667,18 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	else
 		slashPos += 1;
 	mFileName = fpath.substr(slashPos, std::string::npos);
-	std::ifstream		theFile( fpath.c_str() );
+	const uint64_t dataForkBytes = FileSizeBytes(fpath);
+	std::ifstream		theFile( fpath.c_str(), std::ios::binary );
 	if( !theFile.is_open() )
 	{
-		fprintf( stderr, "Error: Couldn't open file '%s'\n", fpath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't open file '%s'\n", fpath.c_str() );
 		return false;
 	}
 	
 	std::string				packagePath( outputPackagePath );
 	if( stackimport_internal_make_directory( packagePath.c_str() ) != 0 && errno != EEXIST )
 	{
-		fprintf( stderr, "Error: Couldn't create output package directory '%s'\n", packagePath.c_str() );
+		stackimport_emit_diagnosticf( "Error: Couldn't create output package directory '%s'\n", packagePath.c_str() );
 		return false;
 	}
 	
@@ -1510,25 +1694,27 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 		mResRefNum = FSOpenResFile( &fileRef, fsRdPerm );
 		if( mResRefNum < 0 )
 		{
-			fprintf( stderr, "Warning: No Mac resource fork to import.\n" );
+			stackimport_emit_diagnosticf( "Warning: No Mac resource fork to import.\n" );
 			resErr = fnfErr;
 		}
 	}
 	else
 	{
-		fprintf( stderr, "Error: Error %d locating input file's resource fork.\n", static_cast<int>(resErr) );
+		stackimport_emit_diagnosticf( "Error: Error %d locating input file's resource fork.\n", static_cast<int>(resErr) );
 		mResRefNum = -1;
 	}
   #endif //MAC_CODE
 	
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Output package name is '%s'\n", mBasePath.c_str() );
+		stackimport_emit_infof( "Status: Output package name is '%s'\n", mBasePath.c_str() );
 	
 	char		vBlockType[5] = { 0 };
 	uint32_t	vBlockSize = 0;
 	int32_t		vBlockID = 0;
 	int			numBlocks = 0;
 	bool		success = true;
+	std::string	sourceStreamStatus("ok");
+	uint64_t	sourceOffset = 0;
 	
 	// Read all blocks so we can random-access them. Yes, I know there are more
 	//	efficient ways, but honestly, who cares?
@@ -1536,11 +1722,13 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	{
 		memset( vBlockType, 0, sizeof(vBlockType) );
 		theFile.read( reinterpret_cast<char*>(&vBlockSize), sizeof(vBlockSize) );
-		if( theFile.eof() )	// Couldn't read because we hit end of file.
+		const std::streamsize blockSizeBytesRead = theFile.gcount();
+		if( blockSizeBytesRead == 0 && theFile.eof() )	// Couldn't read because we hit end of file.
 			break;
-		if( !theFile )
+		if( blockSizeBytesRead != static_cast<std::streamsize>(sizeof(vBlockSize)) )
 		{
-			fprintf( stderr, "Error: Could not read complete block size.\n" );
+			stackimport_emit_diagnosticf( "Error: Could not read complete block size.\n" );
+			sourceStreamStatus = "truncated_header";
 			success = false;
 			break;
 		}
@@ -1550,33 +1738,53 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 		theFile.read( reinterpret_cast<char*>(&vBlockID), sizeof(vBlockID) );
 		if( !theFile )
 		{
-			fprintf( stderr, "Error: Could not read complete block header.\n" );
+			stackimport_emit_diagnosticf( "Error: Could not read complete block header.\n" );
+			sourceStreamStatus = "truncated_header";
 			success = false;
 			break;
 		}
 		vBlockID = static_cast<int32_t>(ReadBEUInt32Bytes(reinterpret_cast<const char*>(&vBlockID)));
 		
 		numBlocks++;
+		CSourceBlockSummary sourceBlock;
+		sourceBlock.type = vBlockType;
+		sourceBlock.id = vBlockID;
+		sourceBlock.offset = sourceOffset;
+		sourceBlock.size = vBlockSize;
+		sourceBlock.payloadOffset = sourceOffset + 12;
+		sourceBlock.payloadBytes = vBlockSize >= 12 ? vBlockSize - 12 : 0;
+		sourceBlock.status = "ok";
 		if( vBlockSize < 12 )
 		{
-			fprintf( stderr, "Error: Invalid block size %u for '%4s' #%d.\n", vBlockSize, vBlockType, vBlockID );
+			stackimport_emit_diagnosticf( "Error: Invalid block size %u for '%4s' #%d.\n", vBlockSize, vBlockType, vBlockID );
+			sourceBlock.status = "invalid_size";
+			mSourceBlocks.push_back(sourceBlock);
+			sourceStreamStatus = "invalid_block_size";
 			success = false;
 			break;
 		}
 		
 		if( strcmp(vBlockType,"TAIL") == 0 && vBlockID == -1 )	// End marker block?
+		{
+			mSourceBlocks.push_back(sourceBlock);
+			sourceOffset += vBlockSize;
 			break;
+		}
 		else if( strcmp(vBlockType,"FREE") == 0 )	// Not a free, reusable block?
 		{
 			if( mStatusMessages )
-				fprintf( stdout, "Status: Skipping '%4s' #%d (%u bytes)\n", vBlockType, vBlockID, vBlockSize );
+				stackimport_emit_infof( "Status: Skipping '%4s' #%d (%u bytes)\n", vBlockType, vBlockID, vBlockSize );
 			theFile.ignore( vBlockSize -12 );	// Skip rest of block data.
 			if( !theFile )
 			{
-				fprintf( stderr, "Error: Could not skip complete 'FREE' block #%d.\n", vBlockID );
+				stackimport_emit_diagnosticf( "Error: Could not skip complete 'FREE' block #%d.\n", vBlockID );
+				sourceBlock.status = "truncated_payload";
+				mSourceBlocks.push_back(sourceBlock);
+				sourceStreamStatus = "truncated_payload";
 				success = false;
 				break;
 			}
+			mSourceBlocks.push_back(sourceBlock);
 		}
 		else
 		{
@@ -1584,19 +1792,24 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 			theFile.read( blockData.buf(0,vBlockSize -12), vBlockSize -12 );
 			if( !theFile )
 			{
-				fprintf( stderr, "Error: Could not read complete '%4s' block #%d.\n", vBlockType, vBlockID );
+				stackimport_emit_diagnosticf( "Error: Could not read complete '%4s' block #%d.\n", vBlockType, vBlockID );
+				sourceBlock.status = "truncated_payload";
+				mSourceBlocks.push_back(sourceBlock);
+				sourceStreamStatus = "truncated_payload";
 				success = false;
 				break;
 			}
 			CStackBlockIdentifier	theTypeAndID(vBlockType,vBlockID);
 			mBlockMap[theTypeAndID] = blockData;
+			mSourceBlocks.push_back(sourceBlock);
 	//			if( mStatusMessages )
-	//				fprintf( stdout, "Status: Located block %s %d - (%lu)\n", vBlockType, vBlockID, mBlockMap.size() );
+	//				stackimport_emit_infof( "Status: Located block %s %d - (%lu)\n", vBlockType, vBlockID, mBlockMap.size() );
 		}
+		sourceOffset += vBlockSize;
 	}
 	
 	if( mStatusMessages )
-		fprintf( stdout, "Status: Found %d blocks in file.\n", numBlocks);
+		stackimport_emit_infof( "Status: Found %d blocks in file.\n", numBlocks);
 	if( !success )
 		return false;
 	
@@ -1612,20 +1825,22 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 						+Count1Resources( 'xfcn' );
 		mMaxProgress += numResources;
 		if( mStatusMessages )
-			fprintf( stdout, "Status: Found %d resources in file.\n", numResources);
+			stackimport_emit_infof( "Status: Found %d resources in file.\n", numResources);
 	}
   #endif // MAC_CODE
 	if( mProgressMessages )
-		fprintf( stdout, "Progress: %d of %d\n", mCurrentProgress, mMaxProgress );
+		stackimport_emit_infof( "Progress: %d of %d\n", mCurrentProgress, mMaxProgress );
 	
 	// Load some "table of contents"-style blocks other blocks need to refer to:
 	CBlockMap::iterator		stackItty = mBlockMap.find(CStackBlockIdentifier("STAK"));
 	if( stackItty == mBlockMap.end() )
 	{
-		fprintf( stderr, "Error: Couldn't find stack block.\n" );
+		stackimport_emit_diagnosticf( "Error: Couldn't find stack block.\n" );
 		return false;
 	}
 	success = LoadStackBlock( -1, stackItty->second );
+	if( success && !WriteSourceManifest(dataForkBytes, sourceStreamStatus.c_str()) )
+		return false;
 	if( success )
 	{
 		CBlockMap::iterator fontTableItty = mBlockMap.find(CStackBlockIdentifier("FTBL",mFontTableBlockID));
@@ -1633,7 +1848,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 			success = LoadFontTable( mFontTableBlockID, fontTableItty->second );
 		else
 		{
-			fprintf( stderr, "Warning: Referenced 'FTBL' #%d is missing; using an empty font table.\n", mFontTableBlockID );
+			stackimport_emit_diagnosticf( "Warning: Referenced 'FTBL' #%d is missing; using an empty font table.\n", mFontTableBlockID );
 			CBuf emptyFontTable;
 			success = LoadFontTable( mFontTableBlockID, emptyFontTable );
 		}
@@ -1645,7 +1860,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 			success = LoadStyleTable( mStyleTableBlockID, styleTableItty->second );
 		else
 		{
-			fprintf( stderr, "Warning: Referenced 'STBL' #%d is missing; using an empty style table.\n", mStyleTableBlockID );
+			stackimport_emit_diagnosticf( "Warning: Referenced 'STBL' #%d is missing; using an empty style table.\n", mStyleTableBlockID );
 			CBuf emptyStyleTable;
 			success = LoadStyleTable( mStyleTableBlockID, emptyStyleTable );
 		}
@@ -1662,18 +1877,41 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 				int32_t		blockID = currBlockItty->first.mID;
 				CBuf&		blockData = currBlockItty->second;
 				if( mStatusMessages )
-					fprintf( stdout, "Status: Processing 'BMAP' #%d %X (%lu bytes)\n", blockID, blockID, blockData.size() );
+					stackimport_emit_infof( "Status: Processing 'BMAP' #%d %X (%lu bytes)\n", blockID, blockID, blockData.size() );
 				
 				char		fname[256] = { 0 };
 				
 				if( mDecodeGraphics )
 				{
-					snprintf( fname, sizeof(fname), "BMAP_%u.pbm", blockID );
-					
-					picture		thePicture;
-					woba_decode( thePicture, blockData.buf() );
-					
-					thePicture.writebitmapandmasktopbm( OutputPath(fname).c_str() );
+					const bool hasHeader = blockData.size() >= 52;
+					const int16_t totalTop = hasHeader ? ReadBEInt16(blockData, 12) : 0;
+					const int16_t totalLeft = hasHeader ? ReadBEInt16(blockData, 14) : 0;
+					const int16_t totalBottom = hasHeader ? ReadBEInt16(blockData, 16) : 0;
+					const int16_t totalRight = hasHeader ? ReadBEInt16(blockData, 18) : 0;
+					const int32_t maskDataLength = hasHeader ? ReadBEInt32(blockData, 44) : -1;
+					const int32_t pictureDataLength = hasHeader ? ReadBEInt32(blockData, 48) : -1;
+					const bool validWobaHeader = hasHeader
+						&& totalRight > totalLeft
+						&& totalBottom > totalTop
+						&& maskDataLength >= 0
+						&& pictureDataLength >= 0
+						&& static_cast<size_t>(maskDataLength) <= blockData.size() - 52
+						&& static_cast<size_t>(pictureDataLength) <= blockData.size() - 52 - static_cast<size_t>(maskDataLength);
+					if( validWobaHeader )
+					{
+						snprintf( fname, sizeof(fname), "BMAP_%u.pbm", blockID );
+						
+						picture		thePicture;
+						woba_decode( thePicture, blockData.buf() );
+						
+						thePicture.writebitmapandmasktopbm( OutputPath(fname).c_str() );
+					}
+					else
+					{
+						stackimport_emit_diagnosticf( "Warning: 'BMAP' #%d has unsupported WOBA header; writing raw data instead.\n", blockID );
+						snprintf( fname, sizeof(fname), "BMAP_%u.raw", blockID );
+						blockData.tofile( OutputPath(fname) );
+					}
 				}
 				else
 				{
@@ -1683,15 +1921,15 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 					if( rawFile )
 					{
 						if( blockData.size() != fwrite( blockData.buf(), 1, blockData.size(), rawFile ) )
-							fprintf( stderr, "Error: Writing un-decoded BMAP #%u.\n", blockID );
+							stackimport_emit_diagnosticf( "Error: Writing un-decoded BMAP #%u.\n", blockID );
 						fclose( rawFile );
 					}
 					else
-						fprintf( stderr, "Error: Creating file for un-decoded BMAP #%u.\n", blockID );
+						stackimport_emit_diagnosticf( "Error: Creating file for un-decoded BMAP #%u.\n", blockID );
 				}
 				
 				if( mProgressMessages )
-					fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+					stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 			}
 			else if( currBlockItty->first == CStackBlockIdentifier("BKGD") )
 			{
@@ -1724,16 +1962,25 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 					&& currBlockItty->first != CStackBlockIdentifier("FTBL")
 					&& currBlockItty->first != CStackBlockIdentifier("STBL") )
 			{
-				fprintf( stderr, "Warning: Skipping block %4s #%d,\n", currBlockItty->first.mType, currBlockItty->first.mID );
+				stackimport_emit_diagnosticf( "Warning: Skipping block %4s #%d,\n", currBlockItty->first.mType, currBlockItty->first.mID );
 				if( mProgressMessages )
-					fprintf( stdout, "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
+					stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 			}
 		}
 	}
 	
 	// Now actually load the cards, which depend on knowledge from backgrounds, stack, style table etc.:
 	if( success )
-		success = LoadListBlock( mBlockMap[CStackBlockIdentifier("LIST",mListBlockID)] );
+	{
+		CBlockMap::iterator listItty = mBlockMap.find(CStackBlockIdentifier("LIST",mListBlockID));
+		if( listItty != mBlockMap.end() )
+			success = LoadListBlock( listItty->second );
+		else
+		{
+			stackimport_emit_diagnosticf( "Warning: Referenced 'LIST' #%d is missing; no cards will be loaded.\n", mListBlockID );
+			success = true;
+		}
+	}
 		
   #if MAC_CODE
 	if( mResRefNum > 0 )
@@ -1751,14 +1998,14 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	
 	if( success && !WriteJsonIndexes() )
 	{
-		fprintf( stderr, "Error: Couldn't write RapidJSON output indexes.\n" );
+		stackimport_emit_diagnosticf( "Error: Couldn't write RapidJSON output indexes.\n" );
 		success = false;
 	}
 
   #if MAC_CODE
 	if( resErr != fnfErr && resErr != noErr )
 	{
-		fprintf( stderr, "Error: During conversion of Macintosh fork of stack.\n" );
+		stackimport_emit_diagnosticf( "Error: During conversion of Macintosh fork of stack.\n" );
 		return false;
 	}
   #endif // MAC_CODE

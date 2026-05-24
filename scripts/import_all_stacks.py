@@ -9,6 +9,7 @@ import csv
 import hashlib
 import json
 import os
+import pty
 import re
 import shutil
 import sqlite3
@@ -24,6 +25,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STACKS_DIR = Path("/Users/jrepp/d/pantechnicon/stacks")
 ARCHIVE_SUFFIXES = (".sit", ".hqx")
 IGNORED_INPUT_NAMES = {".mirror-manifest.tsv", ".mirror.log", ".DS_Store"}
+CODE_RESOURCE_TYPES = {"XCMD", "XFCN", "xcmd", "xfcn"}
+EXECUTABLE_RESOURCE_TYPES = CODE_RESOURCE_TYPES | {"cfrg"}
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("RESOURCE_DASM_JOBS", min(4, os.cpu_count() or 1))),
         help="Maximum concurrent resource_dasm subprocesses. Default: min(4, CPU count)",
+    )
+    parser.add_argument(
+        "--stackimport-pty",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("STACKIMPORT_PTY", "1").lower() not in {"0", "false", "no"},
+        help="Run stackimport under a pseudo-terminal so terminal color output is available. Default: true",
     )
     parser.add_argument(
         "--run-root",
@@ -396,6 +406,26 @@ def connect_database(path: Path) -> sqlite3.Connection:
             source_chunk_id INTEGER
         );
 
+        CREATE TABLE IF NOT EXISTS external_code_resources (
+            id INTEGER PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+            stack_id INTEGER NOT NULL REFERENCES stacks(id) ON DELETE CASCADE,
+            attempt_id INTEGER NOT NULL REFERENCES import_attempts(id) ON DELETE CASCADE,
+            output_file_id INTEGER REFERENCES output_files(id) ON DELETE SET NULL,
+            resource_type TEXT NOT NULL,
+            resource_id INTEGER NOT NULL,
+            resource_name TEXT NOT NULL,
+            external_kind TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            instruction_format TEXT NOT NULL,
+            container_format TEXT NOT NULL,
+            payload_bytes INTEGER,
+            payload_sha256 TEXT NOT NULL,
+            disassembly_rel_path TEXT NOT NULL,
+            disassembly_status TEXT NOT NULL,
+            attrs_json TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS stack_statistics (
             id INTEGER PRIMARY KEY,
             stack_id INTEGER NOT NULL REFERENCES stacks(id) ON DELETE CASCADE,
@@ -438,6 +468,9 @@ def connect_database(path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_binary_chunks_attempt ON binary_chunks(attempt_id);
         CREATE INDEX IF NOT EXISTS idx_embedded_files_stack_kind ON embedded_files(stack_id, embedded_kind);
         CREATE INDEX IF NOT EXISTS idx_embedded_files_hash ON embedded_files(sha256);
+        CREATE INDEX IF NOT EXISTS idx_external_code_resources_stack ON external_code_resources(stack_id);
+        CREATE INDEX IF NOT EXISTS idx_external_code_resources_platform ON external_code_resources(platform, instruction_format);
+        CREATE INDEX IF NOT EXISTS idx_external_code_resources_hash ON external_code_resources(payload_sha256);
         CREATE INDEX IF NOT EXISTS idx_stack_statistics_metric ON stack_statistics(metric);
         CREATE INDEX IF NOT EXISTS idx_format_gaps_kind ON format_gaps(kind);
         """
@@ -447,6 +480,52 @@ def connect_database(path: Path) -> sqlite3.Connection:
 
 def text_or_empty(value: bytes) -> str:
     return value.decode("macroman", errors="replace").replace("\x00", "").strip()
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def ansi_log_path_for(log_path: Path) -> Path:
+    return log_path.with_name(f"{log_path.stem}.ansi{log_path.suffix}")
+
+
+def run_command(command: list[str], *, use_pty: bool) -> subprocess.CompletedProcess[str]:
+    if not use_pty:
+        return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+
+    master_fd, slave_fd = pty.openpty()
+    output = bytearray()
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=slave_fd,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+        slave_fd = -1
+        while True:
+            try:
+                chunk = os.read(master_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            output.extend(chunk)
+        returncode = process.wait()
+    finally:
+        if slave_fd >= 0:
+            os.close(slave_fd)
+        os.close(master_fd)
+
+    return subprocess.CompletedProcess(
+        command,
+        returncode,
+        output.decode("utf-8", errors="replace"),
+        None,
+    )
 
 
 def extension_for(path: Path) -> str:
@@ -462,6 +541,39 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def bytes_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_i16be(data: bytes, offset: int) -> int | None:
+    if offset < 0 or offset + 2 > len(data):
+        return None
+    value = int.from_bytes(data[offset : offset + 2], byteorder="big", signed=True)
+    return value
+
+
+def read_u16be(data: bytes, offset: int) -> int | None:
+    if offset < 0 or offset + 2 > len(data):
+        return None
+    return int.from_bytes(data[offset : offset + 2], byteorder="big", signed=False)
+
+
+def read_i32be(data: bytes, offset: int) -> int | None:
+    if offset < 0 or offset + 4 > len(data):
+        return None
+    return int.from_bytes(data[offset : offset + 4], byteorder="big", signed=True)
+
+
+def read_u32be(data: bytes, offset: int) -> int | None:
+    if offset < 0 or offset + 4 > len(data):
+        return None
+    return int.from_bytes(data[offset : offset + 4], byteorder="big", signed=False)
+
+
+def mac_roman_text(data: bytes) -> str:
+    return data.decode("macroman", errors="replace")
 
 
 def log_stem_for(rel_path: str) -> str:
@@ -680,11 +792,9 @@ def chunk_status_from_log(line: str) -> tuple[str, str, int | None, int | None] 
 
 
 def output_package_for(import_path: Path) -> Path:
-    path_text = str(import_path)
-    stak_pos = path_text.rfind(".stak")
-    if stak_pos != -1:
-        return Path(f"{path_text[:stak_pos]}.xstk")
-    return Path(f"{path_text}.xstk")
+    if import_path.suffix:
+        return import_path.with_suffix(".xstk")
+    return import_path.with_name(f"{import_path.name}.xstk")
 
 
 def kind_for_output(path: Path) -> str:
@@ -704,9 +814,14 @@ def logical_file_info(rel_path: str) -> tuple[str, int | None]:
     name = Path(rel_path).name
     if name == "printsettings.json":
         return "printsettings", None
-    code_resource = re.match(r"^.*_(XCMD|XFCN)_(-?\d+)(?:_.*)?\.txt$", name)
+    if name == "source-manifest.json":
+        return "source_manifest", None
+    code_resource = re.match(r"^.*_(XCMD|XFCN|xcmd|xfcn|cfrg)_(-?\d+)(?:_.*)?\.txt$", name)
     if code_resource:
-        logical_kind = "externalcommand" if code_resource.group(1) == "XCMD" else "externalfunction"
+        if code_resource.group(1) == "cfrg":
+            logical_kind = "codefragment"
+        else:
+            logical_kind = "externalcommand" if code_resource.group(1).lower() == "xcmd" else "externalfunction"
         return logical_kind, int(code_resource.group(2))
     match = re.match(r"^(card|background|BMAP|PAT|stylesheet|master|pagesetup|reporttemplate|printsettings)_(-?\d+)", name)
     if match:
@@ -804,11 +919,32 @@ def run_stackimport(
     log_path: Path,
     stackimport_bin: Path,
     stackimport_args: list[str],
+    stackimport_pty: bool,
     resource_dasm_bin: Path,
     disassemble_code_resources: bool,
+    classified: ClassifiedFile | None = None,
 ) -> ImportResult:
     command = [str(stackimport_bin), *stackimport_args, str(import_path)]
-    completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    completed = run_command(command, use_pty=stackimport_pty)
+    captured_output = completed.stdout or ""
+    plain_output = strip_ansi(captured_output) if stackimport_pty else captured_output
+    ansi_log_path = ansi_log_path_for(log_path)
+    if stackimport_pty and captured_output != plain_output:
+        ansi_log_path.write_text(
+            "\n".join(
+                [
+                    f"Original input: {archive_input}",
+                    f"Import input: {import_path}",
+                    f"Display input: {display_input}",
+                    f"Command: {subprocess.list2cmdline(command)}",
+                    "PTY: enabled",
+                    "",
+                    captured_output,
+                ]
+            ),
+            encoding="utf-8",
+            errors="replace",
+        )
 
     log_path.write_text(
         "\n".join(
@@ -817,8 +953,10 @@ def run_stackimport(
                 f"Import input: {import_path}",
                 f"Display input: {display_input}",
                 f"Command: {subprocess.list2cmdline(command)}",
+                f"PTY: {'enabled' if stackimport_pty else 'disabled'}",
+                f"ANSI log: {ansi_log_path if stackimport_pty and ansi_log_path.exists() else ''}",
                 "",
-                completed.stdout,
+                plain_output,
             ]
         ),
         encoding="utf-8",
@@ -933,20 +1071,17 @@ def run_stackimport(
         )
 
     if output_package.exists():
-        if disassemble_code_resources:
-            disassemble_external_code_resources(
-                conn=conn,
-                run_id=run_id,
-                source_id=source_id,
-                extracted_file_id=extracted_file_id,
-                attempt_id=attempt_id,
-                archive_input=archive_input,
-                display_input=display_input,
-                import_path=import_path,
-                output_package=output_package,
-                resource_dasm_bin=resource_dasm_bin,
-            )
-        index_output_package(conn, attempt_id, output_package)
+        write_source_manifest(
+            run_id=run_id,
+            source_id=source_id,
+            extracted_file_id=extracted_file_id,
+            attempt_id=attempt_id,
+            archive_input=archive_input,
+            display_input=display_input,
+            classified=classified,
+            import_path=import_path,
+            output_package=output_package,
+        )
 
     return ImportResult(
         attempt_id=attempt_id,
@@ -969,46 +1104,321 @@ def relative_output_path_for_tool(output_dir: Path) -> tuple[Path, Path]:
     return output_dir.parent, Path(output_dir.name)
 
 
-def disassemble_external_code_resources(
+def parse_stack_data_fork(data: bytes) -> dict[str, object]:
+    blocks: list[dict[str, object]] = []
+    block_keys: set[tuple[str, int]] = set()
+    stak_payload: bytes | None = None
+    offset = 0
+    stream_status = "ok"
+    while offset + 12 <= len(data):
+        block_size = read_u32be(data, offset)
+        block_type_bytes = data[offset + 4 : offset + 8]
+        block_type = mac_roman_text(block_type_bytes)
+        block_id = read_i32be(data, offset + 8)
+        if block_size is None or block_id is None:
+            stream_status = "truncated_header"
+            break
+        block: dict[str, object] = {
+            "type": block_type,
+            "id": block_id,
+            "offset": offset,
+            "size": block_size,
+            "payloadOffset": offset + 12,
+            "payloadBytes": max(block_size - 12, 0),
+        }
+        if block_size < 12:
+            block["status"] = "invalid_size"
+            blocks.append(block)
+            stream_status = "invalid_block_size"
+            break
+        if offset + block_size > len(data):
+            block["status"] = "truncated_payload"
+            blocks.append(block)
+            stream_status = "truncated_payload"
+            break
+        block["status"] = "ok"
+        blocks.append(block)
+        block_keys.add((block_type, block_id))
+        if block_type == "STAK":
+            stak_payload = data[offset + 12 : offset + block_size]
+        offset += block_size
+        if block_type == "TAIL" and block_id == -1:
+            break
+    else:
+        if offset != len(data):
+            stream_status = "trailing_partial_header"
+
+    referenced: dict[str, object] = {}
+    missing: list[dict[str, object]] = []
+    if stak_payload is not None:
+        referenced = {
+            "cardCount": read_i32be(stak_payload, 32),
+            "firstCardId": read_i32be(stak_payload, 36),
+            "listBlockId": read_i32be(stak_payload, 40),
+            "fontTableBlockId": read_i32be(stak_payload, 420),
+            "styleTableBlockId": read_i32be(stak_payload, 424),
+            "cardHeight": read_i16be(stak_payload, 428),
+            "cardWidth": read_i16be(stak_payload, 430),
+        }
+        for key, block_type in (
+            ("listBlockId", "LIST"),
+            ("fontTableBlockId", "FTBL"),
+            ("styleTableBlockId", "STBL"),
+        ):
+            value = referenced.get(key)
+            if isinstance(value, int) and (block_type, value) not in block_keys:
+                missing.append({"type": block_type, "id": value, "referencedBy": f"STAK.{key}"})
+
+    return {
+        "bytes": len(data),
+        "sha256": bytes_sha256(data),
+        "streamStatus": stream_status,
+        "blocks": blocks,
+        "blockTypeCounts": {
+            block_type: sum(1 for block in blocks if block["type"] == block_type)
+            for block_type in sorted({str(block["type"]) for block in blocks})
+        },
+        "stakReferences": referenced,
+        "missingReferencedBlocks": missing,
+    }
+
+
+def resource_attribute_names(flags: int) -> list[str]:
+    names: list[str] = []
+    if flags & 0x01:
+        names.append("compressed")
+    if flags & 0x04:
+        names.append("preload")
+    if flags & 0x08:
+        names.append("protected")
+    if flags & 0x10:
+        names.append("locked")
+    if flags & 0x20:
+        names.append("purgeable")
+    if flags & 0x40:
+        names.append("systemHeap")
+    return names
+
+
+def parse_resource_fork(data: bytes) -> dict[str, object]:
+    if len(data) < 16:
+        return {"bytes": len(data), "sha256": bytes_sha256(data), "status": "too_short", "resources": []}
+
+    data_offset = read_u32be(data, 0)
+    map_offset = read_u32be(data, 4)
+    data_length = read_u32be(data, 8)
+    map_length = read_u32be(data, 12)
+    if None in {data_offset, map_offset, data_length, map_length}:
+        return {"bytes": len(data), "sha256": bytes_sha256(data), "status": "truncated_header", "resources": []}
+    assert data_offset is not None and map_offset is not None and data_length is not None and map_length is not None
+    if data_offset + data_length > len(data) or map_offset + map_length > len(data):
+        return {
+            "bytes": len(data),
+            "sha256": bytes_sha256(data),
+            "status": "invalid_header_bounds",
+            "header": {
+                "dataOffset": data_offset,
+                "mapOffset": map_offset,
+                "dataLength": data_length,
+                "mapLength": map_length,
+            },
+            "resources": [],
+        }
+
+    type_list_offset = read_u16be(data, map_offset + 24)
+    name_list_offset = read_u16be(data, map_offset + 26)
+    if type_list_offset is None or name_list_offset is None:
+        return {"bytes": len(data), "sha256": bytes_sha256(data), "status": "truncated_map", "resources": []}
+    type_list_base = map_offset + type_list_offset
+    name_list_base = map_offset + name_list_offset
+    type_count_minus_one = read_u16be(data, type_list_base)
+    if type_count_minus_one is None:
+        return {"bytes": len(data), "sha256": bytes_sha256(data), "status": "missing_type_list", "resources": []}
+
+    resources: list[dict[str, object]] = []
+    status = "ok"
+    for type_index in range(type_count_minus_one + 1):
+        type_entry = type_list_base + 2 + (type_index * 8)
+        if type_entry + 8 > len(data):
+            status = "truncated_type_entry"
+            break
+        resource_type = mac_roman_text(data[type_entry : type_entry + 4])
+        resource_count_minus_one = read_u16be(data, type_entry + 4)
+        reference_list_offset = read_u16be(data, type_entry + 6)
+        if resource_count_minus_one is None or reference_list_offset is None:
+            status = "truncated_type_entry"
+            break
+        reference_base = type_list_base + reference_list_offset
+        for resource_index in range(resource_count_minus_one + 1):
+            ref_entry = reference_base + (resource_index * 12)
+            if ref_entry + 12 > len(data):
+                status = "truncated_reference_entry"
+                break
+            resource_id = read_i16be(data, ref_entry)
+            name_offset = read_i16be(data, ref_entry + 2)
+            attr_and_offset = read_u32be(data, ref_entry + 4)
+            if resource_id is None or name_offset is None or attr_and_offset is None:
+                status = "truncated_reference_entry"
+                break
+            attributes = (attr_and_offset >> 24) & 0xFF
+            resource_data_offset = attr_and_offset & 0x00FFFFFF
+            name = ""
+            if name_offset != -1:
+                absolute_name_offset = name_list_base + name_offset
+                if 0 <= absolute_name_offset < len(data):
+                    name_length = data[absolute_name_offset]
+                    name_start = absolute_name_offset + 1
+                    name_end = min(name_start + name_length, len(data))
+                    name = mac_roman_text(data[name_start:name_end])
+            absolute_data_offset = data_offset + resource_data_offset
+            resource_data_length = read_u32be(data, absolute_data_offset)
+            resource_payload_offset = absolute_data_offset + 4
+            payload_status = "ok"
+            payload_sha256 = ""
+            if resource_data_length is None or resource_payload_offset + resource_data_length > data_offset + data_length:
+                resource_data_length = None
+                payload_status = "invalid_data_bounds"
+            else:
+                payload = data[resource_payload_offset : resource_payload_offset + resource_data_length]
+                payload_sha256 = bytes_sha256(payload)
+            resources.append(
+                {
+                    "type": resource_type,
+                    "id": resource_id,
+                    "name": name,
+                    "attributes": attributes,
+                    "attributeNames": resource_attribute_names(attributes),
+                    "dataOffset": absolute_data_offset,
+                    "payloadOffset": resource_payload_offset,
+                    "payloadBytes": resource_data_length,
+                    "payloadSha256": payload_sha256,
+                    "status": payload_status,
+                }
+            )
+        if status != "ok":
+            break
+
+    return {
+        "bytes": len(data),
+        "sha256": bytes_sha256(data),
+        "status": status,
+        "header": {
+            "dataOffset": data_offset,
+            "mapOffset": map_offset,
+            "dataLength": data_length,
+            "mapLength": map_length,
+            "typeListOffset": type_list_offset,
+            "nameListOffset": name_list_offset,
+        },
+        "resourceTypeCounts": {
+            resource_type: sum(1 for resource in resources if resource["type"] == resource_type)
+            for resource_type in sorted({str(resource["type"]) for resource in resources})
+        },
+        "resources": resources,
+    }
+
+
+def write_source_manifest(
     *,
-    conn: sqlite3.Connection,
     run_id: str,
     source_id: int,
     extracted_file_id: int | None,
     attempt_id: int,
     archive_input: str,
     display_input: str,
+    classified: ClassifiedFile | None,
     import_path: Path,
     output_package: Path,
-    resource_dasm_bin: Path,
 ) -> None:
+    data = import_path.read_bytes()
+    core_manifest_path = output_package / "source-manifest.json"
+    core_manifest: dict[str, object] = {}
+    if core_manifest_path.exists():
+        try:
+            loaded_manifest = json.loads(core_manifest_path.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(loaded_manifest, dict):
+                core_manifest = loaded_manifest
+        except json.JSONDecodeError:
+            core_manifest = {"status": "invalid_json"}
+    core_data_fork = core_manifest.get("dataFork")
+    if isinstance(core_data_fork, dict):
+        data_fork = dict(core_data_fork)
+        data_fork.setdefault("bytes", len(data))
+        data_fork.setdefault("sha256", bytes_sha256(data))
+        data_fork.setdefault("parser", "stackimport.core")
+    else:
+        data_fork = parse_stack_data_fork(data)
+        data_fork["parser"] = "scripts.import_all_stacks"
+
+    resource_fork_path = Path(str(import_path) + "/..namedfork/rsrc")
+    resource_fork: dict[str, object]
+    if resource_fork_path.exists() and resource_fork_path.stat().st_size > 0:
+        resource_fork = parse_resource_fork(resource_fork_path.read_bytes())
+        resource_fork["path"] = str(resource_fork_path)
+    else:
+        resource_fork = {
+            "path": str(resource_fork_path),
+            "bytes": 0,
+            "sha256": "",
+            "status": "missing_or_empty",
+            "resources": [],
+            "resourceTypeCounts": {},
+        }
+
+    manifest = {
+        "format": "stackimport.sourceStackManifest",
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "runId": run_id,
+        "sourceId": source_id,
+        "extractedFileId": extracted_file_id,
+        "attemptId": attempt_id,
+        "archiveInput": archive_input,
+        "displayInput": display_input,
+        "sourcePath": str(import_path),
+        "outputPackage": str(output_package),
+        "classification": {
+            "relPath": classified.rel_path if classified else display_input,
+            "finderType": classified.finder_type if classified else "",
+            "binaryType": classified.binary_type if classified else "",
+            "binarySize": classified.binary_size if classified else None,
+            "extension": classified.extension if classified else import_path.suffix[1:],
+            "decision": classified.decision if classified else "stack",
+            "reason": classified.reason if classified else "",
+        },
+        "encodingNotes": {
+            "filenames": "archive and Finder-derived names may originate as classic Mac encodings",
+            "resourceNames": "resource names are decoded from MacRoman into UTF-8",
+        },
+        "coreManifest": {
+            "path": str(core_manifest_path),
+            "generator": core_manifest.get("generator", ""),
+            "status": core_manifest.get("format", "missing") if core_manifest else "missing",
+        },
+        "dataFork": data_fork,
+        "resourceFork": resource_fork,
+    }
+    output_package.mkdir(parents=True, exist_ok=True)
+    (output_package / "source-manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def disassemble_external_code_resources(job: DisassemblyJob) -> DisassemblyResult:
+    run_id = job.run_id
+    attempt_id = job.attempt_id
+    archive_input = job.archive_input
+    display_input = job.display_input
+    import_path = job.import_path
+    output_package = job.output_package
+    resource_dasm_bin = job.resource_dasm_bin
     resource_fork_path = Path(str(import_path) + "/..namedfork/rsrc")
     output_dir = output_package / "resource-disassembly"
     provenance_path = output_dir / "resource-disassembly.provenance.json"
     if not resource_fork_path.exists() or resource_fork_path.stat().st_size == 0:
-        insert_format_gap(
-            conn,
-            run_id,
-            "resource_disassembly",
-            "resource fork missing or empty",
-            display_input,
-            source_id=source_id,
-            extracted_file_id=extracted_file_id,
-            attempt_id=attempt_id,
-        )
-        return
+        return DisassemblyResult(job, "skipped", "resource fork missing or empty", None, 0)
     if not resource_dasm_bin.exists():
-        insert_format_gap(
-            conn,
-            run_id,
-            "resource_disassembly",
-            f"resource_dasm binary not found: {resource_dasm_bin}",
-            display_input,
-            source_id=source_id,
-            extracted_file_id=extracted_file_id,
-            attempt_id=attempt_id,
-        )
-        return
+        return DisassemblyResult(job, "failed", f"resource_dasm binary not found: {resource_dasm_bin}", None, 0)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     tool_cwd, tool_output = relative_output_path_for_tool(output_dir)
@@ -1018,6 +1428,9 @@ def disassemble_external_code_resources(
         str(tool_output),
         "--target-type=XCMD",
         "--target-type=XFCN",
+        "--target-type=xcmd",
+        "--target-type=xfcn",
+        "--target-type=cfrg",
     ]
     completed = subprocess.run(
         command,
@@ -1047,7 +1460,7 @@ def disassemble_external_code_resources(
     )
     disassembly_files = sorted(
         path for path in output_dir.glob("*.txt")
-        if re.search(r"_(?:XCMD|XFCN)_-?\d+(?:_|\\.)", path.name)
+        if re.search(r"_(?:XCMD|XFCN|xcmd|xfcn|cfrg)_-?\d+(?:_|\\.)", path.name)
     )
     provenance = {
         "format": "stackimport.resourceDisassembly.provenance",
@@ -1070,29 +1483,38 @@ def disassemble_external_code_resources(
     provenance_path.write_text(json.dumps(provenance, indent=2, sort_keys=True), encoding="utf-8")
 
     if completed.returncode != 0:
-        insert_format_gap(
-            conn,
-            run_id,
-            "resource_disassembly",
-            f"resource_dasm failed with exit_code={completed.returncode}",
-            display_input,
-            source_id=source_id,
-            extracted_file_id=extracted_file_id,
-            attempt_id=attempt_id,
-            log_path=log_path,
-        )
-    elif not disassembly_files:
-        insert_format_gap(
-            conn,
-            run_id,
-            "resource_disassembly",
-            "resource_dasm found no XCMD/XFCN resources",
-            display_input,
-            source_id=source_id,
-            extracted_file_id=extracted_file_id,
-            attempt_id=attempt_id,
-            log_path=log_path,
-        )
+        return DisassemblyResult(job, "failed", f"resource_dasm failed with exit_code={completed.returncode}", log_path, len(disassembly_files))
+    if not disassembly_files:
+        return DisassemblyResult(job, "empty", "resource_dasm found no XCMD/XFCN resources", log_path, 0)
+    return DisassemblyResult(job, "ok", "resource_dasm completed", log_path, len(disassembly_files))
+
+
+def record_disassembly_result(conn: sqlite3.Connection, result: DisassemblyResult) -> None:
+    if result.status == "ok":
+        return
+    insert_format_gap(
+        conn,
+        result.job.run_id,
+        "resource_disassembly",
+        result.detail,
+        result.job.display_input,
+        source_id=result.job.source_id,
+        extracted_file_id=result.job.extracted_file_id,
+        attempt_id=result.job.attempt_id,
+        log_path=result.log_path,
+    )
+
+
+def run_disassembly_jobs(jobs: list[DisassemblyJob], max_workers: int) -> list[DisassemblyResult]:
+    if not jobs:
+        return []
+    workers = max(1, max_workers)
+    results: list[DisassemblyResult] = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(disassemble_external_code_resources, job) for job in jobs]
+        for future in as_completed(futures):
+            results.append(future.result())
+    return results
 
 
 def parse_json_if_possible(path: Path) -> object | None:
@@ -1401,6 +1823,7 @@ def index_output_package(conn: sqlite3.Connection, attempt_id: int, output_packa
     link_media_refs_to_output_files(conn, stack_id)
     link_output_file_references(conn, stack_id)
     link_binary_chunks_to_stack_and_outputs(conn, run_id, stack_id, attempt_id)
+    index_external_code_resources(conn, run_id, stack_id, attempt_id, output_package)
     index_embedded_files(conn, run_id, stack_id, attempt_id)
     insert_stack_statistics(conn, stack_id, attempt_id)
 
@@ -1749,6 +2172,232 @@ def embedded_kind_for_output(row: sqlite3.Row) -> str:
     return "embedded_file"
 
 
+def code_resource_kind(resource_type: str) -> str:
+    if resource_type == "cfrg":
+        return "code_fragment"
+    return "externalcommand" if resource_type.lower() == "xcmd" else "externalfunction"
+
+
+def code_resource_platform(resource_type: str) -> str:
+    if resource_type == "cfrg":
+        return "macppc"
+    return "macppc" if resource_type.islower() else "mac68k"
+
+
+def read_resource_payload_prefix(import_path: Path, resource: dict[str, object], byte_count: int = 16) -> bytes:
+    payload_offset = resource.get("payloadOffset")
+    payload_bytes = resource.get("payloadBytes")
+    if not isinstance(payload_offset, int) or not isinstance(payload_bytes, int) or payload_bytes <= 0:
+        return b""
+    resource_fork_path = Path(str(import_path) + "/..namedfork/rsrc")
+    if not resource_fork_path.exists():
+        return b""
+    try:
+        with resource_fork_path.open("rb") as file:
+            file.seek(payload_offset)
+            return file.read(min(byte_count, payload_bytes))
+    except OSError:
+        return b""
+
+
+def infer_code_instruction_format(resource_type: str, payload_prefix: bytes) -> tuple[str, str]:
+    if resource_type == "cfrg":
+        return "ppc32", "cfm_code_fragment"
+    if resource_type in {"XCMD", "XFCN"}:
+        return "m68k", "classic_code_resource"
+    if payload_prefix.startswith(b"Joy!"):
+        return "ppc32", "pef"
+    return "ppc32", "raw_code_resource"
+
+
+def resource_type_text(value: int) -> str:
+    try:
+        return value.to_bytes(4, byteorder="big").decode("macroman", errors="replace")
+    except OverflowError:
+        return ""
+
+
+def cfrg_usage_name(value: int) -> str:
+    return {
+        0: "import_library",
+        1: "application",
+        2: "drop_in_addition",
+        3: "stub_library",
+        4: "weak_stub_library",
+    }.get(value, "invalid")
+
+
+def cfrg_location_name(value: int) -> str:
+    return {
+        0: "memory",
+        1: "data_fork",
+        2: "resource",
+        3: "byte_stream",
+        4: "named_fragment",
+    }.get(value, "invalid")
+
+
+def parse_cfrg_payload(payload: bytes) -> dict[str, object]:
+    if len(payload) < 34:
+        return {"status": "too_short", "entries": []}
+    version = read_u16be(payload, 10)
+    entry_count = read_u16be(payload, 32)
+    if version != 1 or entry_count is None:
+        return {"status": "unsupported_version", "version": version, "entries": []}
+
+    entries: list[dict[str, object]] = []
+    offset = 34
+    status = "ok"
+    for index in range(entry_count):
+        if offset + 43 > len(payload):
+            status = "truncated_entry"
+            break
+        architecture = read_u32be(payload, offset)
+        usage = payload[offset + 22]
+        where = payload[offset + 23]
+        code_offset = read_u32be(payload, offset + 24)
+        code_length = read_u32be(payload, offset + 28)
+        space_id = read_u32be(payload, offset + 32)
+        fork_instance = read_u16be(payload, offset + 36)
+        extension_count = read_u16be(payload, offset + 38)
+        entry_size = read_u16be(payload, offset + 40)
+        name_length = payload[offset + 42] if offset + 42 < len(payload) else 0
+        name_start = offset + 43
+        name_end = min(name_start + name_length, len(payload))
+        if entry_size is None or entry_size <= 0 or offset + entry_size > len(payload):
+            status = "invalid_entry_size"
+            break
+        entries.append(
+            {
+                "index": index,
+                "architecture": architecture,
+                "architectureText": resource_type_text(architecture) if isinstance(architecture, int) else "",
+                "usage": usage,
+                "usageName": cfrg_usage_name(usage),
+                "where": where,
+                "whereName": cfrg_location_name(where),
+                "offset": code_offset,
+                "length": code_length,
+                "spaceId": space_id,
+                "forkInstance": fork_instance,
+                "extensionCount": extension_count,
+                "entrySize": entry_size,
+                "name": mac_roman_text(payload[name_start:name_end]),
+            }
+        )
+        offset += entry_size
+    return {"status": status, "version": version, "entryCount": entry_count, "entries": entries}
+
+
+def disassembly_resource_index(output_package: Path) -> dict[tuple[str, int], str]:
+    index: dict[tuple[str, int], str] = {}
+    output_dir = output_package / "resource-disassembly"
+    if not output_dir.exists():
+        return index
+    for path in output_dir.glob("*.txt"):
+        match = re.search(r"_(XCMD|XFCN|xcmd|xfcn|cfrg)_(-?\d+)(?:_|\\.)", path.name)
+        if not match:
+            continue
+        try:
+            rel_path = str(path.relative_to(output_package))
+        except ValueError:
+            rel_path = str(path)
+        index[(match.group(1), int(match.group(2)))] = rel_path
+    return index
+
+
+def index_external_code_resources(
+    conn: sqlite3.Connection,
+    run_id: str,
+    stack_id: int,
+    attempt_id: int,
+    output_package: Path,
+) -> None:
+    manifest = parse_json_if_possible(output_package / "source-manifest.json")
+    if not isinstance(manifest, dict):
+        return
+    resource_fork = manifest.get("resourceFork")
+    if not isinstance(resource_fork, dict):
+        return
+    resources = resource_fork.get("resources")
+    if not isinstance(resources, list):
+        return
+
+    attempt = conn.execute("SELECT import_path FROM import_attempts WHERE id = ?", (attempt_id,)).fetchone()
+    import_path = Path(attempt["import_path"]) if attempt else output_package
+    disassembly_by_resource = disassembly_resource_index(output_package)
+
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        resource_type = resource.get("type")
+        resource_id = resource.get("id")
+        if not isinstance(resource_type, str) or resource_type not in EXECUTABLE_RESOURCE_TYPES or not isinstance(resource_id, int):
+            continue
+        payload_prefix = read_resource_payload_prefix(import_path, resource)
+        payload = read_resource_payload_prefix(import_path, resource, int(resource.get("payloadBytes") or 0))
+        cfrg_metadata = parse_cfrg_payload(payload) if resource_type == "cfrg" else {}
+        cfrg_entries = cfrg_metadata.get("entries") if isinstance(cfrg_metadata, dict) else None
+        indexed_entries = cfrg_entries if isinstance(cfrg_entries, list) and cfrg_entries else [None]
+        disassembly_rel_path = disassembly_by_resource.get((resource_type, resource_id), "")
+        output_file_id = None
+        if disassembly_rel_path:
+            row = conn.execute(
+                "SELECT id FROM output_files WHERE stack_id = ? AND rel_path = ?",
+                (stack_id, disassembly_rel_path),
+            ).fetchone()
+            output_file_id = row["id"] if row else None
+        payload_bytes = resource.get("payloadBytes")
+        payload_sha256 = resource.get("payloadSha256")
+        for cfrg_entry in indexed_entries:
+            attrs = dict(resource)
+            if isinstance(cfrg_metadata, dict) and cfrg_metadata:
+                attrs["cfrg"] = {key: value for key, value in cfrg_metadata.items() if key != "entries"}
+            if isinstance(cfrg_entry, dict):
+                attrs["cfrgEntry"] = cfrg_entry
+            instruction_format, container_format = infer_code_instruction_format(resource_type, payload_prefix)
+            platform = code_resource_platform(resource_type)
+            resource_name = resource.get("name") if isinstance(resource.get("name"), str) else ""
+            if isinstance(cfrg_entry, dict):
+                architecture_text = cfrg_entry.get("architectureText")
+                if architecture_text == "pwpc":
+                    platform = "macppc"
+                    instruction_format = "ppc32"
+                elif architecture_text:
+                    platform = f"mac-{architecture_text}"
+                    instruction_format = str(architecture_text)
+                if isinstance(cfrg_entry.get("name"), str) and cfrg_entry["name"]:
+                    resource_name = cfrg_entry["name"]
+            conn.execute(
+                """
+                INSERT INTO external_code_resources(
+                    run_id, stack_id, attempt_id, output_file_id, resource_type, resource_id,
+                    resource_name, external_kind, platform, instruction_format, container_format,
+                    payload_bytes, payload_sha256, disassembly_rel_path, disassembly_status, attrs_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    stack_id,
+                    attempt_id,
+                    output_file_id,
+                    resource_type,
+                    resource_id,
+                    resource_name,
+                    code_resource_kind(resource_type),
+                    platform,
+                    instruction_format,
+                    container_format,
+                    payload_bytes if isinstance(payload_bytes, int) else None,
+                    payload_sha256 if isinstance(payload_sha256, str) else "",
+                    disassembly_rel_path,
+                    "present" if disassembly_rel_path else "missing",
+                    json.dumps(attrs, sort_keys=True),
+                ),
+            )
+
+
 def index_embedded_files(conn: sqlite3.Connection, run_id: str, stack_id: int, attempt_id: int) -> None:
     for row in conn.execute(
         """
@@ -1757,7 +2406,7 @@ def index_embedded_files(conn: sqlite3.Connection, run_id: str, stack_id: int, a
         WHERE stack_id = ?
           AND (
               kind IN ('image', 'sound', 'raw')
-              OR logical_kind IN ('pat', 'bmap')
+              OR logical_kind IN ('pat', 'bmap', 'externalcommand', 'externalfunction')
           )
         """,
         (stack_id,),
@@ -1816,6 +2465,7 @@ def insert_stack_statistics(conn: sqlite3.Connection, stack_id: int, attempt_id:
         "not_understood_chunk_count": "SELECT COUNT(*) FROM binary_chunks WHERE stack_id = ? AND understood = 0",
         "embedded_file_count": "SELECT COUNT(*) FROM embedded_files WHERE stack_id = ?",
         "embedded_file_bytes": "SELECT COALESCE(SUM(bytes), 0) FROM embedded_files WHERE stack_id = ?",
+        "external_code_resource_count": "SELECT COUNT(*) FROM external_code_resources WHERE stack_id = ?",
     }
     for metric, query in scalar_queries.items():
         value = conn.execute(query, (stack_id,)).fetchone()[0]
@@ -1829,6 +2479,8 @@ def insert_stack_statistics(conn: sqlite3.Connection, stack_id: int, attempt_id:
         "binary_chunk_type": "SELECT chunk_type, COUNT(*) FROM binary_chunks WHERE stack_id = ? GROUP BY chunk_type",
         "binary_chunk_status": "SELECT status, COUNT(*) FROM binary_chunks WHERE stack_id = ? GROUP BY status",
         "embedded_file_kind": "SELECT embedded_kind, COUNT(*) FROM embedded_files WHERE stack_id = ? GROUP BY embedded_kind",
+        "external_code_platform": "SELECT platform || ':' || instruction_format || ':' || container_format, COUNT(*) FROM external_code_resources WHERE stack_id = ? GROUP BY platform, instruction_format, container_format",
+        "external_code_kind": "SELECT external_kind, COUNT(*) FROM external_code_resources WHERE stack_id = ? GROUP BY external_kind",
     }
     for metric, query in grouped_queries.items():
         for detail, value in conn.execute(query, (stack_id,)):
@@ -2119,6 +2771,56 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
             """,
             ["embedded_kind", "logical_kind", "sha256", "bytes", "occurrence_count", "stacks"],
         ),
+        "external-code-resources.tsv": (
+            """
+            SELECT s.stack_name, s.import_input, c.resource_type, c.resource_id,
+                   c.resource_name, c.external_kind, c.platform, c.instruction_format,
+                   c.container_format, c.payload_bytes, c.payload_sha256,
+                   c.disassembly_status, c.disassembly_rel_path
+            FROM external_code_resources c
+            JOIN stacks s ON s.id = c.stack_id
+            WHERE c.run_id = ?
+            ORDER BY s.stack_name, c.resource_type, c.resource_id, c.resource_name
+            """,
+            [
+                "stack_name",
+                "import_input",
+                "resource_type",
+                "resource_id",
+                "resource_name",
+                "external_kind",
+                "platform",
+                "instruction_format",
+                "container_format",
+                "payload_bytes",
+                "payload_sha256",
+                "disassembly_status",
+                "disassembly_rel_path",
+            ],
+        ),
+        "external-code-usage.tsv": (
+            """
+            SELECT platform, instruction_format, container_format, external_kind,
+                   COUNT(*) AS occurrence_count,
+                   COUNT(DISTINCT payload_sha256) AS distinct_hashes,
+                   SUM(COALESCE(payload_bytes, 0)) AS total_bytes,
+                   GROUP_CONCAT(DISTINCT resource_type) AS resource_types
+            FROM external_code_resources
+            WHERE run_id = ?
+            GROUP BY platform, instruction_format, container_format, external_kind
+            ORDER BY occurrence_count DESC, platform, external_kind
+            """,
+            [
+                "platform",
+                "instruction_format",
+                "container_format",
+                "external_kind",
+                "occurrence_count",
+                "distinct_hashes",
+                "total_bytes",
+                "resource_types",
+            ],
+        ),
         "external-binary-files.tsv": (
             """
             SELECT archive_input, external_input, external_kind, bytes, extension,
@@ -2214,6 +2916,8 @@ def main() -> int:
     conn.commit()
 
     processed = stack_ok = stack_failed = no_stack = extract_failed = 0
+    disassembly_jobs: list[DisassemblyJob] = []
+    packages_to_index: list[tuple[int, Path]] = []
     for source_path in iter_input_files(stacks_dir):
         processed += 1
         rel_path = str(source_path.relative_to(stacks_dir))
@@ -2281,8 +2985,10 @@ def main() -> int:
                     log_dir / f"{log_stem}.{import_count}.log",
                     stackimport_bin,
                     args.stackimport_args,
+                    args.stackimport_pty,
                     args.resource_dasm_bin,
                     args.disassemble_code_resources,
+                    classified,
                 )
                 if result.status == "ok":
                     stack_ok += 1
@@ -2291,6 +2997,22 @@ def main() -> int:
                     if not args.keep_going:
                         conn.commit()
                         return 1
+                if result.output_package is not None:
+                    packages_to_index.append((result.attempt_id, result.output_package))
+                    if args.disassemble_code_resources:
+                        disassembly_jobs.append(
+                            DisassemblyJob(
+                                run_id=args.run_id,
+                                source_id=source_id,
+                                extracted_file_id=extracted_id,
+                                attempt_id=result.attempt_id,
+                                archive_input=rel_path,
+                                display_input=display_input,
+                                import_path=extracted_path,
+                                output_package=result.output_package,
+                                resource_dasm_bin=args.resource_dasm_bin,
+                            )
+                        )
 
             if import_count == 0:
                 no_stack += 1
@@ -2333,8 +3055,10 @@ def main() -> int:
                     log_dir / f"{log_stem}.log",
                     stackimport_bin,
                     args.stackimport_args,
+                    args.stackimport_pty,
                     args.resource_dasm_bin,
                     args.disassemble_code_resources,
+                    classified,
                 )
                 update_source_status(conn, source_id, "imported")
                 if result.status == "ok":
@@ -2344,8 +3068,34 @@ def main() -> int:
                     if not args.keep_going:
                         conn.commit()
                         return 1
+                if result.output_package is not None:
+                    packages_to_index.append((result.attempt_id, result.output_package))
+                    if args.disassemble_code_resources:
+                        disassembly_jobs.append(
+                            DisassemblyJob(
+                                run_id=args.run_id,
+                                source_id=source_id,
+                                extracted_file_id=extracted_id,
+                                attempt_id=result.attempt_id,
+                                archive_input=rel_path,
+                                display_input=rel_path,
+                                import_path=source_path,
+                                output_package=result.output_package,
+                                resource_dasm_bin=args.resource_dasm_bin,
+                            )
+                        )
         if processed % 10 == 0:
             conn.commit()
+
+    if disassembly_jobs:
+        print(f"Running resource disassembly for {len(disassembly_jobs)} stack packages with {max(1, args.resource_dasm_jobs)} workers", flush=True)
+        for disassembly_result in run_disassembly_jobs(disassembly_jobs, args.resource_dasm_jobs):
+            record_disassembly_result(conn, disassembly_result)
+        conn.commit()
+
+    for attempt_id, output_package in packages_to_index:
+        index_output_package(conn, attempt_id, output_package)
+    conn.commit()
 
     conn.execute(
         """
@@ -2384,6 +3134,8 @@ def main() -> int:
     print(f"Chunk usage: {run_dir / 'chunk-usage.tsv'}")
     print(f"Embedded files: {run_dir / 'embedded-files.tsv'}")
     print(f"Embedded file usage: {run_dir / 'embedded-file-usage.tsv'}")
+    print(f"External code resources: {run_dir / 'external-code-resources.tsv'}")
+    print(f"External code usage: {run_dir / 'external-code-usage.tsv'}")
     print(f"External binary files: {run_dir / 'external-binary-files.tsv'}")
     print(f"External binary usage: {run_dir / 'external-binary-usage.tsv'}")
     print(

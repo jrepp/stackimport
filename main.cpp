@@ -1,4 +1,5 @@
 #include "stackimport_c.h"
+#include "stackimport_logging.h"
 
 #include <climits>
 #include <cstdlib>
@@ -12,7 +13,7 @@ void	RunTests();
 
 
 // Arguments as string for syntax info
-#define SYNTAXSTR "[--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>"
+#define SYNTAXSTR "[--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>"
 
 namespace {
 
@@ -33,8 +34,7 @@ void cli_deallocate(void* ptr, void*)
 
 void cli_message(uint32_t severity, const char* message, void*)
 {
-	FILE* stream = severity >= STACKIMPORT_MESSAGE_WARNING ? stderr : stdout;
-	fprintf(stream, "%s\n", message ? message : "");
+	stackimport_quill_log_message(severity, message);
 }
 
 stackimport_file_handle cli_open_file(const char* path, const char* mode, void*)
@@ -77,10 +77,12 @@ std::string absolute_path(const char* path)
 std::string default_output_package_path(const std::string& input_path)
 {
 	std::string package_path(input_path);
-	const std::string suffix(".stak");
-	const std::string::size_type pos = package_path.rfind(suffix);
-	if(pos != std::string::npos)
-		package_path.resize(pos);
+	const std::string::size_type slash = package_path.find_last_of('/');
+	const std::string::size_type dot = package_path.find_last_of('.');
+	if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
+	{
+		package_path.resize(dot);
+	}
 	package_path.append(".xstk");
 	return package_path;
 }
@@ -90,17 +92,18 @@ std::string default_output_package_path(const std::string& input_path)
 
 int main( int argc, char * const argv[] )
 {
+	stackimport_logging_init();
 	#if defined(DEBUG) && DEBUG
 	RunTests();
 	#endif
 	
 	if( argc < 2 )
 	{
-		fprintf( stderr, "Error: Syntax is %s " SYNTAXSTR "\n", argv[0] );
+		stackimport_quill_diagnosticf( "Error: Syntax is %s " SYNTAXSTR "\n", argv[0] );
 		return 2;
 	}
 	
-	uint32_t flags = 0;
+	uint32_t flags = STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
 	const char* outputPathArgument = nullptr;
 	int		x = 1;	// Skip command name in argv[0].
 	if( argc > 2 )
@@ -109,6 +112,8 @@ int main( int argc, char * const argv[] )
 		{
 			if( strcmp(argv[x],"--dumprawblocks") == 0 )
 				flags |= STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
+			else if( strcmp(argv[x],"--nodumprawblocks") == 0 )
+				flags &= static_cast<uint32_t>(~STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS);
 			else if( strcmp(argv[x],"--nostatus") == 0 )
 				flags |= STACKIMPORT_IMPORT_NO_STATUS;
 			else if( strcmp(argv[x],"--noprogress") == 0 )
@@ -120,14 +125,14 @@ int main( int argc, char * const argv[] )
 				x++;
 				if( x >= argc )
 				{
-					fprintf( stderr, "Error: Missing path after --output, syntax is %s " SYNTAXSTR "\n", argv[0] );
+					stackimport_quill_diagnosticf( "Error: Missing path after --output, syntax is %s " SYNTAXSTR "\n", argv[0] );
 					return 3;
 				}
 				outputPathArgument = argv[x];
 			}
 			else if( argv[x][0] == '-' )
 			{
-				fprintf( stderr, "Error: Unknown option %s, syntax is %s " SYNTAXSTR "\n", argv[x], argv[0] );
+				stackimport_quill_diagnosticf( "Error: Unknown option %s, syntax is %s " SYNTAXSTR "\n", argv[x], argv[0] );
 				return 3;
 			}
 			else	// Doesn't start with a dash? Must be pathname!
@@ -137,14 +142,14 @@ int main( int argc, char * const argv[] )
 	
 	if( x >= argc )	// Only options, no file path?
 	{
-		fprintf( stderr, "Error: Syntax is %s " SYNTAXSTR "\n", argv[0] );
+		stackimport_quill_diagnosticf( "Error: Syntax is %s " SYNTAXSTR "\n", argv[0] );
 		return 4;
 	}
 	
 	std::string	fpath = absolute_path(argv[x]);
 	if( fpath.empty() )
 	{
-		fprintf( stderr, "Error: Could not resolve current working directory.\n" );
+		stackimport_quill_diagnosticf( "Error: Could not resolve current working directory.\n" );
 		return 5;
 	}
 	const std::string outputPath = outputPathArgument ?
@@ -152,7 +157,7 @@ int main( int argc, char * const argv[] )
 		default_output_package_path(fpath);
 	if( outputPath.empty() )
 	{
-		fprintf( stderr, "Error: Could not resolve output package path.\n" );
+		stackimport_quill_diagnosticf( "Error: Could not resolve output package path.\n" );
 		return 5;
 	}
 
@@ -170,7 +175,7 @@ int main( int argc, char * const argv[] )
 	stackimport_status status = stackimport_context_create_with_platform(&platform, &context);
 	if( status != STACKIMPORT_STATUS_OK )
 	{
-		fprintf( stderr, "Error: Could not create import context: %s.\n", stackimport_status_string(status) );
+		stackimport_quill_diagnosticf( "Error: Could not create import context: %s.\n", stackimport_status_string(status) );
 		return 5;
 	}
 
@@ -184,9 +189,11 @@ int main( int argc, char * const argv[] )
 	stackimport_context_destroy(context);
 	if( status != STACKIMPORT_STATUS_OK )
 	{
-		fprintf( stderr, "Error: Conversion of '%s' incomplete/failed: %s.\n", fpath.c_str(), stackimport_status_string(status) );
+		stackimport_quill_diagnosticf( "Error: Conversion of '%s' incomplete/failed: %s.\n", fpath.c_str(), stackimport_status_string(status) );
+		stackimport_logging_shutdown();
 		return 5;
 	}
 	
+	stackimport_logging_shutdown();
     return 0;
 }

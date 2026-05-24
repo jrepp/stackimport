@@ -1,5 +1,7 @@
 #include "stackimport_platform_internal.h"
 
+#include "stackimport_logging.h"
+
 #include <cstdlib>
 #include <cstdio>
 #include <sys/stat.h>
@@ -23,8 +25,7 @@ void default_deallocate(void* ptr, void*)
 
 void default_message(uint32_t severity, const char* message, void*)
 {
-	FILE* stream = severity >= STACKIMPORT_MESSAGE_WARNING ? stderr : stdout;
-	fprintf(stream, "%s\n", message ? message : "");
+	stackimport_quill_log_message(severity, message);
 }
 
 stackimport_file_handle default_open_file(const char* path, const char* mode, void*)
