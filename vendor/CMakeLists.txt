@@ -5,6 +5,7 @@ option(STACKIMPORT_VENDOR_STRICT_WARNINGS "Build vendored tools with stricter co
 option(STACKIMPORT_VENDOR_WARNINGS_AS_ERRORS "Treat local vendored library warnings as errors" ${STACKIMPORT_WARNINGS_AS_ERRORS})
 
 find_package(Threads REQUIRED)
+find_package(ZLIB)
 
 set(STACKIMPORT_VENDOR_CXX_WARNING_FLAGS)
 set(STACKIMPORT_VENDOR_CMAKE_WARNING_FLAGS)
@@ -127,6 +128,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
         -Wno-sign-conversion
     )
 endif()
+
+add_library(vendor_rsrcd INTERFACE)
+target_include_directories(vendor_rsrcd SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/rsrcd/include")
+target_compile_options(vendor_rsrcd INTERFACE
+    ${STACKIMPORT_VENDOR_CXX_WARNING_FLAGS}
+    ${STACKIMPORT_VENDOR_WARNING_ERROR_FLAGS}
+)
 
 add_custom_target(vendor-header-libraries
     DEPENDS vendor_ppcd vendor_snd2wav
