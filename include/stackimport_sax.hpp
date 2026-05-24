@@ -44,7 +44,7 @@ struct BlockType {
         return BlockType{p[0], p[1], p[2], p[3]};
     }
 
-    constexpr auto as_sv() const -> std::string_view {
+    auto as_sv() const -> std::string_view {
         return std::string_view{reinterpret_cast<const char*>(v), 4};
     }
     constexpr auto to_uint32() const -> uint32_t {
