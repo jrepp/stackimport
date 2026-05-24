@@ -2584,6 +2584,175 @@ def write_tsv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) 
         writer.writerows(rows)
 
 
+DISASSEMBLY_LINE_RE = re.compile(
+    r"^\s*(?P<address>[0-9A-Fa-f]{8})\s+"
+    r"(?P<bytes>[0-9A-Fa-f]{4,8}(?:\s+[0-9A-Fa-f]{4,8})*)\s+"
+    r"(?P<mnemonic>[A-Za-z.]+)\s*(?P<operands>.*)$"
+)
+
+
+def scan_disassembly_calls(disassembly_path: Path, platform: str) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+    try:
+        lines = disassembly_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return calls
+
+    for line_number, line in enumerate(lines, start=1):
+        match = DISASSEMBLY_LINE_RE.match(line)
+        if not match:
+            continue
+        mnemonic = match.group("mnemonic").lower()
+        operands = match.group("operands").strip()
+        call_kind = ""
+        target = ""
+
+        if platform == "mac68k":
+            if mnemonic == "syscall":
+                call_kind = "toolbox_trap"
+                target = operands.split(None, 1)[0] if operands else ""
+            elif mnemonic in {"jsr", "jmp", "bsr"}:
+                call_kind = "control_transfer"
+                target = operands
+        elif platform == "macppc":
+            if mnemonic in {"bl", "bla"}:
+                call_kind = "branch_link"
+                target = operands
+            elif mnemonic in {"bctrl", "bcctrl", "bclrl", "blrl"}:
+                call_kind = "indirect_branch_link"
+                target = mnemonic
+            elif mnemonic == "sc":
+                call_kind = "system_call"
+                target = "sc"
+
+        if not call_kind:
+            continue
+        calls.append(
+            {
+                "address": match.group("address").upper(),
+                "line": line_number,
+                "call_kind": call_kind,
+                "target": target,
+                "mnemonic": mnemonic,
+                "operands": operands,
+                "instruction": line.strip(),
+            }
+        )
+    return calls
+
+
+def export_disassembly_call_audit(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None:
+    rows: list[dict[str, object]] = []
+    aggregate: dict[tuple[str, str, str, str, str], dict[str, object]] = {}
+    resources = conn.execute(
+        """
+        SELECT s.stack_name, s.import_input, s.output_package,
+               c.resource_type, c.resource_id, c.resource_name,
+               c.platform, c.instruction_format, c.disassembly_rel_path,
+               of.path AS disassembly_path
+        FROM external_code_resources c
+        JOIN stacks s ON s.id = c.stack_id
+        LEFT JOIN output_files of ON of.id = c.output_file_id
+        WHERE c.run_id = ?
+          AND c.disassembly_status = 'present'
+          AND c.disassembly_rel_path != ''
+        ORDER BY s.stack_name, c.resource_type, c.resource_id, c.resource_name
+        """,
+        (run_id,),
+    )
+    for resource in resources:
+        disassembly_path = Path(resource["disassembly_path"]) if resource["disassembly_path"] else Path(resource["output_package"]) / resource["disassembly_rel_path"]
+        resource_key = f"{resource['stack_name']}:{resource['resource_type']}:{resource['resource_id']}:{resource['resource_name']}"
+        for call in scan_disassembly_calls(disassembly_path, str(resource["platform"])):
+            row = {
+                "stack_name": resource["stack_name"],
+                "import_input": resource["import_input"],
+                "resource_type": resource["resource_type"],
+                "resource_id": resource["resource_id"],
+                "resource_name": resource["resource_name"],
+                "platform": resource["platform"],
+                "instruction_format": resource["instruction_format"],
+                "disassembly_rel_path": resource["disassembly_rel_path"],
+                **call,
+            }
+            rows.append(row)
+            key = (
+                str(resource["platform"]),
+                str(resource["instruction_format"]),
+                str(call["call_kind"]),
+                str(call["target"]),
+                str(call["mnemonic"]),
+            )
+            summary = aggregate.setdefault(
+                key,
+                {
+                    "platform": resource["platform"],
+                    "instruction_format": resource["instruction_format"],
+                    "call_kind": call["call_kind"],
+                    "target": call["target"],
+                    "mnemonic": call["mnemonic"],
+                    "occurrence_count": 0,
+                    "resource_count": 0,
+                    "stack_count": 0,
+                    "_resources": set(),
+                    "_stacks": set(),
+                },
+            )
+            summary["occurrence_count"] = int(summary["occurrence_count"]) + 1
+            summary["_resources"].add(resource_key)
+            summary["_stacks"].add(resource["stack_name"])
+
+    for summary in aggregate.values():
+        resources_seen = summary.pop("_resources")
+        stacks_seen = summary.pop("_stacks")
+        summary["resource_count"] = len(resources_seen)
+        summary["stack_count"] = len(stacks_seen)
+
+    write_tsv(
+        run_dir / "disassembly-call-audit.tsv",
+        rows,
+        [
+            "stack_name",
+            "import_input",
+            "resource_type",
+            "resource_id",
+            "resource_name",
+            "platform",
+            "instruction_format",
+            "disassembly_rel_path",
+            "address",
+            "line",
+            "call_kind",
+            "target",
+            "mnemonic",
+            "operands",
+            "instruction",
+        ],
+    )
+    write_tsv(
+        run_dir / "disassembly-call-usage.tsv",
+        sorted(
+            aggregate.values(),
+            key=lambda item: (
+                str(item["platform"]),
+                str(item["call_kind"]),
+                -int(item["occurrence_count"]),
+                str(item["target"]),
+            ),
+        ),
+        [
+            "platform",
+            "instruction_format",
+            "call_kind",
+            "target",
+            "mnemonic",
+            "occurrence_count",
+            "resource_count",
+            "stack_count",
+        ],
+    )
+
+
 def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None:
     report_queries = {
         "summary.tsv": (
@@ -2944,6 +3113,101 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
                 "resource_types",
             ],
         ),
+        "disassembly-summary.tsv": (
+            """
+            SELECT c.platform, c.instruction_format, c.disassembly_status,
+                   COUNT(*) AS resource_count,
+                   COUNT(DISTINCT c.stack_id) AS stack_count,
+                   COUNT(DISTINCT c.payload_sha256) AS distinct_payload_count,
+                   SUM(COALESCE(c.payload_bytes, 0)) AS payload_bytes,
+                   COUNT(DISTINCT CASE WHEN c.disassembly_rel_path != '' THEN c.disassembly_rel_path END) AS disassembly_file_count,
+                   SUM(COALESCE(of.bytes, 0)) AS disassembly_bytes
+            FROM external_code_resources c
+            LEFT JOIN output_files of ON of.id = c.output_file_id
+            WHERE c.run_id = ?
+            GROUP BY c.platform, c.instruction_format, c.disassembly_status
+            ORDER BY c.platform, c.instruction_format, c.disassembly_status
+            """,
+            [
+                "platform",
+                "instruction_format",
+                "disassembly_status",
+                "resource_count",
+                "stack_count",
+                "distinct_payload_count",
+                "payload_bytes",
+                "disassembly_file_count",
+                "disassembly_bytes",
+            ],
+        ),
+        "disassembly-files-summary.tsv": (
+            """
+            SELECT f.extension, f.kind, f.logical_kind,
+                   COUNT(*) AS file_count,
+                   COUNT(DISTINCT f.sha256) AS distinct_file_count,
+                   SUM(f.bytes) AS disassembly_bytes
+            FROM output_files f
+            JOIN import_attempts a ON a.id = f.attempt_id
+            WHERE a.run_id = ?
+              AND f.rel_path LIKE 'resource-disassembly/%'
+            GROUP BY f.extension, f.kind, f.logical_kind
+            ORDER BY f.extension, f.kind, f.logical_kind
+            """,
+            [
+                "extension",
+                "kind",
+                "logical_kind",
+                "file_count",
+                "distinct_file_count",
+                "disassembly_bytes",
+            ],
+        ),
+        "missing-disassemblies.tsv": (
+            """
+            SELECT s.stack_name, s.import_input, c.resource_type, c.resource_id,
+                   c.resource_name, c.platform, c.instruction_format,
+                   c.container_format, c.payload_bytes, c.payload_sha256
+            FROM external_code_resources c
+            JOIN stacks s ON s.id = c.stack_id
+            WHERE c.run_id = ?
+              AND c.disassembly_status != 'present'
+            ORDER BY c.platform, s.stack_name, c.resource_type, c.resource_id, c.resource_name
+            """,
+            [
+                "stack_name",
+                "import_input",
+                "resource_type",
+                "resource_id",
+                "resource_name",
+                "platform",
+                "instruction_format",
+                "container_format",
+                "payload_bytes",
+                "payload_sha256",
+            ],
+        ),
+        "unindexed-disassembly-files.tsv": (
+            """
+            SELECT s.stack_name, s.import_input, f.rel_path, f.bytes, f.sha256,
+                   f.logical_kind, f.logical_id
+            FROM output_files f
+            JOIN stacks s ON s.id = f.stack_id
+            LEFT JOIN external_code_resources c ON c.output_file_id = f.id
+            WHERE s.run_id = ?
+              AND f.rel_path LIKE 'resource-disassembly/%'
+              AND c.id IS NULL
+            ORDER BY s.stack_name, f.rel_path
+            """,
+            [
+                "stack_name",
+                "import_input",
+                "rel_path",
+                "bytes",
+                "sha256",
+                "logical_kind",
+                "logical_id",
+            ],
+        ),
         "external-binary-files.tsv": (
             """
             SELECT archive_input, external_input, external_kind, bytes, extension,
@@ -2990,6 +3254,7 @@ def export_reports(conn: sqlite3.Connection, run_dir: Path, run_id: str) -> None
     for filename, (query, fieldnames) in report_queries.items():
         rows = [dict(row) for row in conn.execute(query, (run_id,))]
         write_tsv(run_dir / filename, rows, fieldnames)
+    export_disassembly_call_audit(conn, run_dir, run_id)
 
     counts = [dict(row) for row in conn.execute(
         """
@@ -3259,6 +3524,12 @@ def main() -> int:
     print(f"Embedded file usage: {run_dir / 'embedded-file-usage.tsv'}")
     print(f"External code resources: {run_dir / 'external-code-resources.tsv'}")
     print(f"External code usage: {run_dir / 'external-code-usage.tsv'}")
+    print(f"Disassembly summary: {run_dir / 'disassembly-summary.tsv'}")
+    print(f"Disassembly file summary: {run_dir / 'disassembly-files-summary.tsv'}")
+    print(f"Missing disassemblies: {run_dir / 'missing-disassemblies.tsv'}")
+    print(f"Unindexed disassembly files: {run_dir / 'unindexed-disassembly-files.tsv'}")
+    print(f"Disassembly call audit: {run_dir / 'disassembly-call-audit.tsv'}")
+    print(f"Disassembly call usage: {run_dir / 'disassembly-call-usage.tsv'}")
     print(f"External binary files: {run_dir / 'external-binary-files.tsv'}")
     print(f"External binary usage: {run_dir / 'external-binary-usage.tsv'}")
     print(
