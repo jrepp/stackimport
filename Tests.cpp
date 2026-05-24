@@ -15,20 +15,34 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 
 namespace {
 
 void* test_allocate(size_t size, size_t alignment, void*)
 {
 	void* ptr = nullptr;
+#if defined(_WIN32)
+	if(alignment < sizeof(void*))
+		alignment = sizeof(void*);
+	ptr = _aligned_malloc(size, alignment);
+	return ptr;
+#else
 	if(posix_memalign(&ptr, alignment, size) != 0)
 		return nullptr;
 	return ptr;
+#endif
 }
 
 void test_deallocate(void* ptr, void*)
 {
+#if defined(_WIN32)
+	_aligned_free(ptr);
+#else
 	free(ptr);
+#endif
 }
 
 }
