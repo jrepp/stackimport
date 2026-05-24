@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STACKIMPORT_VERSION_FULL)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt" STACKIMPORT_VERSION_FULL)
 string(STRIP "${STACKIMPORT_VERSION_FULL}" STACKIMPORT_VERSION_FULL)
 if(NOT STACKIMPORT_VERSION_FULL MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$")
-    message(FATAL_ERROR "VERSION must be a SemVer 2.0.0 version")
+    message(FATAL_ERROR "VERSION.txt must be a SemVer 2.0.0 version")
 endif()
 string(REGEX REPLACE "^([0-9]+\\.[0-9]+\\.[0-9]+).*$" "\\1" STACKIMPORT_VERSION_CORE "${STACKIMPORT_VERSION_FULL}")
 

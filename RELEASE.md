@@ -4,7 +4,7 @@
 
 ## Version Schema
 
-The canonical version lives in `VERSION` and must be a valid SemVer 2.0.0
+The canonical version lives in `VERSION.txt` and must be a valid SemVer 2.0.0
 version:
 
 ```text
@@ -24,23 +24,23 @@ above.
 
 ## Git Tags
 
-Release tags must be `v` followed by the exact `VERSION` value:
+Release tags must be `v` followed by the exact `VERSION.txt` value:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow rejects tags that do not match `VERSION`.
+The release workflow rejects tags that do not match `VERSION.txt`.
 
 ## GitHub Release Workflow
 
 `.github/workflows/release.yml` runs for `v*` tags and can also be started
 manually with a `version` input. It:
 
-1. Validates `VERSION`, the requested version, and the tag name.
+1. Validates `VERSION.txt`, the requested version, and the tag name.
 2. Builds and tests the same six platform targets as the build workflow.
-3. Packages the CLI, test binary, static library, public header, `VERSION`, and
+3. Packages the CLI, test binary, static library, public header, `VERSION.txt`, and
    `README.md` into per-platform zip archives.
 4. Publishes a GitHub release and uploads those archives.
 

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer version to release. Must match VERSION.'
+        description: 'SemVer version to release. Must match VERSION.txt.'
         required: true
         type: string
 
@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(--version-file VERSION --github-output "${GITHUB_OUTPUT}")
+          args=(--version-file VERSION.txt --github-output "${GITHUB_OUTPUT}")
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             args+=(--tag "${GITHUB_REF_NAME}")
           else
@@ -105,7 +105,7 @@ jobs:
           fi
 
           cp stackimport_c.h "${package_dir}/include/"
-          cp VERSION README.md "${package_dir}/"
+          cp VERSION.txt README.md "${package_dir}/"
           (cd artifacts && cmake -E tar cf "${package_name}.zip" --format=zip -- "${package_name}")
 
       - name: Upload release artifact

@@ -27,7 +27,7 @@ def shell_bool(value: bool) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate stackimport release version metadata.")
-    parser.add_argument("--version-file", default="VERSION", type=Path)
+    parser.add_argument("--version-file", default="VERSION.txt", type=Path)
     parser.add_argument("--version", help="Requested SemVer version, without leading v.")
     parser.add_argument("--tag", help="Release tag, with leading v.")
     parser.add_argument("--github-output", type=Path, help="Append outputs for GitHub Actions.")
