@@ -36,6 +36,7 @@
 #include "woba.h"
 #include "CBuf.h"
 #include "stackimport_logging.h"
+#include "stackimport_platform_internal.h"
 
 using namespace std;
 
@@ -105,6 +106,35 @@ static void bounded_fill(char * dest, int destLength, int destStart, char ch, in
 		return;
 	count = std::min( count, destLength -destStart );
 	memset( dest +destStart, ch, static_cast<size_t>(count) );
+}
+
+static bool platform_write_all(stackimport_file_handle file, const void* data, size_t size)
+{
+	return size == 0 || stackimport_internal_write_file(file, data, size) == size;
+}
+
+static bool platform_write_pbm(const char* fn, int width, int height, const char* data, int dataLength, bool leadingNewline)
+{
+	stackimport_file_handle file = stackimport_internal_open_file(fn, "wb");
+	if(!file)
+		return false;
+
+	char header[256];
+	const int headerLength = snprintf(header, sizeof(header), leadingNewline ? "\nP4\n%d %d\n" : "P4\n%d %d\n", width, height);
+	bool ok = headerLength > 0
+		&& platform_write_all(file, header, static_cast<size_t>(headerLength))
+		&& platform_write_all(file, data, size_from_nonnegative_int(dataLength));
+	const int closeStatus = stackimport_internal_close_file(file);
+	return ok && closeStatus == 0;
+}
+
+static bool platform_append_pbm(stackimport_file_handle file, int width, int height, const char* data, int dataLength, bool leadingNewline)
+{
+	char header[256];
+	const int headerLength = snprintf(header, sizeof(header), leadingNewline ? "\nP4\n%d %d\n" : "P4\n%d %d\n", width, height);
+	return headerLength > 0
+		&& platform_write_all(file, header, static_cast<size_t>(headerLength))
+		&& platform_write_all(file, data, size_from_nonnegative_int(dataLength));
 }
 
 int __bitmap_row_width(int width, int, int depth)
@@ -621,49 +651,28 @@ void picture::writefile(char * fn)
 
 void picture::writebitmapandmasktopbm(const char * fn)
 {
-	fstream fp(fn, ios::out|ios::binary|ios::trunc);
-	char		str[256];
-	
-	// Write PBM Header:
-	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
-	
-	fp.write( bitmap, stream_size_from_nonnegative_int(bitmaplength) );
-	
-	// Write second PBM Header:
-	snprintf( str, sizeof(str), "\nP4\n%d %d\n", width, height );
-	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
-	
-	fp.write( mask, stream_size_from_nonnegative_int(masklength) );
-	fp.close();
+	stackimport_file_handle file = stackimport_internal_open_file(fn, "wb");
+	if(!file)
+		return;
+	const bool ok = platform_append_pbm(file, width, height, bitmap, bitmaplength, false)
+		&& platform_append_pbm(file, width, height, mask, masklength, true);
+	const int closeStatus = stackimport_internal_close_file(file);
+	if(!ok || closeStatus != 0)
+		stackimport_internal_message(STACKIMPORT_MESSAGE_WARNING, "Warning: Short write while writing PBM.");
 }
 
 
 void picture::writebitmaptopbm(const char * fn)
 {
-	fstream fp(fn, ios::out|ios::binary|ios::trunc);
-	char		str[256];
-	
-	// Write PBM Header:
-	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
-	
-	fp.write( bitmap, stream_size_from_nonnegative_int(bitmaplength) );
-	fp.close();
+	if(!platform_write_pbm(fn, width, height, bitmap, bitmaplength, false))
+		stackimport_internal_message(STACKIMPORT_MESSAGE_WARNING, "Warning: Short write while writing bitmap PBM.");
 }
 
 
 void picture::writemasktopbm(const char * fn)
 {
-	fstream fp(fn, ios::out|ios::binary|ios::trunc);
-	char		str[256];
-	
-	// Write PBM Header:
-	snprintf( str, sizeof(str), "P4\n%d %d\n", width, height );
-	fp.write( str, static_cast<std::streamsize>(strlen(str)) );
-	
-	fp.write( mask, stream_size_from_nonnegative_int(masklength) );
-	fp.close();
+	if(!platform_write_pbm(fn, width, height, mask, masklength, false))
+		stackimport_internal_message(STACKIMPORT_MESSAGE_WARNING, "Warning: Short write while writing mask PBM.");
 }
 
 
