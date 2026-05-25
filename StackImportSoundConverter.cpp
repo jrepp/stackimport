@@ -1,5 +1,7 @@
 #include "StackImportSoundConverter.h"
 
+#include "vendor/resource_dasm/src/AudioCodecs.hh"
+
 #include <cmath>
 #include <cstddef>
 
@@ -15,6 +17,7 @@ public:
 	bool convert(PlatformByteVector& wav, std::string& error)
 	{
 		uint16_t channels = 1;
+		uint32_t sampleBufferOffset = 0;
 		const int16_t sndFormat = read_s16(error);
 		if(!error.empty())
 			return false;
@@ -35,22 +38,45 @@ public:
 			if(read_s16(error) != 5)
 				return fail(error, "not sampled sound");
 			opts = read_s32(error);
-			if(opts != initMono && opts != 0xA0 && opts != initStereo)
-				return fail(error, "unhandled sampled-sound options");
+			channels = (opts & initStereo) != 0 ? 2 : 1;
 		}
 		if(!error.empty())
 			return false;
-		if(read_s16(error) != 1)
-			return fail(error, "too many commands");
-		const uint16_t sndCommand = read_u16(error);
-		if(sndCommand != 0x8051 && sndCommand != 0x8050)
-			return fail(error, "not a bufferCmd or sndCmd");
-		if(read_s16(error) != 0)
-			return fail(error, "bad param1");
-		if(read_s32(error) != static_cast<int32_t>(sndHeaderOffset))
-			return fail(error, "bad param2");
+		const int16_t commandCount = read_s16(error);
+		if(commandCount <= 0)
+			return fail(error, "snd contains no commands");
+		for(int16_t i = 0; i < commandCount; i++)
+		{
+			const uint16_t sndCommand = read_u16(error);
+			(void)read_s16(error);
+			const uint32_t param2 = read_u32(error);
+			if(!error.empty())
+				return false;
+			if(sndCommand == 0x8051 || sndCommand == 0x8050)
+			{
+				if(sampleBufferOffset == 0)
+					sampleBufferOffset = param2;
+			}
+			else if(sndCommand != 0)
+				return fail(error, "unsupported snd command");
+		}
+		if(sampleBufferOffset == 0)
+			sampleBufferOffset = sndHeaderOffset;
+		const size_t sampleBufferStart = pos_;
+		if(sampleBufferOffset + 22 <= input_.size)
+			pos_ = sampleBufferOffset;
 		if(read_s32(error) != 0)
-			return fail(error, "bad data pointer");
+		{
+			if(pos_ != sampleBufferStart + 4)
+			{
+				error.clear();
+				pos_ = sampleBufferStart;
+				if(read_s32(error) != 0)
+					return fail(error, "bad data pointer");
+			}
+			else
+				return fail(error, "bad data pointer");
+		}
 
 		uint32_t numBytes = read_u32(error);
 		const double sampleRate = read_ufixed(error);
@@ -59,15 +85,8 @@ public:
 		uint8_t sampleEncoding = read_u8(error);
 		if(!error.empty())
 			return false;
-		if(sampleEncoding != 0 && sampleEncoding != extSH)
+		if(sampleEncoding != 0 && sampleEncoding != compressedSH && sampleEncoding != extSH)
 			return fail(error, "unsupported sample encoding");
-		if(sampleEncoding == extSH)
-		{
-			channels = static_cast<uint16_t>(numBytes);
-			numBytes = 0;
-		}
-		else if(opts == initStereo)
-			channels = 2;
 
 		const uint8_t baseFrequency = read_u8(error);
 		double factor = 1.0;
@@ -77,28 +96,55 @@ public:
 		uint32_t dataSize = numBytes;
 		uint32_t rate = static_cast<uint32_t>(sampleRate);
 		uint32_t bytesPerSample = 1;
-		if(sampleEncoding == extSH)
+		std::vector<phosg::le_int16_t> decodedSamples;
+		if(sampleEncoding == compressedSH || sampleEncoding == extSH)
 		{
+			if(numBytes > 0)
+				channels = static_cast<uint16_t>(numBytes);
 			const uint32_t numFrames = read_u32(error);
 			const double aiffSampleRate = read_extended80(error);
 			(void)read_u32(error);
+			const uint32_t format = read_u32(error);
 			(void)read_u32(error);
+			const uint32_t stateVars = read_u32(error);
 			(void)read_u32(error);
-			const uint16_t sampleSize = read_u16(error);
-			bytesPerSample = sampleSize / 8;
+			const uint16_t compressionId = read_u16(error);
 			(void)read_u16(error);
-			(void)read_u32(error);
-			(void)read_u32(error);
-			(void)read_u32(error);
-			if(bytesPerSample == 0)
+			(void)read_u16(error);
+			uint16_t sampleSize = read_u16(error);
+			if(sampleSize == 0)
+				sampleSize = static_cast<uint16_t>(stateVars >> 16u);
+			bytesPerSample = sampleSize / 8;
+			if(bytesPerSample == 0 || (bytesPerSample != 1 && bytesPerSample != 2))
 				return fail(error, "invalid sample size");
-			dataSize = numFrames * bytesPerSample * channels;
-			numBytes = dataSize;
 			rate = static_cast<uint32_t>(aiffSampleRate);
+			if(compressionId == 3 || compressionId == 4)
+			{
+				const bool isMace3 = compressionId == 3;
+				const uint32_t encodedBytes = numFrames * (isMace3 ? 2u : 1u) * channels;
+				if(pos_ + encodedBytes > input_.size)
+					return fail(error, "truncated compressed sample data");
+				decodedSamples = ResourceDASM::decode_mace(input_.data + pos_, encodedBytes, channels == 2, isMace3);
+				pos_ += encodedBytes;
+				bytesPerSample = 2;
+				dataSize = static_cast<uint32_t>(decodedSamples.size() * sizeof(phosg::le_int16_t));
+				numBytes = dataSize;
+			}
+			else if(compressionId == 0 || compressionId == 0xFFFF)
+			{
+				dataSize = numFrames * bytesPerSample * channels;
+				numBytes = dataSize;
+				if(format != 0x736F7774 && bytesPerSample == 2)
+				{
+					// Data is big-endian 16-bit; the common writer path below swaps it to WAV little-endian.
+				}
+			}
+			else
+				return fail(error, "unsupported compression");
 		}
 		if(!error.empty())
 			return false;
-		if(pos_ + numBytes > input_.size)
+		if(decodedSamples.empty() && pos_ + numBytes > input_.size)
 			return fail(error, "truncated sample data");
 
 		wav.clear();
@@ -117,7 +163,12 @@ public:
 		append_ascii(wav, "data");
 		append_u32le(wav, dataSize);
 
-		if(bytesPerSample == 2)
+		if(!decodedSamples.empty())
+		{
+			const auto* sampleBytes = reinterpret_cast<const uint8_t*>(decodedSamples.data());
+			wav.insert(wav.end(), sampleBytes, sampleBytes + decodedSamples.size() * sizeof(phosg::le_int16_t));
+		}
+		else if(bytesPerSample == 2)
 		{
 			for(uint32_t i = 0; i < numBytes / 2; i++)
 				append_u16le(wav, read_u16(error));
@@ -131,8 +182,8 @@ public:
 	}
 
 private:
-	static constexpr int32_t initMono = 0x0080;
 	static constexpr int32_t initStereo = 0x00C0;
+	static constexpr uint8_t compressedSH = 0xFE;
 	static constexpr uint8_t extSH = 0xFF;
 
 	rsrcd::Bytes input_;

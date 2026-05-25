@@ -87,6 +87,7 @@ set(STACKIMPORT_SOURCES
     CStackFile.cpp
     StackImportResourceFork.cpp
     StackImportSoundConverter.cpp
+    vendor/resource_dasm/src/AudioCodecs.cc
     Mac68kDisassembly.cpp
     CBuf.cpp
     byteutils.cpp
@@ -224,6 +225,12 @@ foreach(target ${STACKIMPORT_CORE_TARGETS})
     stackimport_enable_static_analysis(${target})
     stackimport_disable_exceptions(${target})
 endforeach()
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    set_source_files_properties(vendor/resource_dasm/src/AudioCodecs.cc PROPERTIES COMPILE_OPTIONS "-fexceptions;-w")
+elseif(MSVC)
+    set_source_files_properties(vendor/resource_dasm/src/AudioCodecs.cc PROPERTIES COMPILE_OPTIONS "/EHsc;/w")
+endif()
 
 if(WIN32)
     foreach(target ${STACKIMPORT_CORE_TARGETS})
