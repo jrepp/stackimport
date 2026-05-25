@@ -32,6 +32,7 @@
 
 #include <cstring>
 #include <fstream>
+#include "stackimport_c.h"
 using namespace std;
 
 class CBuf;
@@ -111,7 +112,9 @@ public:
 	void readfile(char *);
 	
 private:
-		
+	void release_buffers(void);
+	bool allocate_buffers(int bitmapBytes, int maskBytes);
+
 	int width;
 	int height;
 	int depth;
@@ -123,6 +126,8 @@ private:
 	char * bitmap;
 	int masklength;
 	char * mask;
+	stackimport_deallocate_fn deallocate;
+	void* allocatorUserData;
 };
 
 #endif

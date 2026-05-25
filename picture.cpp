@@ -180,30 +180,61 @@ unsigned int __pow21(int p)
 picture::picture(void)
 	: width(0), height(0), depth(0), greyscalemask(false),
 	rowlength(0), maskrowlength(0), bitmaplength(0), bitmap(nullptr),
-	masklength(0), mask(nullptr)
+	masklength(0), mask(nullptr), deallocate(nullptr), allocatorUserData(nullptr)
 {
 }
 
 picture::picture(int w, int h, int d, bool greymask)
 	: width(0), height(0), depth(0), greyscalemask(false),
 	rowlength(0), maskrowlength(0), bitmaplength(0), bitmap(nullptr),
-	masklength(0), mask(nullptr)
+	masklength(0), mask(nullptr), deallocate(nullptr), allocatorUserData(nullptr)
 {
 	reinit( w, h, d, greymask );
 }
 
 picture::~picture(void)
 {
-	delete [] bitmap;
-	delete [] mask;
+	release_buffers();
+}
+
+void picture::release_buffers(void)
+{
+	if(bitmap)
+		stackimport_internal_deallocate(bitmap, deallocate, allocatorUserData);
+	if(mask)
+		stackimport_internal_deallocate(mask, deallocate, allocatorUserData);
+	bitmap = nullptr;
+	mask = nullptr;
+	bitmaplength = 0;
+	masklength = 0;
+	deallocate = nullptr;
+	allocatorUserData = nullptr;
+}
+
+bool picture::allocate_buffers(int bitmapBytes, int maskBytes)
+{
+	release_buffers();
+	const auto& platform = stackimport_current_internal_platform();
+	if(bitmapBytes > 0)
+		bitmap = static_cast<char*>(stackimport_internal_allocate(static_cast<size_t>(bitmapBytes), alignof(char)));
+	if(maskBytes > 0)
+		mask = static_cast<char*>(stackimport_internal_allocate(static_cast<size_t>(maskBytes), alignof(char)));
+	if((bitmapBytes > 0 && !bitmap) || (maskBytes > 0 && !mask))
+	{
+		stackimport_internal_note_allocation_failure();
+		release_buffers();
+		return false;
+	}
+	deallocate = platform.deallocate;
+	allocatorUserData = platform.user_data;
+	bitmaplength = bitmapBytes;
+	masklength = maskBytes;
+	return true;
 }
 
 void picture::reinit(int w, int h, int d, bool greymask)
 {
-	delete [] bitmap;
-	delete [] mask;
-	bitmap = nullptr;
-	mask = nullptr;
+	release_buffers();
 	width = w;
 	height = h;
 	depth = d;
@@ -218,8 +249,12 @@ void picture::reinit(int w, int h, int d, bool greymask)
 		rowlength = maskrowlength = bitmaplength = masklength = 0;
 		return;
 	}
-	bitmap = new char[static_cast<size_t>(bitmaplength)];
-	mask = new char[static_cast<size_t>(masklength)];
+	if(!allocate_buffers(bitmaplength, masklength))
+	{
+		width = height = depth = 0;
+		rowlength = maskrowlength = bitmaplength = masklength = 0;
+		return;
+	}
 	memset(bitmap, 0, static_cast<size_t>(bitmaplength));
 	memset(mask, 0xFF, static_cast<size_t>(masklength));
 }
@@ -578,7 +613,6 @@ void picture::__directcopybmptomask(void)
 void picture::bwrite(fstream fp)
 {
 	int stuff[8];
-	char * buf;
 	stuff[0] = 0x12AAB175;
 	stuff[1] = 0;
 	stuff[2] = width;
@@ -588,12 +622,18 @@ void picture::bwrite(fstream fp)
 	stuff[6] = bitmaplength;
 	stuff[7] = masklength;
 	const int totalLength = 32 + bitmaplength + masklength;
-	buf = new char[static_cast<size_t>(totalLength)];
+	auto* buf = static_cast<char*>(stackimport_internal_allocate(static_cast<size_t>(totalLength), alignof(char)));
+	if(!buf)
+	{
+		stackimport_internal_note_allocation_failure();
+		return;
+	}
 	memcpy(buf, reinterpret_cast<const char *>(stuff), 32);
 	memcpy(buf+32, bitmap, static_cast<size_t>(bitmaplength));
 	memcpy(buf+32+bitmaplength, mask, static_cast<size_t>(masklength));
 	fp.write(buf, stream_size_from_nonnegative_int(totalLength));
-	delete [] buf;
+	const auto& platform = stackimport_current_internal_platform();
+	stackimport_internal_deallocate(buf, platform.deallocate, platform.user_data);
 	/* fp.write(reinterpret_cast<char *>(stuff), 32); */
 	/* fp.write(bitmap, bitmaplength); */
 	/* fp.write(mask, masklength); */
@@ -604,16 +644,14 @@ void picture::bread(fstream fp)
 	int stuff[8];
 	fp.read(reinterpret_cast<char *>(stuff), 32);
 	if (stuff[0] == 0x12AAB175) {
-		if (bitmaplength) { delete [] bitmap; }
-		if (masklength) { delete [] mask; }
+		const int newBitmapLength = stuff[6];
+		const int newMaskLength = stuff[7];
+		if(newBitmapLength <= 0 || newMaskLength <= 0 || !allocate_buffers(newBitmapLength, newMaskLength))
+			return;
 		width = stuff[2];
 		height = stuff[3];
 		depth = stuff[4];
 		greyscalemask = (stuff[5] == 8);
-		bitmaplength = stuff[6];
-		masklength = stuff[7];
-		bitmap = new char[static_cast<size_t>(bitmaplength)];
-		mask = new char[static_cast<size_t>(masklength)];
 		fp.read(bitmap, stream_size_from_nonnegative_int(bitmaplength));
 		fp.read(mask, stream_size_from_nonnegative_int(masklength));
 		
@@ -626,7 +664,6 @@ void picture::writefile(char * fn)
 {
 	fstream fp(fn, ios::out|ios::binary|ios::app);
 	int stuff[8];
-	char * buf;
 	stuff[0] = 0x12AAB175;
 	stuff[1] = 0;
 	stuff[2] = width;
@@ -636,12 +673,19 @@ void picture::writefile(char * fn)
 	stuff[6] = bitmaplength;
 	stuff[7] = masklength;
 	const int totalLength = 32 + bitmaplength + masklength;
-	buf = new char[static_cast<size_t>(totalLength)];
+	auto* buf = static_cast<char*>(stackimport_internal_allocate(static_cast<size_t>(totalLength), alignof(char)));
+	if(!buf)
+	{
+		stackimport_internal_note_allocation_failure();
+		fp.close();
+		return;
+	}
 	memcpy(buf, reinterpret_cast<const char *>(stuff), 32);
 	memcpy(buf+32, bitmap, static_cast<size_t>(bitmaplength));
 	memcpy(buf+32+bitmaplength, mask, static_cast<size_t>(masklength));
 	fp.write(buf, stream_size_from_nonnegative_int(totalLength));
-	delete [] buf;
+	const auto& platform = stackimport_current_internal_platform();
+	stackimport_internal_deallocate(buf, platform.deallocate, platform.user_data);
 	/* fp.write(reinterpret_cast<char *>(stuff), 32); */
 	/* fp.write(bitmap, bitmaplength); */
 	/* fp.write(mask, masklength); */
@@ -682,16 +726,14 @@ void picture::readfile(char * fn)
 	int stuff[8];
 	fp.read(reinterpret_cast<char *>(stuff), 32);
 	if (stuff[0] == 0x12AAB175) {
-		if (bitmaplength) { delete [] bitmap; }
-		if (masklength) { delete [] mask; }
+		const int newBitmapLength = stuff[6];
+		const int newMaskLength = stuff[7];
+		if(newBitmapLength <= 0 || newMaskLength <= 0 || !allocate_buffers(newBitmapLength, newMaskLength))
+			return;
 		width = stuff[2];
 		height = stuff[3];
 		depth = stuff[4];
 		greyscalemask = (stuff[5] == 8);
-		bitmaplength = stuff[6];
-		masklength = stuff[7];
-		bitmap = new char[static_cast<size_t>(bitmaplength)];
-		mask = new char[static_cast<size_t>(masklength)];
 		fp.read(bitmap, stream_size_from_nonnegative_int(bitmaplength));
 		fp.read(mask, stream_size_from_nonnegative_int(masklength));
 		
