@@ -15,6 +15,7 @@
 #include <memory>
 #include <span>
 #include <cstdio>
+#include <cstdarg>
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
@@ -115,12 +116,53 @@ bool write_json_file(const std::string& path, const char* data, size_t size)
 	return ok;
 }
 
+bool write_text_file(const std::string& path, const std::string& text)
+{
+	return write_json_file(path, text.data(), text.size());
+}
+
 bool write_json_document(const std::string& path, JsonDocument& document, StackImportRapidJsonAllocator& baseAllocator)
 {
 	JsonStringBuffer jsonBuffer(&baseAllocator);
 	JsonWriter writer(jsonBuffer, &baseAllocator);
 	document.Accept(writer);
 	return write_json_file(path, jsonBuffer.GetString(), jsonBuffer.GetSize());
+}
+
+void append_format(std::string& text, const char* format, ...)
+{
+	char buffer[1024];
+	va_list args;
+	va_start(args, format);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
+	const int written = vsnprintf(buffer, sizeof(buffer), format, args);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+	va_end(args);
+	if(written <= 0)
+		return;
+	if(static_cast<size_t>(written) < sizeof(buffer))
+	{
+		text.append(buffer, static_cast<size_t>(written));
+		return;
+	}
+
+	std::vector<char> dynamicBuffer(static_cast<size_t>(written) + 1u);
+	va_start(args, format);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
+	vsnprintf(dynamicBuffer.data(), dynamicBuffer.size(), format, args);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+	va_end(args);
+	text.append(dynamicBuffer.data(), static_cast<size_t>(written));
 }
 
 class PlatformStackReader final : public stackimport::IStackReader {
@@ -583,12 +625,9 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 		char vFileName[256] = { 0 };
 		snprintf( vFileName, sizeof(vFileName), "stylesheet_%d.css", blockID );
 		mStyleSheetName = vFileName;
-		FILE* vStylesheetFile = fopen( OutputPath(vFileName).c_str(), "w" );
-		if( vStylesheetFile )
-		{
-			fprintf( vStylesheetFile, "/* Missing or empty HyperCard style table %d. */\n", blockID );
-			fclose( vStylesheetFile );
-		}
+		std::string stylesheet;
+		append_format( stylesheet, "/* Missing or empty HyperCard style table %d. */\n", blockID );
+		write_text_file( OutputPath(vFileName), stylesheet );
 		if( mProgressMessages )
 			stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
 		return true;
@@ -604,8 +643,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 	mStyleSheetName = vFileName;
 	vLayerFilePath.append( 1, '/' );
 	vLayerFilePath.append( vFileName );
-	
-	FILE*		vStylesheetFile = fopen( vLayerFilePath.c_str(), "w" );
+	std::string stylesheet;
 	
 	currOffs += 2;
 	int16_t	nextStyleID = ReadBEInt16(blockData, currOffs);
@@ -618,7 +656,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 		CStyleEntry		style;
 		
 		style.mStyleID = ReadBEInt16(blockData, currOffs);
-		fprintf( vStylesheetFile, "\t\t.style%d\n\t\t{\n", style.mStyleID );
+		append_format( stylesheet, "\t\t.style%d\n\t\t{\n", style.mStyleID );
 		currOffs += 2;
 		currOffs += 8;
 		
@@ -626,7 +664,7 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 		if( style.mFontID != -1 )
 		{
 			style.mFontName = mFontTable[style.mFontID];
-			fprintf( vStylesheetFile, "\t\t\tfont-family: \"%s\";\n", style.mFontName.c_str() );
+			append_format( stylesheet, "\t\t\tfont-family: \"%s\";\n", style.mFontName.c_str() );
 		}
 		currOffs += 2;
 		
@@ -634,65 +672,66 @@ bool	CStackFile::LoadStyleTable( int32_t blockID, CBuf& blockData )
 		currOffs += 2;
 		
 		if( textStyleFlags == 0 )
-			fprintf( vStylesheetFile, "\t\t\tfont-style: normal;\n" );
+			append_format( stylesheet, "\t\t\tfont-style: normal;\n" );
 		else if( textStyleFlags != -1 )	// -1 means use field style.
 		{
 			if( textStyleFlags & (1 << 15) )
 			{
-				fprintf( vStylesheetFile, "\t\t\t/* group text style */\n" );
+				append_format( stylesheet, "\t\t\t/* group text style */\n" );
 				style.mGroup = true;
 			}
 			if( textStyleFlags & (1 << 14) )
 			{
-				fprintf( vStylesheetFile, "\t\t\tletter-spacing: 0.1em;\n" );
+				append_format( stylesheet, "\t\t\tletter-spacing: 0.1em;\n" );
 				style.mExtend = true;
 			}
 			if( textStyleFlags & (1 << 13) )
 			{
-				fprintf( vStylesheetFile, "\t\t\tletter-spacing: -0.1em;\n" );
+				append_format( stylesheet, "\t\t\tletter-spacing: -0.1em;\n" );
 				style.mCondense = true;
 			}
 			if( textStyleFlags & (1 << 12) )
 			{
-				fprintf( vStylesheetFile, "\t\t\ttext-shadow: 1px 1px #000000;\n" );
+				append_format( stylesheet, "\t\t\ttext-shadow: 1px 1px #000000;\n" );
 				style.mShadow = true;
 			}
 			if( textStyleFlags & (1 << 11) )
 			{
-				fprintf( vStylesheetFile, "\t\t\tcolor: white; -webkit-text-stroke-width: 1pt; -webkit-text-stroke-color: #000;\n" );
+				append_format( stylesheet, "\t\t\tcolor: white; -webkit-text-stroke-width: 1pt; -webkit-text-stroke-color: #000;\n" );
 				style.mOutline = true;
 			}
 			if( textStyleFlags & (1 << 10) )
 			{
-				fprintf( vStylesheetFile, "\t\t\ttext-decoration: underline;\n" );
+				append_format( stylesheet, "\t\t\ttext-decoration: underline;\n" );
 				style.mUnderline = true;
 			}
 			if( textStyleFlags & (1 << 9) )
 			{
-				fprintf( vStylesheetFile, "\t\t\tfont-style: italic;\n" );
+				append_format( stylesheet, "\t\t\tfont-style: italic;\n" );
 				style.mItalic = true;
 			}
 			if( textStyleFlags & (1 << 8) )
 			{
-				fprintf( vStylesheetFile, "\t\t\tfont-weight: bold;\n" );
+				append_format( stylesheet, "\t\t\tfont-weight: bold;\n" );
 				style.mBold = true;
 			}
 		}
 		int16_t	fontSize = ReadBEInt16(blockData, currOffs);
 		if( fontSize != -1 )
 		{
-			fprintf( vStylesheetFile, "\t\t\tfont-size: %dpt;\n", fontSize );
+			append_format( stylesheet, "\t\t\tfont-size: %dpt;\n", fontSize );
 			style.mFontSize = fontSize;
 		}
 		currOffs += 2;
 		currOffs += 8;	// 2 bytes padding?
 		
-		fprintf( vStylesheetFile, "\t\t}\n" );
+		append_format( stylesheet, "\t\t}\n" );
 		
 		mStyles[style.mStyleID] = style;
 	}
 	
-	fclose( vStylesheetFile );
+	if( !write_text_file( vLayerFilePath, stylesheet ) )
+		stackimport_emit_diagnosticf( "Error: Couldn't create stylesheet '%s'.\n", vLayerFilePath.c_str() );
 	
 	if( mProgressMessages )
 		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -1961,16 +2000,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 				else
 				{
 					snprintf( fname, sizeof(fname), "BMAP_%u.raw", blockID );
-					
-					FILE*	rawFile = fopen( OutputPath(fname).c_str(), "w" );
-					if( rawFile )
-					{
-						if( blockData.size() != fwrite( blockData.buf(), 1, blockData.size(), rawFile ) )
-							stackimport_emit_diagnosticf( "Error: Writing un-decoded BMAP #%u.\n", blockID );
-						fclose( rawFile );
-					}
-					else
-						stackimport_emit_diagnosticf( "Error: Creating file for un-decoded BMAP #%u.\n", blockID );
+					blockData.tofile( OutputPath(fname) );
 				}
 				
 				if( mProgressMessages )
