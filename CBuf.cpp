@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <new>
+#include <climits>
 #include "CBuf.h"
 #include "byteutils.h"
 #include "stackimport_platform_internal.h"
@@ -17,10 +18,10 @@
 
 namespace {
 
-[[noreturn]] void fail_allocation()
+shared_buffer* failed_buffer()
 {
-	stackimport_internal_message(STACKIMPORT_MESSAGE_FATAL, "Fatal: out of memory while allocating buffer.");
-	std::abort();
+	static shared_buffer buffer = { nullptr, 0, INT_MAX, nullptr, nullptr };
+	return &buffer;
 }
 
 }
@@ -65,7 +66,11 @@ void	CBuf::alloc_buffer( size_t amount )
 {
 	mShared = static_cast<shared_buffer*>( stackimport_internal_allocate( sizeof(shared_buffer), alignof(shared_buffer) ) );
 	if( !mShared )
-		fail_allocation();
+	{
+		stackimport_internal_note_allocation_failure();
+		mShared = failed_buffer();
+		return;
+	}
 	*mShared = {};
 	const auto& platform = stackimport_current_internal_platform();
 	mShared->mDeallocate = platform.deallocate;
@@ -75,9 +80,10 @@ void	CBuf::alloc_buffer( size_t amount )
 		mShared->mBuffer = static_cast<char*>( stackimport_internal_allocate( amount, alignof(char) ) );
 		if( !mShared->mBuffer )
 		{
+			stackimport_internal_note_allocation_failure();
 			stackimport_internal_deallocate( mShared, mShared->mDeallocate, mShared->mAllocatorUserData );
-			mShared = nullptr;
-			fail_allocation();
+			mShared = failed_buffer();
+			return;
 		}
 	}
 	mShared->mSize = amount;
@@ -89,6 +95,11 @@ void	CBuf::release_buffer()
 {
 	if( !mShared )
 		return;
+	if( mShared->mDeallocate == nullptr )
+	{
+		mShared = nullptr;
+		return;
+	}
 	if( mShared->mRefCount > 1 )
 		mShared->mRefCount--;
 	else
@@ -127,7 +138,11 @@ void	CBuf::resize( size_t inSize )
 		{
 			mShared->mBuffer = static_cast<char*>( stackimport_internal_allocate( inSize, alignof(char) ) );
 			if( !mShared->mBuffer )
-				fail_allocation();
+			{
+				stackimport_internal_note_allocation_failure();
+				mShared->mSize = 0;
+				return;
+			}
 		}
 		mShared->mSize = inSize;
 	}

@@ -83,6 +83,7 @@ const stackimport_internal_platform kDefaultPlatform = {
 };
 
 thread_local const stackimport_internal_platform* current_platform = &kDefaultPlatform;
+thread_local bool allocation_failed = false;
 
 }
 
@@ -127,6 +128,21 @@ void stackimport_internal_deallocate(void* ptr, stackimport_deallocate_fn deallo
 {
 	if(ptr)
 		deallocate(ptr, user_data);
+}
+
+void stackimport_internal_note_allocation_failure()
+{
+	allocation_failed = true;
+}
+
+void stackimport_internal_reset_allocation_failure()
+{
+	allocation_failed = false;
+}
+
+bool stackimport_internal_had_allocation_failure()
+{
+	return allocation_failed;
 }
 
 stackimport_file_handle stackimport_internal_open_file(const char* path, const char* mode)

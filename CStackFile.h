@@ -290,6 +290,11 @@ public:
 
 			if (!isFree && !isTail && block.payload_bytes > 0) {
 				CBuf value(block.payload_bytes);
+				if (value.size() != block.payload_bytes) {
+					source_stream_status_ = "allocation_failed";
+					stopped_ = true;
+					return BlockResult::Failure;
+				}
 				size_t r = reader.read(reinterpret_cast<uint8_t*>(value.buf()),
 				                      block.payload_bytes);
 				if (r != block.payload_bytes) {

@@ -22,6 +22,9 @@ stackimport_internal_platform stackimport_internal_platform_from_api(const stack
 void stackimport_internal_message(uint32_t severity, const char* message);
 void* stackimport_internal_allocate(size_t size, size_t alignment);
 void stackimport_internal_deallocate(void* ptr, stackimport_deallocate_fn deallocate, void* user_data);
+void stackimport_internal_note_allocation_failure();
+void stackimport_internal_reset_allocation_failure();
+bool stackimport_internal_had_allocation_failure();
 stackimport_file_handle stackimport_internal_open_file(const char* path, const char* mode);
 size_t stackimport_internal_read_file(stackimport_file_handle file, void* data, size_t size);
 size_t stackimport_internal_write_file(stackimport_file_handle file, const void* data, size_t size);

@@ -68,7 +68,23 @@ struct CountingPlatformState {
 	int opens = 0;
 	int reads = 0;
 	int writes = 0;
+	size_t allocations = 0;
+	size_t fail_after_allocations = SIZE_MAX;
 };
+
+void* STACKIMPORT_CALL counting_allocate(size_t size, size_t alignment, void* user_data)
+{
+	auto* state = static_cast<CountingPlatformState*>(user_data);
+	state->allocations++;
+	if(state->allocations > state->fail_after_allocations)
+		return nullptr;
+	return test_allocate(size, alignment, nullptr);
+}
+
+void STACKIMPORT_CALL counting_deallocate(void* ptr, void*)
+{
+	test_deallocate(ptr, nullptr);
+}
 
 stackimport_file_handle STACKIMPORT_CALL counting_open_file(const char* path, const char* mode, void* user_data)
 {
@@ -434,4 +450,51 @@ void	RunTests()
 	assert(freeManifestJson.find("\"status\": \"terminal\"") != std::string::npos);
 	assert(freeManifestJson.find("\"offset\": 16") != std::string::npos);
 
+	const std::string platformStackPath = std::string("/tmp/stackimport-platform-read-") + std::to_string(std::rand()) + ".stk";
+	const std::string platformStackPackage = platformStackPath + ".xstk";
+	write_minimal_short_stak(platformStackPath);
+	CountingPlatformState platformState;
+	stackimport_platform platform = {};
+	stackimport_platform_init(&platform);
+	platform.open_file = counting_open_file;
+	platform.read_file = counting_read_file;
+	platform.write_file = counting_write_file;
+	platform.close_file = counting_close_file;
+	platform.make_directory = counting_make_directory;
+	platform.user_data = &platformState;
+	stackimport_context* platformContext = nullptr;
+	assert(stackimport_context_create_with_platform(&platform, &platformContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options platformOptions = {};
+	stackimport_import_options_init(&platformOptions);
+	platformOptions.input_path = platformStackPath.c_str();
+	platformOptions.output_package_path = platformStackPackage.c_str();
+	assert(stackimport_import(platformContext, &platformOptions) == STACKIMPORT_STATUS_OK);
+	stackimport_context_destroy(platformContext);
+	assert(platformState.opens > 0);
+	assert(platformState.reads > 0);
+	assert(platformState.writes > 0);
+
+	const std::string failingStackPackage = platformStackPath + ".allocation-failed.xstk";
+	CountingPlatformState failingPlatformState;
+	failingPlatformState.fail_after_allocations = 0;
+	stackimport_platform failingPlatform = {};
+	stackimport_platform_init(&failingPlatform);
+	failingPlatform.allocate = counting_allocate;
+	failingPlatform.deallocate = counting_deallocate;
+	failingPlatform.open_file = counting_open_file;
+	failingPlatform.read_file = counting_read_file;
+	failingPlatform.write_file = counting_write_file;
+	failingPlatform.close_file = counting_close_file;
+	failingPlatform.make_directory = counting_make_directory;
+	failingPlatform.user_data = &failingPlatformState;
+	alignas(std::max_align_t) unsigned char failingStorage[4096] = {};
+	stackimport_context* failingContext = nullptr;
+	assert(stackimport_context_init_with_platform(failingStorage, sizeof(failingStorage), &failingPlatform, &failingContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options failingOptions = {};
+	stackimport_import_options_init(&failingOptions);
+	failingOptions.input_path = platformStackPath.c_str();
+	failingOptions.output_package_path = failingStackPackage.c_str();
+	assert(stackimport_import(failingContext, &failingOptions) == STACKIMPORT_STATUS_ALLOCATION_FAILED);
+	stackimport_context_deinit(failingContext);
+	assert(failingPlatformState.allocations > 0);
 }

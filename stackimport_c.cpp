@@ -348,6 +348,7 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 		return STACKIMPORT_STATUS_UNSUPPORTED_OPTION;
 
 	stackimport_platform_scope scope(context->internal_platform);
+	stackimport_internal_reset_allocation_failure();
 	context->stack.~CStackFile();
 	new (&context->stack) CStackFile();
 	context->stack.SetDumpRawBlockData((options->flags & STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS) != 0);
@@ -362,6 +363,12 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 		context->stack.SetResourceOutput(&resourceOutput);
 
 	if(!context->stack.LoadFile(options->input_path, options->output_package_path))
+	{
+		if(stackimport_internal_had_allocation_failure())
+			return STACKIMPORT_STATUS_ALLOCATION_FAILED;
 		return STACKIMPORT_STATUS_IMPORT_FAILED;
+	}
+	if(stackimport_internal_had_allocation_failure())
+		return STACKIMPORT_STATUS_ALLOCATION_FAILED;
 	return STACKIMPORT_STATUS_OK;
 }
