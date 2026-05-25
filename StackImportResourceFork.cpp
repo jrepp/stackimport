@@ -3,9 +3,7 @@
 #include "StackImportSoundConverter.h"
 
 #include <cerrno>
-#include <fstream>
 #include <cstdio>
-#include <sys/stat.h>
 
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
@@ -94,11 +92,12 @@ bool write_json_file(const std::string& path, const char* data, size_t size)
 
 bool write_text_file(const std::string& path, const std::string& text)
 {
-	std::ofstream file(path.c_str(), std::ios::binary);
-	if(!file.is_open())
+	stackimport_file_handle file = stackimport_internal_open_file(path.c_str(), "wb");
+	if(!file)
 		return false;
-	file.write(text.data(), static_cast<std::streamsize>(text.size()));
-	return static_cast<bool>(file);
+	const bool ok = stackimport_internal_write_file(file, text.data(), text.size()) == text.size();
+	const int closeStatus = stackimport_internal_close_file(file);
+	return ok && closeStatus == 0;
 }
 
 bool write_binary_file(const std::string& path, rsrcd::Bytes data)
@@ -111,12 +110,26 @@ bool write_binary_file(const std::string& path, rsrcd::Bytes data)
 	return ok && closeStatus == 0;
 }
 
-uint64_t file_size_bytes(const std::string& path)
+bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 {
-	struct stat fileInfo = {};
-	if(stat(path.c_str(), &fileInfo) != 0 || fileInfo.st_size < 0)
-		return 0;
-	return static_cast<uint64_t>(fileInfo.st_size);
+	data.clear();
+	stackimport_file_handle file = stackimport_internal_open_file(path.c_str(), "rb");
+	if(!file)
+		return false;
+
+	uint8_t buffer[16384];
+	while(true)
+	{
+		const size_t count = stackimport_internal_read_file(file, buffer, sizeof(buffer));
+		if(count == 0)
+			break;
+		data.insert(data.end(), buffer, buffer + count);
+		if(count < sizeof(buffer))
+			break;
+	}
+
+	const int closeStatus = stackimport_internal_close_file(file);
+	return closeStatus == 0;
 }
 
 static void swap_bgra_to_rgba(uint8_t* data, int pixel_count)
@@ -213,15 +226,12 @@ bool stackimport_load_resource_fork(
 	resourceForkBytes = 0;
 
 	const std::string resourceForkPath = fpath + "/..namedfork/rsrc";
-	std::ifstream resourceFile(resourceForkPath.c_str(), std::ios::binary);
-	if(!resourceFile.is_open())
+	std::vector<uint8_t> resourceForkData;
+	if(!read_binary_file(resourceForkPath, resourceForkData))
 	{
 		resourceForkStatus = "missing_or_empty";
 		return true;
 	}
-	std::string resourceForkData(
-		(std::istreambuf_iterator<char>(resourceFile)),
-		std::istreambuf_iterator<char>());
 	resourceForkBytes = static_cast<uint64_t>(resourceForkData.size());
 	if(resourceForkData.empty())
 	{
@@ -231,7 +241,7 @@ bool stackimport_load_resource_fork(
 
 	rsrcd::VecParserOutput<256> parsed;
 	auto parseResult = rsrcd::Parser{}.parse_fork(
-		rsrcd::Bytes{reinterpret_cast<const uint8_t*>(resourceForkData.data()), resourceForkData.size()},
+		rsrcd::Bytes{resourceForkData.data(), resourceForkData.size()},
 		parsed);
 	if(!parseResult || parsed.count() == 0)
 	{
@@ -531,7 +541,5 @@ bool stackimport_load_resource_fork(
 	}
 
 	resourceForkStatus = resourceForkHadInvalidResources ? "partial" : "ok";
-	if(resourceForkBytes == 0)
-		resourceForkBytes = file_size_bytes(resourceForkPath);
 	return true;
 }

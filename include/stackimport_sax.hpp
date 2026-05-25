@@ -465,8 +465,9 @@ public:
             }
 
             if (block_type == block_type::FREE) {
-                if (payload_bytes > 0) {
-                    if (!input.seek(file_offset + HEADER_SIZE + payload_bytes)) {
+                const size_t next_pos = file_offset + HEADER_SIZE + payload_bytes;
+                if (input.position() != next_pos) {
+                    if (!input.seek(next_pos)) {
                         output.on_error("seek failed on FREE block");
                         return BlockErr::ReadFailed;
                     }

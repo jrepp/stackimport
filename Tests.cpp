@@ -15,12 +15,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cerrno>
+#include <cstdio>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <span>
+#include <sys/stat.h>
 #if defined(_WIN32)
 #include <malloc.h>
+#include <direct.h>
 #endif
 
 namespace {
@@ -57,6 +61,49 @@ int STACKIMPORT_CALL test_resource_wants(const stackimport_resource_payload* pay
 int STACKIMPORT_CALL test_resource_payload(const stackimport_resource_payload* payload, const void* data, size_t size, void*)
 {
 	return payload && payload->payload_size == size && (size == 0 || data != nullptr);
+}
+
+
+struct CountingPlatformState {
+	int opens = 0;
+	int reads = 0;
+	int writes = 0;
+};
+
+stackimport_file_handle STACKIMPORT_CALL counting_open_file(const char* path, const char* mode, void* user_data)
+{
+	auto* state = static_cast<CountingPlatformState*>(user_data);
+	state->opens++;
+	return std::fopen(path, mode);
+}
+
+size_t STACKIMPORT_CALL counting_read_file(stackimport_file_handle file, void* data, size_t size, void* user_data)
+{
+	auto* state = static_cast<CountingPlatformState*>(user_data);
+	state->reads++;
+	return std::fread(data, 1, size, static_cast<FILE*>(file));
+}
+
+size_t STACKIMPORT_CALL counting_write_file(stackimport_file_handle file, const void* data, size_t size, void* user_data)
+{
+	auto* state = static_cast<CountingPlatformState*>(user_data);
+	state->writes++;
+	return std::fwrite(data, 1, size, static_cast<FILE*>(file));
+}
+
+int STACKIMPORT_CALL counting_close_file(stackimport_file_handle file, void*)
+{
+	return std::fclose(static_cast<FILE*>(file));
+}
+
+int STACKIMPORT_CALL counting_make_directory(const char* path, void*)
+{
+#if defined(_WIN32)
+	const int result = _mkdir(path);
+#else
+	const int result = mkdir(path, 0777);
+#endif
+	return result == 0 || errno == EEXIST ? 0 : result;
 }
 
 class TestResourceOutput final : public stackimport::IResourceOutput {

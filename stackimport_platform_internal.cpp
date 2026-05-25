@@ -46,6 +46,11 @@ stackimport_file_handle default_open_file(const char* path, const char* mode, vo
 	return fopen(path, mode);
 }
 
+size_t default_read_file(stackimport_file_handle file, void* data, size_t size, void*)
+{
+	return fread(data, 1, size, static_cast<FILE*>(file));
+}
+
 size_t default_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
 {
 	return fwrite(data, 1, size, static_cast<FILE*>(file));
@@ -70,6 +75,7 @@ const stackimport_internal_platform kDefaultPlatform = {
 	default_deallocate,
 	default_message,
 	default_open_file,
+	default_read_file,
 	default_write_file,
 	default_close_file,
 	default_make_directory,
@@ -99,6 +105,7 @@ stackimport_internal_platform stackimport_internal_platform_from_api(const stack
 		platform->deallocate,
 		platform->message ? platform->message : default_message,
 		platform->open_file,
+		platform->read_file,
 		platform->write_file,
 		platform->close_file,
 		platform->make_directory,
@@ -125,6 +132,11 @@ void stackimport_internal_deallocate(void* ptr, stackimport_deallocate_fn deallo
 stackimport_file_handle stackimport_internal_open_file(const char* path, const char* mode)
 {
 	return current_platform->open_file(path, mode, current_platform->user_data);
+}
+
+size_t stackimport_internal_read_file(stackimport_file_handle file, void* data, size_t size)
+{
+	return current_platform->read_file(file, data, size, current_platform->user_data);
 }
 
 size_t stackimport_internal_write_file(stackimport_file_handle file, const void* data, size_t size)

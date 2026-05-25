@@ -73,6 +73,11 @@ stackimport_file_handle STACKIMPORT_CALL libc_open_file(const char* path, const 
 	return fopen(path, mode);
 }
 
+size_t STACKIMPORT_CALL libc_read_file(stackimport_file_handle file, void* data, size_t size, void*)
+{
+	return fread(data, 1, size, static_cast<FILE*>(file));
+}
+
 size_t STACKIMPORT_CALL libc_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
 {
 	return fwrite(data, 1, size, static_cast<FILE*>(file));
@@ -99,6 +104,7 @@ bool valid_platform(const stackimport_platform* platform)
 		platform->allocate &&
 		platform->deallocate &&
 		platform->open_file &&
+		platform->read_file &&
 		platform->write_file &&
 		platform->close_file &&
 		platform->make_directory;
@@ -228,6 +234,7 @@ STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_plat
 	platform->deallocate = libc_deallocate;
 	platform->message = libc_message;
 	platform->open_file = libc_open_file;
+	platform->read_file = libc_read_file;
 	platform->write_file = libc_write_file;
 	platform->close_file = libc_close_file;
 	platform->make_directory = libc_make_directory;

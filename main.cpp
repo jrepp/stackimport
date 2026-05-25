@@ -62,6 +62,11 @@ stackimport_file_handle cli_open_file(const char* path, const char* mode, void*)
 	return fopen(path, mode);
 }
 
+size_t cli_read_file(stackimport_file_handle file, void* data, size_t size, void*)
+{
+	return fread(data, 1, size, static_cast<FILE*>(file));
+}
+
 size_t cli_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
 {
 	return fwrite(data, 1, size, static_cast<FILE*>(file));
@@ -273,6 +278,7 @@ int main( int argc, char * const argv[] )
 	platform.deallocate = cli_deallocate;
 	platform.message = cli_message;
 	platform.open_file = cli_open_file;
+	platform.read_file = cli_read_file;
 	platform.write_file = cli_write_file;
 	platform.close_file = cli_close_file;
 	platform.make_directory = cli_make_directory;

@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define STACKIMPORT_API_VERSION 5u
+#define STACKIMPORT_API_VERSION 6u
 
 typedef struct stackimport_context stackimport_context;
 
@@ -55,6 +55,7 @@ typedef void (STACKIMPORT_CALL *stackimport_message_fn)(uint32_t severity, const
 
 typedef void* stackimport_file_handle;
 typedef stackimport_file_handle (STACKIMPORT_CALL *stackimport_open_file_fn)(const char* path, const char* mode, void* user_data);
+typedef size_t (STACKIMPORT_CALL *stackimport_read_file_fn)(stackimport_file_handle file, void* data, size_t size, void* user_data);
 typedef size_t (STACKIMPORT_CALL *stackimport_write_file_fn)(stackimport_file_handle file, const void* data, size_t size, void* user_data);
 typedef int (STACKIMPORT_CALL *stackimport_close_file_fn)(stackimport_file_handle file, void* user_data);
 typedef int (STACKIMPORT_CALL *stackimport_make_directory_fn)(const char* path, void* user_data);
@@ -123,6 +124,7 @@ typedef struct stackimport_platform {
 	stackimport_deallocate_fn deallocate;
 	stackimport_message_fn message;
 	stackimport_open_file_fn open_file;
+	stackimport_read_file_fn read_file;
 	stackimport_write_file_fn write_file;
 	stackimport_close_file_fn close_file;
 	stackimport_make_directory_fn make_directory;

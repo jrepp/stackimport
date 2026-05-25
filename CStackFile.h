@@ -273,6 +273,21 @@ public:
 			const bool isFree = block.type == stackimport::block_type::FREE;
 			const bool isTail = block.type == stackimport::block_type::TAIL && block.id.get() == -1;
 
+			if (isFree && block.payload_bytes > 0) {
+				uint8_t discard[4096];
+				uint32_t remaining = block.payload_bytes;
+				while (remaining > 0) {
+					const size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
+					const size_t r = reader.read(discard, chunk);
+					if (r != chunk) {
+						source_stream_status_ = "truncated_payload";
+						stopped_ = true;
+						return BlockResult::Failure;
+					}
+					remaining -= static_cast<uint32_t>(r);
+				}
+			}
+
 			if (!isFree && !isTail && block.payload_bytes > 0) {
 				CBuf value(block.payload_bytes);
 				size_t r = reader.read(reinterpret_cast<uint8_t*>(value.buf()),

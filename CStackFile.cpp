@@ -14,7 +14,6 @@
 #include <fstream>
 #include <memory>
 #include <span>
-#include <sys/stat.h>
 #include <cstdio>
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -123,6 +122,47 @@ bool write_json_document(const std::string& path, JsonDocument& document, StackI
 	document.Accept(writer);
 	return write_json_file(path, jsonBuffer.GetString(), jsonBuffer.GetSize());
 }
+
+class PlatformStackReader final : public stackimport::IStackReader {
+public:
+	PlatformStackReader() : file_(nullptr), pos_(0) {}
+	~PlatformStackReader() override { close(); }
+
+	bool open(const char* path)
+	{
+		file_ = stackimport_internal_open_file(path, "rb");
+		pos_ = 0;
+		return file_ != nullptr;
+	}
+
+	void close()
+	{
+		if(file_)
+		{
+			stackimport_internal_close_file(file_);
+			file_ = nullptr;
+		}
+		pos_ = 0;
+	}
+
+	auto read(uint8_t* dst, size_t len) -> size_t override
+	{
+		if(!file_)
+			return 0;
+		const size_t count = stackimport_internal_read_file(file_, dst, len);
+		pos_ += count;
+		return count;
+	}
+
+	auto seek(size_t) -> bool override { return false; }
+	auto position() const -> size_t override { return pos_; }
+	auto size() const -> size_t override { return 0; }
+	auto bytes_read() const -> uint64_t { return static_cast<uint64_t>(pos_); }
+
+private:
+	stackimport_file_handle file_;
+	size_t pos_;
+};
 
 JsonValue json_output_ref(
 	const char* kind,
@@ -239,15 +279,6 @@ uint32_t	ReadBEUInt32Bytes( const char bytes[4] )
 		| static_cast<uint32_t>(unsignedBytes[2]) << 8
 		| static_cast<uint32_t>(unsignedBytes[3]));
 }
-
-uint64_t	FileSizeBytes( const std::string& path )
-{
-	struct stat fileInfo = {};
-	if( stat( path.c_str(), &fileInfo ) != 0 || fileInfo.st_size < 0 )
-		return 0;
-	return static_cast<uint64_t>(fileInfo.st_size);
-}
-
 
 void	NumVersionToStr( const unsigned char numVersion[4], char outStr[16] )
 {
@@ -1764,7 +1795,6 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	else
 		slashPos += 1;
 	mFileName = fpath.substr(slashPos, std::string::npos);
-	const uint64_t dataForkBytes = FileSizeBytes(fpath);
 
 	std::string				packagePath( outputPackagePath );
 	if( stackimport_internal_make_directory( packagePath.c_str() ) != 0 && errno != EEXIST )
@@ -1802,7 +1832,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	std::string	sourceStreamStatus("ok");
 
 	// Use streaming BlockParser instead of manual block reading loop
-	stackimport::FileStackReader fileReader;
+	PlatformStackReader fileReader;
 	if (!fileReader.open(fpath.c_str())) {
 		stackimport_emit_diagnosticf("Error: Couldn't open file '%s'\n", fpath.c_str());
 		return false;
@@ -1818,6 +1848,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	}
 
 	int numBlocks = blockOutput.num_blocks();
+	const uint64_t dataForkBytes = fileReader.bytes_read();
 	bool success = true;
 	
 	if( mStatusMessages )
