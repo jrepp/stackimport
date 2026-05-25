@@ -406,7 +406,7 @@ CStackFile::CStackFile()
 	: mDumpRawBlockData(false), mStatusMessages(true), mProgressMessages(true), mDecodeGraphics(true),
 	mResourceOutput(nullptr),
 	mListBlockID(-1), mFontTableBlockID(-1), mStyleTableBlockID(-1), mStackID(-1),
-	mStackCardCount(0), mFirstCardID(0), mUserLevel(0), mCardWidth(512), mCardHeight(342),
+	mStackCardCount(0), mFirstCardID(0), mStackPatternCount(0), mUserLevel(0), mCardWidth(512), mCardHeight(342),
 	mStackCantModify(false), mStackCantDelete(false), mStackPrivateAccess(false),
 	mStackCantAbort(false), mStackCantPeek(false), mCardBlockSize(-1),
 	mResourceForkStatus("not_checked"), mResourceForkBytes(0),
@@ -446,6 +446,7 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 	{
 		JsonValue item(rapidjson::kObjectType);
 		item.AddMember("type", json_string(block.type, allocator), allocator);
+		item.AddMember("typeCode", block.typeCode, allocator);
 		item.AddMember("id", block.id, allocator);
 		item.AddMember("offset", JsonValue().SetUint64(block.offset), allocator);
 		item.AddMember("size", block.size, allocator);
@@ -475,6 +476,7 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 		stakReferences.AddMember("styleTableBlockId", mStyleTableBlockID, allocator);
 		stakReferences.AddMember("cardHeight", mCardHeight, allocator);
 		stakReferences.AddMember("cardWidth", mCardWidth, allocator);
+		stakReferences.AddMember("patternCount", mStackPatternCount, allocator);
 	}
 	dataFork.AddMember("stakReferences", stakReferences, allocator);
 
@@ -516,6 +518,7 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 	{
 		JsonValue item(rapidjson::kObjectType);
 		item.AddMember("type", json_string(resource.type, allocator), allocator);
+		item.AddMember("typeCode", resource.typeCode, allocator);
 		item.AddMember("id", resource.id, allocator);
 		item.AddMember("flags", resource.flags, allocator);
 		item.AddMember("name", json_string(resource.name, allocator), allocator);
@@ -562,52 +565,84 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	}
 	
 	mStackID = stackID;
-	mStackCardCount = ReadBEInt32(blockData, 32);
-	mFirstCardID = ReadBEInt32(blockData, 36);
-	mListBlockID = ReadBEInt32(blockData, 40);
-	mUserLevel = ReadBEInt16(blockData, 60);
-	int16_t	flags = ReadBEInt16(blockData, 64);
-	mStackCantModify = (flags & (1 << 15)) != 0;
-	mStackCantDelete = (flags & (1 << 14)) != 0;
-	mStackPrivateAccess = (flags & (1 << 13)) != 0;
-	mStackCantAbort = (flags & (1 << 11)) != 0;
-	mStackCantPeek = (flags & (1 << 10)) != 0;
+	if( !blockData.hasdata( 0, 68 ) )
+		stackimport_emit_diagnosticf( "Warning: 'STAK' #%d is too short for the fixed header (%lu bytes); missing fields will keep defaults.\n", stackID, blockData.size() );
+	if( blockData.hasdata( 32, sizeof(int32_t) ) )
+		mStackCardCount = ReadBEInt32(blockData, 32);
+	if( blockData.hasdata( 36, sizeof(int32_t) ) )
+		mFirstCardID = ReadBEInt32(blockData, 36);
+	if( blockData.hasdata( 40, sizeof(int32_t) ) )
+		mListBlockID = ReadBEInt32(blockData, 40);
+	if( blockData.hasdata( 60, sizeof(int16_t) ) )
+		mUserLevel = ReadBEInt16(blockData, 60);
+	if( blockData.hasdata( 64, sizeof(int16_t) ) )
+	{
+		int16_t	flags = ReadBEInt16(blockData, 64);
+		mStackCantModify = (flags & (1 << 15)) != 0;
+		mStackCantDelete = (flags & (1 << 14)) != 0;
+		mStackPrivateAccess = (flags & (1 << 13)) != 0;
+		mStackCantAbort = (flags & (1 << 11)) != 0;
+		mStackCantPeek = (flags & (1 << 10)) != 0;
+	}
 	char		versStr[16] = { 0 };
-	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 84, 4 )), versStr );
-	mCreatedByVersion = "HyperCard ";
-	mCreatedByVersion += versStr;
-	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 88, 4 )), versStr );
-	mLastCompactedVersion = "HyperCard ";
-	mLastCompactedVersion += versStr;
-	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 92, 4 )), versStr );
-	mLastEditedVersion = "HyperCard ";
-	mLastEditedVersion += versStr;
-	NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 96, 4 )), versStr );
-	mFirstEditedVersion = "HyperCard ";
-	mFirstEditedVersion += versStr;
-	mFontTableBlockID = ReadBEInt32(blockData, 420);
-	mStyleTableBlockID = ReadBEInt32(blockData, 424);
-	mCardHeight = ReadBEInt16(blockData, 428);
+	if( blockData.hasdata( 84, 4 ) )
+	{
+		NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 84, 4 )), versStr );
+		mCreatedByVersion = "HyperCard ";
+		mCreatedByVersion += versStr;
+	}
+	if( blockData.hasdata( 88, 4 ) )
+	{
+		NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 88, 4 )), versStr );
+		mLastCompactedVersion = "HyperCard ";
+		mLastCompactedVersion += versStr;
+	}
+	if( blockData.hasdata( 92, 4 ) )
+	{
+		NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 92, 4 )), versStr );
+		mLastEditedVersion = "HyperCard ";
+		mLastEditedVersion += versStr;
+	}
+	if( blockData.hasdata( 96, 4 ) )
+	{
+		NumVersionToStr( reinterpret_cast<const unsigned char*>(blockData.buf( 96, 4 )), versStr );
+		mFirstEditedVersion = "HyperCard ";
+		mFirstEditedVersion += versStr;
+	}
+	if( blockData.hasdata( 420, sizeof(int32_t) ) )
+		mFontTableBlockID = ReadBEInt32(blockData, 420);
+	if( blockData.hasdata( 424, sizeof(int32_t) ) )
+		mStyleTableBlockID = ReadBEInt32(blockData, 424);
+	if( blockData.hasdata( 428, sizeof(int16_t) ) )
+		mCardHeight = ReadBEInt16(blockData, 428);
 	if( mCardHeight == 0 )
 		mCardHeight = 342;
-	mCardWidth = ReadBEInt16(blockData, 430);
+	if( blockData.hasdata( 430, sizeof(int16_t) ) )
+		mCardWidth = ReadBEInt16(blockData, 430);
 	if( mCardWidth == 0 )
 		mCardWidth = 512;
 
 	char			pattern[8] = { 0 };
 	size_t			offs = 692;
-	for( int n = 0; n < 40; n++ )
+	if( blockData.hasdata( offs, 40 * 8 ) )
 	{
-		memmove( pattern, blockData.buf( offs, 8 ), 8 );
-		char		fname[256] = { 0 };
-		snprintf( fname, sizeof(fname), "PAT_%u.pbm", static_cast<unsigned>(n +1) );
-		picture		thePicture( 8, 8, 1, false );
-		thePicture.memcopyin( pattern, 0, 8 );
-		thePicture.writebitmaptopbm( OutputPath(fname).c_str() );
-		offs += 8;
+		for( int n = 0; n < 40; n++ )
+		{
+			memmove( pattern, blockData.buf( offs, 8 ), 8 );
+			char		fname[256] = { 0 };
+			snprintf( fname, sizeof(fname), "PAT_%u.pbm", static_cast<unsigned>(n +1) );
+			picture		thePicture( 8, 8, 1, false );
+			thePicture.memcopyin( pattern, 0, 8 );
+			thePicture.writebitmaptopbm( OutputPath(fname).c_str() );
+			offs += 8;
+		}
+		mStackPatternCount = 40;
 	}
+	else
+		stackimport_emit_diagnosticf( "Warning: 'STAK' #%d has no complete pattern table; pattern files were not exported.\n", stackID );
 	
-	mStackScript = mac_roman_string( blockData, 1524 );
+	if( blockData.hasdata( 1524, 1 ) )
+		mStackScript = mac_roman_string( blockData, 1524 );
 	
 	if( mProgressMessages )
 		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -1686,6 +1721,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		const rsrcd::ResRef& res = parsed.at(i);
 
 		CResourceSummary summary;
+		summary.typeCode = 0;
 		summary.id = res.id;
 		summary.flags = res.flags;
 		summary.bytes = res.data.size;
@@ -1700,6 +1736,7 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 			continue;
 		}
 		summary.type.assign(reinterpret_cast<const char*>(res.type.data), 4);
+		summary.typeCode = rsrcd::read_u32be(res.type.data);
 		if (!res.name.empty() && res.name.data != nullptr)
 			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
 
@@ -1981,9 +2018,10 @@ bool	CStackFile::WriteJsonIndexes() const
 	project.AddMember("lastCompactedVersion", json_string(mLastCompactedVersion, projectAllocator), projectAllocator);
 	project.AddMember("lastEditedVersion", json_string(mLastEditedVersion, projectAllocator), projectAllocator);
 	project.AddMember("firstEditedVersion", json_string(mFirstEditedVersion, projectAllocator), projectAllocator);
+	project.AddMember("patternCount", mStackPatternCount, projectAllocator);
 
 	JsonValue outputs(rapidjson::kArrayType);
-	for(int n = 0; n < 40; n++)
+	for(int n = 0; n < mStackPatternCount; n++)
 	{
 		char patternFile[256] = { 0 };
 		snprintf(patternFile, sizeof(patternFile), "PAT_%d.pbm", n + 1);
@@ -1995,6 +2033,7 @@ bool	CStackFile::WriteJsonIndexes() const
 	{
 		JsonValue blockObject(rapidjson::kObjectType);
 		blockObject.AddMember("type", json_string(block.first.mType, projectAllocator), projectAllocator);
+		blockObject.AddMember("typeCode", ReadBEUInt32Bytes(block.first.mType), projectAllocator);
 		blockObject.AddMember("id", block.first.mID, projectAllocator);
 		blockObject.AddMember("size", static_cast<uint64_t>(block.second.size()), projectAllocator);
 		blockObject.AddMember("understood", block.first == CStackBlockIdentifier("BKGD")
@@ -2097,6 +2136,7 @@ bool	CStackFile::WriteJsonIndexes() const
 	stack.AddMember("cardCount", mStackCardCount, stackAllocator);
 	stack.AddMember("cardWidth", mCardWidth, stackAllocator);
 	stack.AddMember("cardHeight", mCardHeight, stackAllocator);
+	stack.AddMember("patternCount", mStackPatternCount, stackAllocator);
 	stack.AddMember("cantModify", mStackCantModify, stackAllocator);
 	stack.AddMember("cantDelete", mStackCantDelete, stackAllocator);
 	stack.AddMember("cantAbort", mStackCantAbort, stackAllocator);

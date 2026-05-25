@@ -15,6 +15,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
 #include <span>
 #if defined(_WIN32)
 #include <malloc.h>
@@ -22,7 +25,7 @@
 
 namespace {
 
-void* test_allocate(size_t size, size_t alignment, void*)
+void* STACKIMPORT_CALL test_allocate(size_t size, size_t alignment, void*)
 {
 	void* ptr = nullptr;
 #if defined(_WIN32)
@@ -37,7 +40,7 @@ void* test_allocate(size_t size, size_t alignment, void*)
 #endif
 }
 
-void test_deallocate(void* ptr, void*)
+void STACKIMPORT_CALL test_deallocate(void* ptr, void*)
 {
 #if defined(_WIN32)
 	_aligned_free(ptr);
@@ -46,12 +49,12 @@ void test_deallocate(void* ptr, void*)
 #endif
 }
 
-int test_resource_wants(const stackimport_resource_payload* payload, void*)
+int STACKIMPORT_CALL test_resource_wants(const stackimport_resource_payload* payload, void*)
 {
 	return payload && payload->format == STACKIMPORT_RESOURCE_PAYLOAD_NATIVE;
 }
 
-int test_resource_payload(const stackimport_resource_payload* payload, const void* data, size_t size, void*)
+int STACKIMPORT_CALL test_resource_payload(const stackimport_resource_payload* payload, const void* data, size_t size, void*)
 {
 	return payload && payload->payload_size == size && (size == 0 || data != nullptr);
 }
@@ -109,6 +112,29 @@ void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t
 	rsrcd::write_u32be(fork + 4, map_off);
 	rsrcd::write_u32be(fork + 8, data_len);
 	rsrcd::write_u32be(fork + 12, map_len);
+}
+
+void write_minimal_short_stak(const std::string& path)
+{
+	std::vector<uint8_t> data(12 + 68 + 12);
+	rsrcd::write_u32be(data.data(), 12 + 68);
+	std::memcpy(data.data() + 4, "STAK", 4);
+	rsrcd::write_u32be(data.data() + 8, 0xFFFFFFFFu);
+	const size_t tail_offset = 12 + 68;
+	rsrcd::write_u32be(data.data() + tail_offset, 12);
+	std::memcpy(data.data() + tail_offset + 4, "TAIL", 4);
+	rsrcd::write_u32be(data.data() + tail_offset + 8, 0xFFFFFFFFu);
+
+	std::ofstream file(path.c_str(), std::ios::binary);
+	file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+	assert(file);
+}
+
+std::string read_text_file(const std::string& path)
+{
+	std::ifstream file(path.c_str(), std::ios::binary);
+	assert(file.is_open());
+	return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
 }
@@ -240,4 +266,19 @@ void	RunTests()
 	assert(!badStart.ok);
 	const auto badSize = stackimport::DisassembleMac68kCodeResource(code, 4, 2, 0);
 	assert(!badSize.ok);
+
+	const std::string shortStackPath = std::string("/tmp/stackimport-short-stak-") + std::to_string(std::rand()) + ".stk";
+	const std::string shortStackPackage = shortStackPath + ".xstk";
+	write_minimal_short_stak(shortStackPath);
+	CStackFile shortStack;
+	shortStack.SetStatusMessages(false);
+	shortStack.SetProgressMessages(false);
+	assert(shortStack.LoadFile(shortStackPath, shortStackPackage));
+	const std::string projectJson = read_text_file(shortStackPackage + "/project.json");
+	const std::string stackJson = read_text_file(shortStackPackage + "/stack_-1.json");
+	const std::string manifestJson = read_text_file(shortStackPackage + "/source-manifest.json");
+	assert(projectJson.find("\"kind\": \"pattern\"") == std::string::npos);
+	assert(projectJson.find("\"patternCount\": 0") != std::string::npos);
+	assert(stackJson.find("\"patternCount\": 0") != std::string::npos);
+	assert(manifestJson.find("\"typeCode\":") != std::string::npos);
 }

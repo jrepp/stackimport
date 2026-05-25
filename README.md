@@ -6,6 +6,20 @@ a more easily readable representation of its contents. Based on Tyler Vano's and
 http://creysoft.com/xtalk/
 
 
+Install With Homebrew
+---------------------
+
+Stable releases are available from the `jrepp/stackimport` Homebrew tap:
+
+    brew tap jrepp/stackimport
+    brew install stackimport
+
+The formula installs the `stackimport` CLI, the public C header, the shared C ABI
+library, the static archive, and `pkg-config` metadata for embedders:
+
+    pkg-config --cflags --libs stackimport
+
+
 How to build this
 -----------------
 
@@ -145,6 +159,12 @@ shared C ABI library (`stackimport_c`) when embedding from C, Swift, Python,
 Ruby, or another host that should not inherit C++ link/runtime details from the
 static archive.
 
+Stable releases update the `jrepp/homebrew-stackimport` tap automatically. After
+a release completes, install with:
+
+    brew tap jrepp/stackimport
+    brew install stackimport
+
 Minimal tap formula shape:
 
 ```ruby
@@ -232,7 +252,8 @@ threading policy.
 License
 -------
 
-    Copyright (c) 2005,2006 and 2010 Rebecca Bettencourt, Uli Kusterer (Mr. Z)
+    Copyright (c) 2005-2026 Rebecca Bettencourt, Uli Kusterer (Mr. Z),
+    Jacob Repp, and contributors
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal

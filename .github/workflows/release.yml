@@ -159,3 +159,61 @@ jobs:
             release_args+=(--prerelease)
           fi
           gh release create "${release_args[@]}"
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs:
+      - validate
+      - publish
+    if: needs.validate.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Render formula
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          curl -fsSL "${source_url}" -o source.tar.gz
+          source_sha="$(python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          print(hashlib.sha256(Path('source.tar.gz').read_bytes()).hexdigest())
+          PY
+          )"
+          python3 scripts/render_homebrew_formula.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${RELEASE_VERSION}" \
+            --sha256 "${source_sha}" \
+            --output generated/stackimport.rb
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: jrepp/homebrew-stackimport
+          path: homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
+      - name: Commit formula update
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p homebrew-tap/Formula
+          cp generated/stackimport.rb homebrew-tap/Formula/stackimport.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/stackimport.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew formula is already current."
+            exit 0
+          fi
+          git commit -m "Update stackimport to ${RELEASE_TAG}"
+          git push

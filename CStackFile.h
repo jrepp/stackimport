@@ -42,6 +42,7 @@ public:
 	bool		mIsWildcard;
 
 	CStackBlockIdentifier( const char* inType, int32_t inID ) : mID(inID), mIsWildcard(false) 	{ size_t len = strlen(inType); if(len > 4) len = 4; memmove( mType, inType, len ); mType[len] = 0; }
+	CStackBlockIdentifier( const uint8_t inType[4], int32_t inID ) : mID(inID), mIsWildcard(false) 	{ memmove( mType, inType, 4 ); mType[4] = 0; }
 	CStackBlockIdentifier( const char* inType ) : mID(0), mIsWildcard(true) 					{ size_t len = strlen(inType); if(len > 4) len = 4; memmove( mType, inType, len ); mType[len] = 0; }
 	virtual ~CStackBlockIdentifier()		= default;
 	
@@ -123,6 +124,7 @@ struct CPageSummary
 struct CSourceBlockSummary
 {
 	std::string	type;
+	uint32_t	typeCode;
 	int32_t		id;
 	uint64_t	offset;
 	uint32_t	size;
@@ -134,6 +136,7 @@ struct CSourceBlockSummary
 struct CResourceSummary
 {
 	std::string	type;
+	uint32_t	typeCode;
 	int32_t		id;
 	uint32_t	flags;
 	std::string	name;
@@ -216,6 +219,7 @@ protected:
 	int32_t			mStackID;
 	int32_t			mStackCardCount;
 	int32_t			mFirstCardID;
+	int32_t			mStackPatternCount;
 	int16_t			mUserLevel;
 	int16_t			mCardWidth;
 	int16_t			mCardHeight;
@@ -277,14 +281,14 @@ public:
 					return false;
 				}
 
-				CStackBlockIdentifier key(reinterpret_cast<const char*>(block.type.v),
-				                         block.id.get());
+				CStackBlockIdentifier key(block.type.v, block.id.get());
 				block_map_[key] = value;
 			}
 
 			CSourceBlockSummary summary;
 			summary.type.assign(4, '\0');
 			std::memcpy(summary.type.data(), block.type.v, 4);
+			summary.typeCode = block.type.to_uint32();
 			summary.id = block.id.get();
 			summary.offset = position_;
 			summary.size = block.size();

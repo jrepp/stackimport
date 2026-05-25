@@ -61,6 +61,27 @@ manually with a `version` input. It:
 3. Packages the CLI, test binary, static library, public header, `VERSION.txt`, and
    `README.md` into per-platform zip archives.
 4. Publishes a GitHub release and uploads those archives.
+5. For stable releases, updates the `jrepp/homebrew-stackimport` tap formula
+   after the GitHub release is published successfully.
 
 Prerelease SemVer values containing `-`, such as `0.2.0-beta.1`, are published
-as GitHub prereleases.
+as GitHub prereleases and do not update the Homebrew tap.
+
+## Homebrew Tap Automation
+
+The tap repository is `jrepp/homebrew-stackimport`. The release workflow renders
+`Formula/stackimport.rb` with `scripts/render_homebrew_formula.py`, using the
+release tag's GitHub source archive and its SHA-256 hash.
+
+Cross-repository writes use the `HOMEBREW_TAP_DEPLOY_KEY` Actions secret on
+`jrepp/stackimport`. The matching public deploy key must be installed on
+`jrepp/homebrew-stackimport` with write access. If the key is rotated, replace
+both the source-repository secret and the tap-repository deploy key before the
+next stable release.
+
+After a stable release completes, users can install with:
+
+```sh
+brew tap jrepp/stackimport
+brew install stackimport
+```
