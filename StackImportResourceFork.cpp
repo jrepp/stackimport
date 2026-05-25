@@ -110,6 +110,32 @@ bool write_binary_file(const std::string& path, rsrcd::Bytes data)
 	return ok && closeStatus == 0;
 }
 
+struct PlatformPngWriter {
+	stackimport_file_handle file;
+	bool ok;
+};
+
+void write_png_chunk(void* context, void* data, int size)
+{
+	auto* writer = static_cast<PlatformPngWriter*>(context);
+	if(!writer || !writer->ok || size < 0)
+		return;
+	const size_t bytes = static_cast<size_t>(size);
+	writer->ok = stackimport_internal_write_file(writer->file, data, bytes) == bytes;
+}
+
+bool write_png_file(const std::string& path, int width, int height, int components, const void* data, int strideBytes)
+{
+	stackimport_file_handle file = stackimport_internal_open_file(path.c_str(), "wb");
+	if(!file)
+		return false;
+
+	PlatformPngWriter writer{file, true};
+	const int encoded = stbi_write_png_to_func(write_png_chunk, &writer, width, height, components, data, strideBytes);
+	const int closeStatus = stackimport_internal_close_file(file);
+	return encoded != 0 && writer.ok && closeStatus == 0;
+}
+
 bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 {
 	data.clear();
@@ -321,7 +347,7 @@ bool stackimport_load_resource_fork(
 					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "ICON_%d.png", res.id);
-					if(stbi_write_png(output_path(basePath, fname).c_str(), 32, 32, 4, bgra, 32 * 4))
+					if(write_png_file(output_path(basePath, fname), 32, 32, 4, bgra, 32 * 4))
 					{
 						summary.status = "exported";
 						summary.outputFile = fname;
@@ -357,7 +383,7 @@ bool stackimport_load_resource_fork(
 					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "CURS_%d.png", res.id);
-					if(stbi_write_png(output_path(basePath, fname).c_str(), 16, 16, 4, bgra, 16 * 4))
+					if(write_png_file(output_path(basePath, fname), 16, 16, 4, bgra, 16 * 4))
 					{
 						summary.status = "exported";
 						summary.outputFile = fname;
@@ -395,7 +421,7 @@ bool stackimport_load_resource_fork(
 					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "PAT#_%d_%02zu.png", res.id, pi);
-					if(stbi_write_png(output_path(basePath, fname).c_str(), 8, 8, 4, bgra, 8 * 4))
+					if(write_png_file(output_path(basePath, fname), 8, 8, 4, bgra, 8 * 4))
 						exported++;
 				}
 			}
