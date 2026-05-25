@@ -262,23 +262,25 @@ public:
 			: block_map_(block_map)
 			, source_blocks_(source_blocks)
 			, source_stream_status_(source_stream_status)
-			, position_(0)
 			, num_blocks_(0)
 			, stopped_(false)
 		{}
 
 		auto on_block(const stackimport::BlockRef& block,
-		              stackimport::IStackReader& reader) -> bool override {
-			if (stopped_) return false;
+		              stackimport::IStackReader& reader) -> BlockResult override {
+			if (stopped_) return BlockResult::Stop;
 
-			if (block.payload_bytes > 0) {
+			const bool isFree = block.type == stackimport::block_type::FREE;
+			const bool isTail = block.type == stackimport::block_type::TAIL && block.id.get() == -1;
+
+			if (!isFree && !isTail && block.payload_bytes > 0) {
 				CBuf value(block.payload_bytes);
 				size_t r = reader.read(reinterpret_cast<uint8_t*>(value.buf()),
 				                      block.payload_bytes);
 				if (r != block.payload_bytes) {
 					source_stream_status_ = "truncated_payload";
 					stopped_ = true;
-					return false;
+					return BlockResult::Failure;
 				}
 
 				CStackBlockIdentifier key(block.type.v, block.id.get());
@@ -290,17 +292,16 @@ public:
 			std::memcpy(summary.type.data(), block.type.v, 4);
 			summary.typeCode = block.type.to_uint32();
 			summary.id = block.id.get();
-			summary.offset = position_;
-			summary.size = block.size();
-			summary.payloadOffset = position_ + 12;
+			summary.offset = block.file_offset;
+			summary.size = 12u + block.payload_bytes;
+			summary.payloadOffset = block.file_offset + 12u;
 			summary.payloadBytes = block.payload_bytes;
-			summary.status = "ok";
+			summary.status = isFree ? "skipped" : (isTail ? "terminal" : "ok");
 			source_blocks_.push_back(summary);
 
-			position_ += 12 + block.payload_bytes;
 			num_blocks_++;
 
-			return true;
+			return BlockResult::Continue;
 		}
 
 		auto on_error(const char* msg) -> bool override {
@@ -316,7 +317,6 @@ public:
 		CBlockMap& block_map_;
 		std::vector<CSourceBlockSummary>& source_blocks_;
 		std::string& source_stream_status_;
-		uint64_t position_;
 		int num_blocks_;
 		bool stopped_;
 	};

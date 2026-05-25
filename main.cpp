@@ -223,7 +223,7 @@ int main( int argc, char * const argv[] )
 		struct ScanOutput : stackimport::IBlockOutput {
 			int count = 0;
 
-			auto on_block(const stackimport::BlockRef& ref, stackimport::IStackReader&) -> bool override {
+			auto on_block(const stackimport::BlockRef& ref, stackimport::IStackReader&) -> BlockResult override {
 				stackimport_quill_diagnosticf("  %08llx  %5u  %.*s  %5d  %7u\n",
 					static_cast<unsigned long long>(ref.file_offset),
 					ref.payload_bytes + 12u,
@@ -231,7 +231,7 @@ int main( int argc, char * const argv[] )
 					ref.id.get(),
 					ref.payload_bytes);
 				count++;
-				return true;
+				return BlockResult::Continue;
 			}
 			auto on_error(const char* msg) -> bool override {
 				stackimport_quill_diagnosticf("  ERROR: %s\n", msg);

@@ -189,9 +189,15 @@ public:
 
 class IBlockOutput {
 public:
+    enum class BlockResult : uint8_t {
+        Continue,
+        Stop,
+        Failure,
+    };
+
     virtual ~IBlockOutput() = default;
 
-    virtual auto on_block(const BlockRef& block, IStackReader& reader) -> bool = 0;
+    virtual auto on_block(const BlockRef& block, IStackReader& reader) -> BlockResult = 0;
     virtual auto on_error(const char* msg) -> bool = 0;
 };
 
@@ -431,19 +437,11 @@ public:
 
             uint32_t payload_bytes = block_size - HEADER_SIZE;
             size_t file_offset = input.position() - HEADER_SIZE;
+            size_t payload_offset = input.position();
 
-            if (block_type == block_type::TAIL && block_id == -1) {
-                break;
-            }
-
-            if (block_type == block_type::FREE) {
-                if (payload_bytes > 0) {
-                    if (!input.seek(input.position() + payload_bytes)) {
-                        output.on_error("seek failed on FREE block");
-                        return BlockErr::ReadFailed;
-                    }
-                }
-                continue;
+            if (input.size() != 0 && payload_bytes > input.size() - payload_offset) {
+                output.on_error("truncated payload");
+                return BlockErr::TruncatedPayload;
             }
 
             BlockRef ref;
@@ -453,8 +451,27 @@ public:
             ref.payload_bytes = payload_bytes;
             // ref.payload is empty; reader is positioned at payload data
 
-            if (!output.on_block(ref, input)) {
+            const auto result = output.on_block(ref, input);
+            if (result == IBlockOutput::BlockResult::Stop) {
+                return BlockErr::None;
+            }
+            if (result == IBlockOutput::BlockResult::Failure) {
+                size_t next_pos = file_offset + HEADER_SIZE + payload_bytes;
+                return input.position() < next_pos ? BlockErr::TruncatedPayload : BlockErr::ReadFailed;
+            }
+
+            if (block_type == block_type::TAIL && block_id == -1) {
                 break;
+            }
+
+            if (block_type == block_type::FREE) {
+                if (payload_bytes > 0) {
+                    if (!input.seek(file_offset + HEADER_SIZE + payload_bytes)) {
+                        output.on_error("seek failed on FREE block");
+                        return BlockErr::ReadFailed;
+                    }
+                }
+                continue;
             }
 
             {
@@ -489,16 +506,11 @@ public:
 
             uint32_t payload_bytes = block_size - HEADER_SIZE;
             uint64_t file_offset = pos;
+            size_t payload_offset = pos + HEADER_SIZE;
 
-            if (block_type == block_type::TAIL && block_id == -1) {
-                break;
-            }
-
-            pos += HEADER_SIZE;
-
-            if (block_type == block_type::FREE) {
-                pos += payload_bytes;
-                continue;
+            if (payload_bytes > buf.size - payload_offset) {
+                output.on_error("truncated payload");
+                return BlockErr::TruncatedPayload;
             }
 
             BlockRef ref;
@@ -506,11 +518,9 @@ public:
             ref.id = BlockID{block_id};
             ref.file_offset = file_offset;
             ref.payload_bytes = payload_bytes;
-            if (payload_bytes > 0 && pos + payload_bytes <= buf.size) {
-                ref.payload = buf.slice(pos, payload_bytes);
+            if (payload_bytes > 0) {
+                ref.payload = buf.slice(payload_offset, payload_bytes);
             }
-
-            pos += payload_bytes;
 
             struct NullReader : IStackReader {
                 auto read(uint8_t*, size_t) -> size_t override { return 0; }
@@ -519,9 +529,24 @@ public:
                 auto size() const -> size_t override { return 0; }
             };
             static NullReader null_reader;
-            if (!output.on_block(ref, null_reader)) {
+            const auto result = output.on_block(ref, null_reader);
+            if (result == IBlockOutput::BlockResult::Stop) {
                 break;
             }
+            if (result == IBlockOutput::BlockResult::Failure) {
+                return BlockErr::ReadFailed;
+            }
+
+            pos = payload_offset + payload_bytes;
+
+            if (block_type == block_type::TAIL && block_id == -1) {
+                break;
+            }
+        }
+
+        if (pos < buf.size) {
+            output.on_error("truncated header");
+            return BlockErr::TruncatedHeader;
         }
 
         return BlockErr::None;

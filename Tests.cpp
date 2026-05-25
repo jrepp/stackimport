@@ -114,6 +114,68 @@ void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t
 	rsrcd::write_u32be(fork + 12, map_len);
 }
 
+void append_block_header(std::vector<uint8_t>& data, uint32_t size, const char type[4], int32_t id)
+{
+	data.push_back(static_cast<uint8_t>((size >> 24u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((size >> 16u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((size >> 8u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>(size & 0xFFu));
+	data.insert(data.end(), type, type + 4);
+	const uint32_t unsignedId = static_cast<uint32_t>(id);
+	data.push_back(static_cast<uint8_t>((unsignedId >> 24u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((unsignedId >> 16u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((unsignedId >> 8u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>(unsignedId & 0xFFu));
+}
+
+class MemoryStackReader final : public stackimport::IStackReader {
+public:
+	explicit MemoryStackReader(rsrcd::Bytes bytes) : bytes_(bytes), pos_(0) {}
+
+	auto read(uint8_t* dst, size_t len) -> size_t override
+	{
+		const size_t available = pos_ < bytes_.size ? bytes_.size - pos_ : 0;
+		const size_t count = len < available ? len : available;
+		if(count > 0)
+			std::memcpy(dst, bytes_.data + pos_, count);
+		pos_ += count;
+		return count;
+	}
+
+	auto seek(size_t pos) -> bool override
+	{
+		if(pos > bytes_.size)
+			return false;
+		pos_ = pos;
+		return true;
+	}
+
+	auto position() const -> size_t override { return pos_; }
+	auto size() const -> size_t override { return bytes_.size; }
+
+private:
+	rsrcd::Bytes bytes_;
+	size_t pos_;
+};
+
+class CapturingBlockOutput final : public stackimport::IBlockOutput {
+public:
+	auto on_block(const stackimport::BlockRef&, stackimport::IStackReader&) -> BlockResult override
+	{
+		block_count++;
+		return BlockResult::Continue;
+	}
+
+	auto on_error(const char* msg) -> bool override
+	{
+		error = msg ? msg : "";
+		return false;
+	}
+
+	int block_count = 0;
+	std::string error;
+};
+
 void write_minimal_short_stak(const std::string& path)
 {
 	std::vector<uint8_t> data(12 + 68 + 12);
@@ -124,6 +186,20 @@ void write_minimal_short_stak(const std::string& path)
 	rsrcd::write_u32be(data.data() + tail_offset, 12);
 	std::memcpy(data.data() + tail_offset + 4, "TAIL", 4);
 	rsrcd::write_u32be(data.data() + tail_offset + 8, 0xFFFFFFFFu);
+
+	std::ofstream file(path.c_str(), std::ios::binary);
+	file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+	assert(file);
+}
+
+void write_minimal_free_then_short_stak(const std::string& path)
+{
+	std::vector<uint8_t> data;
+	append_block_header(data, 16, "FREE", 0);
+	data.insert(data.end(), {0, 1, 2, 3});
+	append_block_header(data, 12 + 68, "STAK", -1);
+	data.resize(data.size() + 68);
+	append_block_header(data, 12, "TAIL", -1);
 
 	std::ofstream file(path.c_str(), std::ios::binary);
 	file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
@@ -218,6 +294,21 @@ void	RunTests()
 	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_UNSUPPORTED_OPTION);
 	stackimport_context_destroy(context);
 
+
+	std::vector<uint8_t> truncatedBlock;
+	append_block_header(truncatedBlock, 16, "STAK", -1);
+	truncatedBlock.insert(truncatedBlock.end(), {0xAA, 0xBB});
+	CapturingBlockOutput streamingCapture;
+	MemoryStackReader truncatedReader(rsrcd::Bytes{truncatedBlock.data(), truncatedBlock.size()});
+	assert(stackimport::BlockParser{}.parse(truncatedReader, streamingCapture) == stackimport::BlockErr::TruncatedPayload);
+	assert(streamingCapture.block_count == 0);
+	assert(streamingCapture.error == "truncated payload");
+
+	CapturingBlockOutput viewCapture;
+	assert(stackimport::BlockParser{}.parse_view(rsrcd::Bytes{truncatedBlock.data(), truncatedBlock.size()}, viewCapture) == stackimport::BlockErr::TruncatedPayload);
+	assert(viewCapture.block_count == 0);
+	assert(viewCapture.error == "truncated payload");
+
 	const uint8_t codeBytes[] = {0x4E, 0x75, 0xA9, 0xF0, 0x12};
 	TestResourceOutput resourceOutput;
 	stackimport::ResourcePayload payload = {};
@@ -281,4 +372,19 @@ void	RunTests()
 	assert(projectJson.find("\"patternCount\": 0") != std::string::npos);
 	assert(stackJson.find("\"patternCount\": 0") != std::string::npos);
 	assert(manifestJson.find("\"typeCode\":") != std::string::npos);
+
+	const std::string freeStackPath = std::string("/tmp/stackimport-free-before-stak-") + std::to_string(std::rand()) + ".stk";
+	const std::string freeStackPackage = freeStackPath + ".xstk";
+	write_minimal_free_then_short_stak(freeStackPath);
+	CStackFile freeStack;
+	freeStack.SetStatusMessages(false);
+	freeStack.SetProgressMessages(false);
+	assert(freeStack.LoadFile(freeStackPath, freeStackPackage));
+	const std::string freeManifestJson = read_text_file(freeStackPackage + "/source-manifest.json");
+	assert(freeManifestJson.find("\"type\": \"FREE\"") != std::string::npos);
+	assert(freeManifestJson.find("\"status\": \"skipped\"") != std::string::npos);
+	assert(freeManifestJson.find("\"type\": \"TAIL\"") != std::string::npos);
+	assert(freeManifestJson.find("\"status\": \"terminal\"") != std::string::npos);
+	assert(freeManifestJson.find("\"offset\": 16") != std::string::npos);
+
 }
