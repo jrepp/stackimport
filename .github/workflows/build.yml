@@ -52,7 +52,7 @@ jobs:
           -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
 
       - name: Build static library, CLI, and tests
-        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests --parallel
+        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests stackimport-rsrcd-tests --parallel
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
