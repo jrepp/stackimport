@@ -39,7 +39,7 @@ bool valid_allocator(const stackimport_allocator* allocator)
 		allocator->deallocate;
 }
 
-void* libc_allocate(size_t size, size_t alignment, void*)
+void* STACKIMPORT_CALL libc_allocate(size_t size, size_t alignment, void*)
 {
 	void* ptr = nullptr;
 	if(alignment < sizeof(void*))
@@ -54,7 +54,7 @@ void* libc_allocate(size_t size, size_t alignment, void*)
 #endif
 }
 
-void libc_deallocate(void* ptr, void*)
+void STACKIMPORT_CALL libc_deallocate(void* ptr, void*)
 {
 #if defined(_WIN32)
 	_aligned_free(ptr);
@@ -63,27 +63,27 @@ void libc_deallocate(void* ptr, void*)
 #endif
 }
 
-void libc_message(uint32_t severity, const char* message, void*)
+void STACKIMPORT_CALL libc_message(uint32_t severity, const char* message, void*)
 {
 	stackimport_quill_log_message(severity, message);
 }
 
-stackimport_file_handle libc_open_file(const char* path, const char* mode, void*)
+stackimport_file_handle STACKIMPORT_CALL libc_open_file(const char* path, const char* mode, void*)
 {
 	return fopen(path, mode);
 }
 
-size_t libc_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
+size_t STACKIMPORT_CALL libc_write_file(stackimport_file_handle file, const void* data, size_t size, void*)
 {
 	return fwrite(data, 1, size, static_cast<FILE*>(file));
 }
 
-int libc_close_file(stackimport_file_handle file, void*)
+int STACKIMPORT_CALL libc_close_file(stackimport_file_handle file, void*)
 {
 	return fclose(static_cast<FILE*>(file));
 }
 
-int libc_make_directory(const char* path, void*)
+int STACKIMPORT_CALL libc_make_directory(const char* path, void*)
 {
 #if defined(_WIN32)
 	return _mkdir(path);
@@ -185,12 +185,12 @@ private:
 
 }
 
-uint32_t stackimport_api_version(void)
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_api_version(void)
 {
 	return STACKIMPORT_API_VERSION;
 }
 
-const char* stackimport_status_string(stackimport_status status)
+STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_status_string(stackimport_status status)
 {
 	switch(status)
 	{
@@ -208,7 +208,7 @@ const char* stackimport_status_string(stackimport_status status)
 	return "unknown status";
 }
 
-void stackimport_allocator_init(stackimport_allocator* allocator)
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_allocator_init(stackimport_allocator* allocator)
 {
 	if(!allocator)
 		return;
@@ -216,7 +216,7 @@ void stackimport_allocator_init(stackimport_allocator* allocator)
 	allocator->struct_size = sizeof(stackimport_allocator);
 }
 
-void stackimport_platform_init(stackimport_platform* platform)
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_platform* platform)
 {
 	if(!platform)
 		return;
@@ -231,7 +231,7 @@ void stackimport_platform_init(stackimport_platform* platform)
 	platform->make_directory = libc_make_directory;
 }
 
-void stackimport_import_options_init(stackimport_import_options* options)
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_import_options_init(stackimport_import_options* options)
 {
 	if(!options)
 		return;
@@ -240,17 +240,17 @@ void stackimport_import_options_init(stackimport_import_options* options)
 	options->resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_ALL;
 }
 
-size_t stackimport_context_size(void)
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_size(void)
 {
 	return sizeof(stackimport_context);
 }
 
-size_t stackimport_context_alignment(void)
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_alignment(void)
 {
 	return alignof(stackimport_context);
 }
 
-stackimport_status stackimport_context_init(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init(
 	void* storage,
 	size_t storage_size,
 	stackimport_context** out_context)
@@ -260,7 +260,7 @@ stackimport_status stackimport_context_init(
 	return stackimport_context_init_with_platform(storage, storage_size, &platform, out_context);
 }
 
-stackimport_status stackimport_context_init_with_platform(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_with_platform(
 	void* storage,
 	size_t storage_size,
 	const stackimport_platform* platform,
@@ -277,7 +277,7 @@ stackimport_status stackimport_context_init_with_platform(
 	return STACKIMPORT_STATUS_OK;
 }
 
-void stackimport_context_deinit(stackimport_context* context)
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_deinit(stackimport_context* context)
 {
 	if(!context)
 		return;
@@ -285,7 +285,7 @@ void stackimport_context_deinit(stackimport_context* context)
 	context->~stackimport_context();
 }
 
-stackimport_status stackimport_context_create(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create(
 	const stackimport_allocator* allocator,
 	stackimport_context** out_context)
 {
@@ -299,7 +299,7 @@ stackimport_status stackimport_context_create(
 	return stackimport_context_create_with_platform(&platform, out_context);
 }
 
-stackimport_status stackimport_context_create_with_platform(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_with_platform(
 	const stackimport_platform* platform,
 	stackimport_context** out_context)
 {
@@ -313,7 +313,7 @@ stackimport_status stackimport_context_create_with_platform(
 	return STACKIMPORT_STATUS_OK;
 }
 
-void stackimport_context_destroy(stackimport_context* context)
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_destroy(stackimport_context* context)
 {
 	if(!context)
 		return;
@@ -325,7 +325,7 @@ void stackimport_context_destroy(stackimport_context* context)
 		platform.deallocate(context, platform.user_data);
 }
 
-stackimport_status stackimport_import(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	stackimport_context* context,
 	const stackimport_import_options* options)
 {

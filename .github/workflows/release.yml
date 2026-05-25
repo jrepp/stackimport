@@ -79,8 +79,8 @@ jobs:
           -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
           -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
 
-      - name: Build static library, CLI, and tests
-        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests stackimport-rsrcd-tests --parallel
+      - name: Build libraries, CLI, and tests
+        run: cmake --build build --config Release --target stackimport_static stackimport_shared stackimport stackimport-tests stackimport-rsrcd-tests --parallel
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
@@ -98,10 +98,13 @@ jobs:
             cp build/Release/stackimport.exe "${package_dir}/bin/"
             cp build/Release/stackimport-tests.exe "${package_dir}/bin/"
             cp build/Release/stackimport.lib "${package_dir}/lib/"
+            cp build/Release/stackimport_c.dll "${package_dir}/bin/"
+            cp build/Release/stackimport_c.lib "${package_dir}/lib/"
           else
             cp build/stackimport "${package_dir}/bin/"
             cp build/stackimport-tests "${package_dir}/bin/"
             cp build/libstackimport.a "${package_dir}/lib/"
+            cp build/libstackimport_c.* "${package_dir}/lib/"
           fi
 
           cp stackimport_c.h "${package_dir}/include/"

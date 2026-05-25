@@ -9,9 +9,12 @@ string(REGEX REPLACE "^([0-9]+\\.[0-9]+\\.[0-9]+).*$" "\\1" STACKIMPORT_VERSION_
 
 project(stackimport VERSION "${STACKIMPORT_VERSION_CORE}" LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+
 option(STACKIMPORT_STRICT_WARNINGS "Enable strict compiler warnings" ON)
 option(STACKIMPORT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(STACKIMPORT_ENABLE_VENDOR "Expose vendored conversion support targets" ON)
+option(STACKIMPORT_BUILD_TESTS "Build stackimport tests" ON)
 option(STACKIMPORT_BUILD_VENDOR_TESTS "Build vendored tests in the top-level test suite" ON)
 option(STACKIMPORT_ENABLE_CLANG_TIDY "Run clang-tidy during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_CPPCHECK "Run cppcheck during CMake builds" OFF)
@@ -25,6 +28,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 function(stackimport_enable_static_analysis target)
     if(STACKIMPORT_ENABLE_CLANG_TIDY)
@@ -106,11 +110,54 @@ if(STACKIMPORT_ENABLE_VENDOR)
     endif()
 endif()
 
+add_library(stackimport_shared SHARED ${STACKIMPORT_SOURCES})
+add_library(stackimport::shared ALIAS stackimport_shared)
+set_target_properties(stackimport_shared PROPERTIES
+    OUTPUT_NAME stackimport_c
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+)
+target_compile_definitions(stackimport_shared
+    PRIVATE STACKIMPORT_BUILD_SHARED=1 STACKIMPORT_SHARED=1
+    PUBLIC MAC_CODE=0
+)
+target_include_directories(stackimport_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+if(STACKIMPORT_ENABLE_VENDOR)
+    target_link_libraries(stackimport_shared PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav vendor_rsrcd)
+    if(STACKIMPORT_BUILD_VENDOR_TOOLS)
+        target_link_libraries(stackimport_shared PRIVATE vendor_resource_file_static)
+        add_dependencies(stackimport_shared vendor_resource_dasm)
+    endif()
+endif()
+
 add_executable(stackimport main.cpp)
 target_link_libraries(stackimport PRIVATE stackimport_static)
+set(STACKIMPORT_CORE_TARGETS stackimport_static stackimport_shared stackimport)
 
-add_executable(stackimport-tests TestsMain.cpp Tests.cpp)
-target_link_libraries(stackimport-tests PRIVATE stackimport_static)
+if(STACKIMPORT_BUILD_TESTS)
+    add_executable(stackimport-tests TestsMain.cpp Tests.cpp)
+    target_link_libraries(stackimport-tests PRIVATE stackimport_static)
+    list(APPEND STACKIMPORT_CORE_TARGETS stackimport-tests)
+endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stackimport.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/stackimport.pc"
+    @ONLY
+)
+
+install(TARGETS stackimport stackimport_static stackimport_shared
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stackimport.pc"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+)
 
 if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
     set(STACKIMPORT_VENDOR_ARCHIVE "${CMAKE_BINARY_DIR}/libstackimport-vendor.a")
@@ -163,7 +210,7 @@ if(STACKIMPORT_STRICT_WARNINGS)
         set(STACKIMPORT_WARNING_FLAGS /W4 /permissive-)
     endif()
 
-    foreach(target stackimport_static stackimport stackimport-tests)
+    foreach(target ${STACKIMPORT_CORE_TARGETS})
         target_compile_options(${target} PRIVATE ${STACKIMPORT_WARNING_FLAGS})
         if(STACKIMPORT_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
@@ -171,18 +218,20 @@ if(STACKIMPORT_STRICT_WARNINGS)
     endforeach()
 endif()
 
-foreach(target stackimport_static stackimport stackimport-tests)
+foreach(target ${STACKIMPORT_CORE_TARGETS})
     stackimport_enable_static_analysis(${target})
     stackimport_disable_exceptions(${target})
 endforeach()
 
 if(WIN32)
-    foreach(target stackimport_static stackimport stackimport-tests)
+    foreach(target ${STACKIMPORT_CORE_TARGETS})
         target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS RAPIDJSON_ENDIAN=RAPIDJSON_LITTLEENDIAN)
     endforeach()
 endif()
 
-add_test(NAME stackimport-tests COMMAND stackimport-tests)
+if(STACKIMPORT_BUILD_TESTS)
+    add_test(NAME stackimport-tests COMMAND stackimport-tests)
+endif()
 
 add_custom_target(import-stacks
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/import_all_stacks.py" --noprogress

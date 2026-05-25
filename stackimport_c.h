@@ -1,7 +1,30 @@
-#pragma once
+#ifndef STACKIMPORT_C_H
+#define STACKIMPORT_C_H
 
 #include <stddef.h>
 #include <stdint.h>
+
+#ifndef STACKIMPORT_API
+#if defined(_WIN32) && defined(STACKIMPORT_SHARED)
+#if defined(STACKIMPORT_BUILD_SHARED)
+#define STACKIMPORT_API __declspec(dllexport)
+#else
+#define STACKIMPORT_API __declspec(dllimport)
+#endif
+#elif defined(__GNUC__) && defined(STACKIMPORT_BUILD_SHARED)
+#define STACKIMPORT_API __attribute__((visibility("default")))
+#else
+#define STACKIMPORT_API
+#endif
+#endif
+
+#ifndef STACKIMPORT_CALL
+#if defined(_WIN32)
+#define STACKIMPORT_CALL __cdecl
+#else
+#define STACKIMPORT_CALL
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,15 +49,15 @@ typedef enum stackimport_import_flags {
 	STACKIMPORT_IMPORT_RAW_GRAPHICS = 1u << 3
 } stackimport_import_flags;
 
-typedef void* (*stackimport_allocate_fn)(size_t size, size_t alignment, void* user_data);
-typedef void (*stackimport_deallocate_fn)(void* ptr, void* user_data);
-typedef void (*stackimport_message_fn)(uint32_t severity, const char* message, void* user_data);
+typedef void* (STACKIMPORT_CALL *stackimport_allocate_fn)(size_t size, size_t alignment, void* user_data);
+typedef void (STACKIMPORT_CALL *stackimport_deallocate_fn)(void* ptr, void* user_data);
+typedef void (STACKIMPORT_CALL *stackimport_message_fn)(uint32_t severity, const char* message, void* user_data);
 
 typedef void* stackimport_file_handle;
-typedef stackimport_file_handle (*stackimport_open_file_fn)(const char* path, const char* mode, void* user_data);
-typedef size_t (*stackimport_write_file_fn)(stackimport_file_handle file, const void* data, size_t size, void* user_data);
-typedef int (*stackimport_close_file_fn)(stackimport_file_handle file, void* user_data);
-typedef int (*stackimport_make_directory_fn)(const char* path, void* user_data);
+typedef stackimport_file_handle (STACKIMPORT_CALL *stackimport_open_file_fn)(const char* path, const char* mode, void* user_data);
+typedef size_t (STACKIMPORT_CALL *stackimport_write_file_fn)(stackimport_file_handle file, const void* data, size_t size, void* user_data);
+typedef int (STACKIMPORT_CALL *stackimport_close_file_fn)(stackimport_file_handle file, void* user_data);
+typedef int (STACKIMPORT_CALL *stackimport_make_directory_fn)(const char* path, void* user_data);
 
 typedef enum stackimport_resource_payload_format {
 	STACKIMPORT_RESOURCE_PAYLOAD_NATIVE = 0,
@@ -76,8 +99,8 @@ typedef struct stackimport_resource_payload {
  * including name and payload data, are valid only for the callback invocation.
  * resource_wants is called before resource_payload; return 0 to skip delivery.
  */
-typedef int (*stackimport_resource_wants_fn)(const stackimport_resource_payload* payload, void* user_data);
-typedef int (*stackimport_resource_payload_fn)(const stackimport_resource_payload* payload, const void* data, size_t size, void* user_data);
+typedef int (STACKIMPORT_CALL *stackimport_resource_wants_fn)(const stackimport_resource_payload* payload, void* user_data);
+typedef int (STACKIMPORT_CALL *stackimport_resource_payload_fn)(const stackimport_resource_payload* payload, const void* data, size_t size, void* user_data);
 
 typedef enum stackimport_message_severity {
 	STACKIMPORT_MESSAGE_INFO = 0,
@@ -118,45 +141,47 @@ typedef struct stackimport_import_options {
 	void* resource_user_data;
 } stackimport_import_options;
 
-uint32_t stackimport_api_version(void);
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_api_version(void);
 
-const char* stackimport_status_string(stackimport_status status);
+STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_status_string(stackimport_status status);
 
 /* Initialize public structs before filling caller-owned fields. */
-void stackimport_allocator_init(stackimport_allocator* allocator);
-void stackimport_platform_init(stackimport_platform* platform);
-void stackimport_import_options_init(stackimport_import_options* options);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_allocator_init(stackimport_allocator* allocator);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_platform* platform);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_import_options_init(stackimport_import_options* options);
 
-size_t stackimport_context_size(void);
-size_t stackimport_context_alignment(void);
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_size(void);
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_alignment(void);
 
-stackimport_status stackimport_context_init(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init(
 	void* storage,
 	size_t storage_size,
 	stackimport_context** out_context);
 
-stackimport_status stackimport_context_init_with_platform(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_with_platform(
 	void* storage,
 	size_t storage_size,
 	const stackimport_platform* platform,
 	stackimport_context** out_context);
 
-void stackimport_context_deinit(stackimport_context* context);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_deinit(stackimport_context* context);
 
-stackimport_status stackimport_context_create(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create(
 	const stackimport_allocator* allocator,
 	stackimport_context** out_context);
 
-stackimport_status stackimport_context_create_with_platform(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_with_platform(
 	const stackimport_platform* platform,
 	stackimport_context** out_context);
 
-void stackimport_context_destroy(stackimport_context* context);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_destroy(stackimport_context* context);
 
-stackimport_status stackimport_import(
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	stackimport_context* context,
 	const stackimport_import_options* options);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

@@ -56,7 +56,7 @@ Embedding API
 `stackimport_context` per concurrent import. The preferred ownership model is
 caller-owned storage:
 
-    alignas(max_align_t) unsigned char storage[4096];
+    _Alignas(max_align_t) unsigned char storage[4096];
     stackimport_context *ctx = NULL;
     stackimport_context_init(storage, sizeof(storage), &ctx);
 
@@ -64,6 +64,9 @@ Callers that prefer heap allocation can provide `stackimport_allocator` callback
 to `stackimport_context_create`. Initialize public structs with
 `stackimport_allocator_init` and `stackimport_import_options_init` before setting
 fields; this keeps callers source-compatible as new optional fields are added.
+Callers that need an explicit non-default calling convention can define
+`STACKIMPORT_CALL` before including `stackimport_c.h`; the macro is applied to
+both exported functions and callback typedefs.
 
 For embedders that need full control over resource acquisition, use
 `stackimport_platform` and create contexts with
@@ -127,6 +130,55 @@ High-level CLI example:
 The output package contains generated JSON metadata, decoded media, and raw block
 data by default.
 
+Installable build:
+
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build
+    cmake --install build --prefix /usr/local
+
+The install step writes `bin/stackimport`, `lib/libstackimport_c.*`,
+`lib/libstackimport.a`, `include/stackimport_c.h`, and
+`lib/pkgconfig/stackimport.pc`. A Homebrew tap can wrap the same flow in a
+formula; consumers can discover the C API flags with
+`pkg-config --cflags --libs stackimport` after installing the formula. Use the
+shared C ABI library (`stackimport_c`) when embedding from C, Swift, Python,
+Ruby, or another host that should not inherit C++ link/runtime details from the
+static archive.
+
+Minimal tap formula shape:
+
+```ruby
+class Stackimport < Formula
+  desc "HyperCard stack importer"
+  homepage "https://github.com/<owner>/stackimport"
+  url "https://github.com/<owner>/stackimport/archive/refs/tags/v1.2.3.tar.gz"
+  sha256 "<sha256>"
+  license "MIT"
+
+  depends_on "cmake" => :build
+
+  def install
+    system "cmake", "-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Release",
+                    "-DSTACKIMPORT_BUILD_TESTS=OFF",
+                    "-DSTACKIMPORT_BUILD_VENDOR_TESTS=OFF",
+                    "-DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF",
+                    "-DCMAKE_INSTALL_PREFIX=#{prefix}"
+    system "cmake", "--build", "build", "--target", "install"
+  end
+
+  test do
+    (testpath/"smoke.c").write <<~C
+      #include <stackimport_c.h>
+      int main(void) {
+        return stackimport_api_version() == STACKIMPORT_API_VERSION ? 0 : 1;
+      }
+    C
+    system ENV.cc, "smoke.c", "-I#{include}", "-L#{lib}", "-lstackimport_c", "-o", "smoke"
+    system "./smoke"
+  end
+end
+```
+
 Corpus import runner:
 
     scripts/import_all_stacks.py
@@ -139,12 +191,11 @@ reports under `import-runs/<run-id>/`.
 High-level C API example:
 
     #include "stackimport_c.h"
-    #include <stdalign.h>
     #include <stddef.h>
     #include <stdio.h>
 
     int main(void) {
-        alignas(max_align_t) unsigned char storage[4096];
+        _Alignas(max_align_t) unsigned char storage[4096];
         stackimport_context *ctx = NULL;
 
         stackimport_status status =

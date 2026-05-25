@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: stackimport
+Description: HyperCard stack importer C API and command-line tool
+Version: @STACKIMPORT_VERSION_FULL@
+Libs: -L${libdir} -lstackimport_c
+Cflags: -I${includedir}
