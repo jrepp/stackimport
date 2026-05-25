@@ -63,6 +63,61 @@ C17/C++23 policy where their build systems allow it:
 
     cmake --build build --target vendor-tools --parallel
 
+Format References
+-----------------
+
+The HyperCard stack format was not officially published, so parser work is backed
+by local notes, imported references, and corpus runs. The maintained index is
+`Stack File Format/README.md`; start there before changing parser behavior.
+
+Current reference material includes:
+
+- `Stack File Format/*/*.txt` notes copied from the older xtalk codebase.
+- Creysoft's HyperCard file format write-up:
+  https://creysoft.com/xtalk/hypercard_file_format2.htm
+- Rebecca Bettencourt's 2011 HyperCard file format guide, normalized into
+  `Stack File Format/DefinitiveGuide2011.md`.
+- `Stack File Format/AddColor.md` for AddColor resource notes.
+- `Stack File Format/ConversionCorpusGrounding.md` for conversion provenance,
+  corpus indexing, and preferred modern output formats.
+- Parser behavior and exported JSON/media evidence in `CStackFile.cpp`, corpus
+  run reports, and generated `.xstk` packages.
+
+When parser behavior changes, update the relevant format notes in the same change
+so block/resource coverage, confidence level, unknown bytes, and corpus evidence
+stay aligned with the implementation.
+
+Vendored Libraries
+------------------
+
+Third-party source snapshots live under `vendor/`. `vendor/INDEX.md` is the
+source-of-truth dependency index, including license paths, local integration
+targets, and local modification notes. Preserve upstream license files and update
+that index whenever a vendored dependency is added, removed, upgraded, or patched.
+
+The main build currently uses these vendored libraries:
+
+- `rsrcd/` - header-only Classic Mac resource fork parser derived from
+  `rsrcdump`; MIT; exposed as `vendor_rsrcd`.
+- `quill/` - Quill logging headers used by stackimport diagnostics; MIT; exposed
+  as `vendor_quill`.
+- `rang/` - terminal color support for log/dump formatting; Unlicense; exposed
+  as `vendor_rang`.
+- `rapidjson/` - JSON DOM/writer used for `.xstk` metadata; MIT; exposed as
+  `vendor_rapidjson`.
+- `stb/` - `stb_image_write.h` for PNG output; MIT or public domain; exposed as
+  `vendor_stb_image_write`.
+- `dr_wav/` - single-header WAV reader/writer candidate; public domain or MIT-0;
+  exposed as `vendor_dr_wav`.
+- `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot; built as
+  `vendor_snd2wav`; see `vendor/INDEX.md` for its licensing caveat.
+- `ppcd/` - PowerPC disassembler snapshot for PPC code-resource work; CC0-1.0;
+  built as `vendor_ppcd`.
+
+Optional vendor-tool targets also build Deark, `resource_dasm`, and `phosg` for
+conversion and reverse-engineering work. These are isolated from the default
+install-oriented Homebrew build with `-DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF`.
+
 Embedding API
 -------------
 
