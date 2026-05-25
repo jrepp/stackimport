@@ -9,7 +9,9 @@
 
 #include "CStackFile.h"
 #include "Mac68kDisassembly.h"
+#include "StackImportSoundConverter.h"
 #include "stackimport_c.h"
+#include "stackimport_platform_internal.h"
 #include <assert.h>
 #include <cstdlib>
 #include <cstddef>
@@ -175,6 +177,41 @@ void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t
 	rsrcd::write_u32be(fork + 4, map_off);
 	rsrcd::write_u32be(fork + 8, data_len);
 	rsrcd::write_u32be(fork + 12, map_len);
+}
+
+
+void append_snd_u16be(std::vector<uint8_t>& data, uint16_t value)
+{
+	data.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>(value & 0xFFu));
+}
+
+void append_snd_u32be(std::vector<uint8_t>& data, uint32_t value)
+{
+	data.push_back(static_cast<uint8_t>((value >> 24u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((value >> 16u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>(value & 0xFFu));
+}
+
+std::vector<uint8_t> make_minimal_snd_fixture()
+{
+	std::vector<uint8_t> snd;
+	append_snd_u16be(snd, 2);
+	append_snd_u16be(snd, 0);
+	append_snd_u16be(snd, 1);
+	append_snd_u16be(snd, 0x8051);
+	append_snd_u16be(snd, 0);
+	append_snd_u32be(snd, 14);
+	append_snd_u32be(snd, 0);
+	append_snd_u32be(snd, 4);
+	append_snd_u32be(snd, 22050u << 16u);
+	append_snd_u32be(snd, 0);
+	append_snd_u32be(snd, 4);
+	snd.push_back(0);
+	snd.push_back(60);
+	snd.insert(snd.end(), {0x80, 0x81, 0x82, 0x83});
+	return snd;
 }
 
 void append_block_header(std::vector<uint8_t>& data, uint32_t size, const char type[4], int32_t id)
@@ -497,4 +534,22 @@ void	RunTests()
 	assert(stackimport_import(failingContext, &failingOptions) == STACKIMPORT_STATUS_ALLOCATION_FAILED);
 	stackimport_context_deinit(failingContext);
 	assert(failingPlatformState.allocations > 0);
+
+	const std::vector<uint8_t> failingSound = make_minimal_snd_fixture();
+	CountingPlatformState failingSoundState;
+	failingSoundState.fail_after_allocations = 0;
+	stackimport_platform failingSoundPlatform = {};
+	stackimport_platform_init(&failingSoundPlatform);
+	failingSoundPlatform.allocate = counting_allocate;
+	failingSoundPlatform.deallocate = counting_deallocate;
+	failingSoundPlatform.user_data = &failingSoundState;
+	stackimport_internal_platform failingSoundInternal = stackimport_internal_platform_from_api(&failingSoundPlatform);
+	{
+		stackimport_platform_scope failingSoundScope(failingSoundInternal);
+		stackimport::PlatformByteVector failingWavData;
+		std::string soundError;
+		assert(!stackimport::ConvertSndResourceToWav(rsrcd::Bytes{failingSound.data(), failingSound.size()}, failingWavData, soundError));
+		assert(soundError == "allocation failed");
+	}
+
 }

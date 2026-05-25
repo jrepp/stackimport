@@ -148,7 +148,8 @@ public:
 			return fail(error, "truncated sample data");
 
 		wav.clear();
-		wav.reserve(static_cast<size_t>(44) + dataSize);
+		if(!wav.reserve(static_cast<size_t>(44) + dataSize))
+			return fail(error, "allocation failed");
 		append_ascii(wav, "RIFF");
 		append_u32le(wav, 36 + dataSize);
 		append_ascii(wav, "WAVE");
@@ -166,7 +167,7 @@ public:
 		if(!decodedSamples.empty())
 		{
 			const auto* sampleBytes = reinterpret_cast<const uint8_t*>(decodedSamples.data());
-			wav.insert(wav.end(), sampleBytes, sampleBytes + decodedSamples.size() * sizeof(phosg::le_int16_t));
+			wav.append(sampleBytes, sampleBytes + decodedSamples.size() * sizeof(phosg::le_int16_t));
 		}
 		else if(bytesPerSample == 2)
 		{
@@ -175,9 +176,11 @@ public:
 		}
 		else
 		{
-			wav.insert(wav.end(), input_.data + pos_, input_.data + pos_ + numBytes);
+			wav.append(input_.data + pos_, input_.data + pos_ + numBytes);
 			pos_ += numBytes;
 		}
+		if(wav.failed())
+			return fail(error, "allocation failed");
 		return error.empty();
 	}
 
@@ -276,20 +279,27 @@ private:
 	static void append_ascii(PlatformByteVector& out, const char* text)
 	{
 		for(const char* p = text; *p; ++p)
-			out.push_back(static_cast<uint8_t>(*p));
+		{
+			if(!out.push_back(static_cast<uint8_t>(*p)))
+				return;
+		}
 	}
 
 	static void append_u16le(PlatformByteVector& out, uint16_t value)
 	{
-		out.push_back(static_cast<uint8_t>(value & 0xFF));
+		if(!out.push_back(static_cast<uint8_t>(value & 0xFF)))
+			return;
 		out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
 	}
 
 	static void append_u32le(PlatformByteVector& out, uint32_t value)
 	{
-		out.push_back(static_cast<uint8_t>(value & 0xFF));
-		out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-		out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+		if(!out.push_back(static_cast<uint8_t>(value & 0xFF)))
+			return;
+		if(!out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF)))
+			return;
+		if(!out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF)))
+			return;
 		out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
 	}
 };
