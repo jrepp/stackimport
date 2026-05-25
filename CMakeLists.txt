@@ -85,6 +85,8 @@ set(STACKIMPORT_SOURCES
     woba.cpp
     picture.cpp
     CStackFile.cpp
+    StackImportResourceFork.cpp
+    StackImportSoundConverter.cpp
     Mac68kDisassembly.cpp
     CBuf.cpp
     byteutils.cpp

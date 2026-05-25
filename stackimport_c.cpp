@@ -123,6 +123,8 @@ uint32_t api_resource_payload_format(stackimport::ResourcePayloadFormat format)
 			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_JSON_UTF8);
 		case stackimport::ResourcePayloadFormat::TextUtf8:
 			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8);
+		case stackimport::ResourcePayloadFormat::Binary:
+			return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_BINARY);
 	}
 	return static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOAD_NATIVE);
 }

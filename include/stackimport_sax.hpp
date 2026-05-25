@@ -108,6 +108,7 @@ enum class ResourcePayloadFormat : uint8_t {
     Rgba32 = 1,
     JsonUtf8 = 2,
     TextUtf8 = 3,
+    Binary = 4,
 };
 
 struct ResourceRef {

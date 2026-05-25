@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define STACKIMPORT_API_VERSION 4u
+#define STACKIMPORT_API_VERSION 5u
 
 typedef struct stackimport_context stackimport_context;
 
@@ -63,7 +63,8 @@ typedef enum stackimport_resource_payload_format {
 	STACKIMPORT_RESOURCE_PAYLOAD_NATIVE = 0,
 	STACKIMPORT_RESOURCE_PAYLOAD_RGBA32 = 1,
 	STACKIMPORT_RESOURCE_PAYLOAD_JSON_UTF8 = 2,
-	STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8 = 3
+	STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8 = 3,
+	STACKIMPORT_RESOURCE_PAYLOAD_BINARY = 4
 } stackimport_resource_payload_format;
 
 typedef enum stackimport_resource_payload_flags {
