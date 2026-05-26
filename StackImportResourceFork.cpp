@@ -1,6 +1,7 @@
 #include "CStackFile.h"
 #include "Mac68kDisassembly.h"
 #include "StackImportPngWriter.h"
+#include "StackImportRsrcdAdapter.h"
 #include "StackImportSoundConverter.h"
 
 #include <cerrno>
@@ -132,16 +133,6 @@ bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 	return closeStatus == 0;
 }
 
-static void swap_bgra_to_rgba(uint8_t* data, int pixel_count)
-{
-	for(int i = 0; i < pixel_count; i++)
-	{
-		uint8_t tmp = data[i * 4];
-		data[i * 4] = data[i * 4 + 2];
-		data[i * 4 + 2] = tmp;
-	}
-}
-
 std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
 {
 	std::string result;
@@ -256,10 +247,8 @@ bool stackimport_load_resource_fork(
 			if(res.data.size == 128)
 			{
 				uint8_t bgra[32 * 32 * 4];
-				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
-				if(rsrcd::img::decode_icon_bw(res.data, dst))
+				if(stackimport::DecodeIconBwWithRsrcd(res.data.data, res.data.size, bgra, sizeof(bgra)))
 				{
-					swap_bgra_to_rgba(bgra, 32 * 32);
 					if(!resourceStreamingStopped)
 					{
 						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 32x32 ICON pixels");
@@ -289,11 +278,9 @@ bool stackimport_load_resource_fork(
 			if(res.data.size >= 68)
 			{
 				uint8_t bgra[16 * 16 * 4];
-				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
 				int16_t hot_x = 0, hot_y = 0;
-				if(rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y))
+				if(stackimport::DecodeCursorWithRsrcd(res.data.data, res.data.size, bgra, sizeof(bgra), hot_x, hot_y))
 				{
-					swap_bgra_to_rgba(bgra, 16 * 16);
 					if(!resourceStreamingStopped)
 					{
 						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 16x16 CURS pixels");
@@ -322,17 +309,13 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "PAT#", 4) == 0)
 		{
-			size_t patCount = rsrcd::patlist::count(res.data);
+			size_t patCount = stackimport::PatternListCountWithRsrcd(res.data.data, res.data.size);
 			int exported = 0;
 			for(size_t pi = 0; pi < patCount; pi++)
 			{
-				rsrcd::Bytes pat = rsrcd::patlist::pattern_at(res.data, pi);
-				if(pat.size == 8)
+				uint8_t bgra[8 * 8 * 4];
+				if(stackimport::DecodePatternAtWithRsrcd(res.data.data, res.data.size, pi, bgra, sizeof(bgra)))
 				{
-					uint8_t bgra[8 * 8 * 4];
-					rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
-					rsrcd::img::decode_pat(pat, dst);
-					swap_bgra_to_rgba(bgra, 8 * 8);
 					if(!resourceStreamingStopped)
 					{
 						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 8x8 PAT# pattern pixels");
