@@ -109,8 +109,9 @@ The main build currently uses these vendored libraries:
   `vendor_stb_image_write`.
 - `dr_wav/` - single-header WAV reader/writer candidate; public domain or MIT-0;
   exposed as `vendor_dr_wav`.
-- `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot; built as
-  `vendor_snd2wav`; see `vendor/INDEX.md` for its licensing caveat.
+- `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot retained as reference
+  material; built as `vendor_snd2wav`; see `vendor/INDEX.md` for its licensing
+  caveat.
 - `ppcd/` - PowerPC disassembler snapshot for PPC code-resource work; CC0-1.0;
   built as `vendor_ppcd`.
 

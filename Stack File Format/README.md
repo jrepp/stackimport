@@ -60,7 +60,7 @@ parser reads resources through Carbon when `MAC_CODE` is enabled.
 | `ICON` | Implemented | Converted to PBM. | `CStackFile::LoadBWIcons` |
 | `PICT` | Implemented | Exported as PICT data with a synthetic header. | `CStackFile::LoadPictures` |
 | `CURS` | Implemented | Converted to PBM. | `CStackFile::LoadCursors` |
-| `snd ` | Implemented | Exported/converted through QuickTime or `snd2wav`, depending on build flags. | `CStackFile::LoadSounds` |
+| `snd ` | Implemented | Exported raw and converted to WAV through the owned sound converter. Optional MACE support depends on the resource_dasm adapter. | `CStackFile::LoadSounds` |
 | `HCbg` | Implemented partially | AddColor data for backgrounds. Known object types are decoded. | `AddColor.md`, `CStackFile::LoadLayerBlock` |
 | `HCcd` | Implemented partially | AddColor data for cards. Known object types are decoded. | `AddColor.md`, `CStackFile::LoadLayerBlock` |
 | `XCMD` | Exported, not decoded | 68K external command code resource; written as raw `.data` with JSON metadata. | `CStackFile::Load68000Resources` |

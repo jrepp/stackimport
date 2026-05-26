@@ -206,10 +206,11 @@ Source format:
 
 Current parser:
 
-- Mac-only Carbon path either uses QuickTime to AIFF or writes `snd_<id>.bin`
-  and converts to WAV through local `snd2wav`.
-- The old metadata path wrote `snd_<id>.aiff` even in the non-QuickTime path;
-  that should be corrected when this path is ported to RapidJSON.
+- Preserves raw `snd ` resource bytes and converts supported sampled-sound
+  commands to WAV through the owned sound converter.
+- Optional MACE decoding is routed through the resource_dasm-backed MACE adapter
+  when vendor tools are enabled; builds without vendor tools report compressed
+  MACE as unavailable.
 
 Modern target:
 
