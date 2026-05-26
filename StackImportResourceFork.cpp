@@ -184,6 +184,7 @@ public:
 			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
 			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") || resource_type_is(res_, "pltt") ||
 			resource_type_is(res_, "ppat") || resource_type_is(res_, "ppt#") || resource_type_is(res_, "cicn") ||
+			resource_type_is(res_, "crsr") ||
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
 			resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
 			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") ||
@@ -391,6 +392,23 @@ private:
 			return;
 		}
 
+		if(resource_type_is(res_, "crsr"))
+		{
+			if(payload.variant_index == 0)
+				snprintf(fname, sizeof(fname), "crsr_%d.png", res_.id);
+			else
+				snprintf(fname, sizeof(fname), "crsr_%d_bitmap.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				record_output_artifact(fname, payload, true);
+				exportedCount_++;
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
 		if(resource_type_is_indexed_icon(res_))
 		{
 			snprintf(fname, sizeof(fname), "%c%c%c%c_%d.png",
@@ -510,6 +528,8 @@ private:
 			snprintf(fname, sizeof(fname), "ppt#_%d.json", res_.id);
 		else if(resource_type_is(res_, "cicn"))
 			snprintf(fname, sizeof(fname), "cicn_%d.json", res_.id);
+		else if(resource_type_is(res_, "crsr"))
+			snprintf(fname, sizeof(fname), "crsr_%d.json", res_.id);
 		else if(resource_type_is(res_, "SIZE"))
 			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
 		else if(resource_type_is(res_, "finf"))
@@ -855,7 +875,7 @@ bool stackimport_load_resource_fork(
 			std::memcmp(res.type.data, "dctb", 4) == 0 || std::memcmp(res.type.data, "fctb", 4) == 0 ||
 			std::memcmp(res.type.data, "wctb", 4) == 0 || std::memcmp(res.type.data, "pltt", 4) == 0 ||
 			std::memcmp(res.type.data, "ppat", 4) == 0 || std::memcmp(res.type.data, "ppt#", 4) == 0 ||
-			std::memcmp(res.type.data, "cicn", 4) == 0)
+			std::memcmp(res.type.data, "cicn", 4) == 0 || std::memcmp(res.type.data, "crsr", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

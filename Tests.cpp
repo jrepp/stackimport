@@ -509,6 +509,30 @@ std::vector<uint8_t> make_cicn_payload()
 	return data;
 }
 
+std::vector<uint8_t> make_crsr_payload()
+{
+	std::vector<uint8_t> data(163, 0);
+	rsrcd::write_u16be(data.data(), 0x8001);
+	rsrcd::write_u32be(data.data() + 2, 96);
+	rsrcd::write_u32be(data.data() + 6, 162);
+	rsrcd::write_u16be(data.data() + 14, 1);
+	data[20] = 0x80;
+	data[52] = 0x80;
+	rsrcd::write_u16be(data.data() + 84, 2);
+	rsrcd::write_u16be(data.data() + 86, 3);
+	rsrcd::write_u32be(data.data() + 88, 146);
+	rsrcd::write_u32be(data.data() + 92, 55);
+	rsrcd::write_u16be(data.data() + 100, 1);
+	rsrcd::write_u16be(data.data() + 106, 1);
+	rsrcd::write_u16be(data.data() + 108, 1);
+	rsrcd::write_u16be(data.data() + 128, 1);
+	rsrcd::write_u32be(data.data() + 138, 146);
+	rsrcd::write_u16be(data.data() + 150, 0x8000);
+	rsrcd::write_u16be(data.data() + 152, 0);
+	rsrcd::write_u16be(data.data() + 156, 0xFFFF);
+	return data;
+}
+
 void test_resource_image_transforms()
 {
 	assert_rgba_resource("ICON", 128, make_icon_payload(), 32, 32);
@@ -920,6 +944,14 @@ void test_resource_color_and_ui_transforms()
 	});
 	assert_rgba_resource("cicn", 3, cicnPayload, 1, 1);
 
+	{
+		CountingResourceOutput crsrOutput = parse_single_resource("crsr", 4, make_crsr_payload());
+		assert(crsrOutput.json_count == 1);
+		assert(crsrOutput.rgba_count == 2);
+		assert(crsrOutput.last_width == 16);
+		assert(crsrOutput.last_height == 16);
+	}
+
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
 	append_u32be(sizePayload, 0x00100000);
@@ -1125,6 +1157,40 @@ void test_resource_package_writes()
 	assert(cicnSummaries[0].outputArtifacts[1].path == "cicn_22.png");
 	assert(cicnSummaries[0].outputArtifacts[1].format == "png");
 	assert(cicnSummaries[0].outputArtifacts[1].mediaType == "image/png");
+
+	const std::vector<uint8_t> crsrFork = make_single_resource_fork("crsr", 23, make_crsr_payload());
+	const std::string crsrOutputPath = std::string("/tmp/stackimport-crsr-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(crsrOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState crsrPlatformState;
+	crsrPlatformState.resource_fork_data = crsrFork.data();
+	crsrPlatformState.resource_fork_size = crsrFork.size();
+	stackimport_platform crsrPlatform = resourceForkPlatform;
+	crsrPlatform.user_data = &crsrPlatformState;
+	const stackimport_internal_platform crsrInternalPlatform = stackimport_internal_platform_from_api(&crsrPlatform);
+	CountingResourceOutput crsrOutput;
+	std::vector<CResourceSummary> crsrSummaries;
+	std::string crsrStatus;
+	uint64_t crsrBytes = 0;
+	{
+		stackimport_platform_scope crsrScope(crsrInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			crsrOutputPath,
+			"Stack",
+			&crsrOutput,
+			crsrSummaries,
+			crsrStatus,
+			crsrBytes));
+	}
+	assert(crsrStatus == "ok");
+	assert(crsrSummaries.size() == 1);
+	assert(crsrSummaries[0].type == "crsr");
+	assert(crsrSummaries[0].status == "exported");
+	assert(crsrSummaries[0].outputFile == "crsr_23.json");
+	assert(crsrSummaries[0].outputArtifacts.size() == 3);
+	assert(crsrSummaries[0].outputArtifacts[0].path == "crsr_23.json");
+	assert(crsrSummaries[0].outputArtifacts[1].path == "crsr_23.png");
+	assert(crsrSummaries[0].outputArtifacts[2].path == "crsr_23_bitmap.png");
 
 	std::vector<uint8_t> packagePpatPayload(28);
 	rsrcd::write_u16be(packagePpatPayload.data(), 0);

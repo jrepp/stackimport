@@ -2106,6 +2106,112 @@ auto emit_cicn_transform(
 	return emitted;
 }
 
+auto emit_crsr_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload json_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed color cursor metadata");
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		"decoded color cursor pixels");
+
+	const bool wants_json = output.wants_resource_payload(json_descriptor);
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	if(!wants_json && !wants_image)
+		return true;
+
+	rsrcd::color_cursor::Cursor cursor{};
+	auto parse_result = rsrcd::color_cursor::parse(resource.data, cursor);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	if(wants_json)
+	{
+		StackImportRapidJsonAllocator base_alloc;
+		JsonPoolAllocator pool(2048, &base_alloc);
+		JsonDocument doc(&pool, 2048, &base_alloc);
+		doc.SetObject();
+		JsonPoolAllocator& allocator = doc.GetAllocator();
+		doc.AddMember("type", cursor.type, allocator);
+		doc.AddMember("pixelMapOffset", cursor.pixel_map_offset, allocator);
+		doc.AddMember("pixelDataOffset", cursor.pixel_data_offset, allocator);
+		doc.AddMember("expandedData", cursor.expanded_data, allocator);
+		doc.AddMember("expandedDepth", cursor.expanded_depth, allocator);
+		doc.AddMember("reserved", cursor.reserved, allocator);
+		doc.AddMember("hotspotY", cursor.hotspot_y, allocator);
+		doc.AddMember("hotspotX", cursor.hotspot_x, allocator);
+		doc.AddMember("colorTableOffset", cursor.color_table_offset, allocator);
+		doc.AddMember("cursorId", cursor.cursor_id, allocator);
+		add_json_pixel_map(doc, cursor.pixel_map, allocator);
+		if(!finish_json_resource_payload(json_descriptor, doc, base_alloc, output))
+			return false;
+	}
+
+	if(!wants_image)
+		return true;
+
+	const int32_t width = rsrcd::color_icon::rect_width(cursor.pixel_map.bounds);
+	const int32_t height = rsrcd::color_icon::rect_height(cursor.pixel_map.bounds);
+	if(width <= 0 || height <= 0)
+		return output.on_resource_error(ref, "crsr has empty bounds");
+	const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+	if(pixel_count > (static_cast<size_t>(1) << 26))
+		return output.on_resource_error(ref, "crsr image is too large");
+
+	StackImportRapidJsonAllocator image_alloc;
+	uint8_t* rgba = static_cast<uint8_t*>(image_alloc.Malloc(pixel_count * 4u));
+	uint8_t* bitmap = static_cast<uint8_t*>(image_alloc.Malloc(16u * 16u * 4u));
+	if(rgba == nullptr || bitmap == nullptr)
+	{
+		StackImportRapidJsonAllocator::Free(rgba);
+		StackImportRapidJsonAllocator::Free(bitmap);
+		return output.on_resource_error(ref, "allocation failed");
+	}
+	rsrcd::MutableBytes dst{rgba, pixel_count * 4u};
+	rsrcd::Result decode_result = rsrcd::color_cursor::decode_rgba(resource.data, cursor, dst);
+	if(!decode_result)
+	{
+		StackImportRapidJsonAllocator::Free(rgba);
+		StackImportRapidJsonAllocator::Free(bitmap);
+		return output.on_resource_error(ref, decode_result.message());
+	}
+	rsrcd::MutableBytes bitmap_dst{bitmap, 16u * 16u * 4u};
+	rsrcd::img::decode_1bit(cursor.bitmap, cursor.mask, 16, 16, bitmap_dst);
+	swap_bgra_to_rgba(bitmap, 16u * 16u);
+
+	image_descriptor.variant_index = 0;
+	image_descriptor.width = static_cast<uint32_t>(width);
+	image_descriptor.height = static_cast<uint32_t>(height);
+	image_descriptor.row_bytes = static_cast<uint32_t>(width) * 4u;
+	image_descriptor.hotspot_x = cursor.hotspot_x;
+	image_descriptor.hotspot_y = cursor.hotspot_y;
+	image_descriptor.data = rsrcd::Bytes{rgba, pixel_count * 4u};
+	bool emitted = output.on_resource_payload(image_descriptor);
+	if(emitted)
+	{
+		ResourcePayload bitmap_descriptor = image_descriptor;
+		bitmap_descriptor.variant_index = 1;
+		bitmap_descriptor.width = 16;
+		bitmap_descriptor.height = 16;
+		bitmap_descriptor.row_bytes = 16 * 4;
+		bitmap_descriptor.description = "decoded monochrome color cursor bitmap";
+		bitmap_descriptor.data = rsrcd::Bytes{bitmap, 16u * 16u * 4u};
+		emitted = output.on_resource_payload(bitmap_descriptor);
+	}
+	StackImportRapidJsonAllocator::Free(rgba);
+	StackImportRapidJsonAllocator::Free(bitmap);
+	return emitted;
+}
+
 void add_json_size_flag(JsonValue& flags, JsonPoolAllocator& allocator, const char* name, bool value)
 {
 	flags.AddMember(JsonValue().SetString(name, allocator), value, allocator);
@@ -2638,6 +2744,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "cicn"))
 		return emit_cicn_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "crsr"))
+		return emit_crsr_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);

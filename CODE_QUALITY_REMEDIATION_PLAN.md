@@ -180,6 +180,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - `ppat` and `ppt#` pixel patterns now also exercise the combined stream:
   metadata JSON is emitted with color pattern, tiled color pattern, monochrome
   bitmap, and tiled monochrome bitmap PNG artifacts.
+- `crsr` color cursors now use the combined stream as well: typed metadata,
+  decoded color cursor PNG, and decoded monochrome bitmap PNG are emitted from
+  one resource transform.
 - Resource domain types and callback helpers moved to
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
@@ -334,6 +337,10 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for `cicn` metadata and image output: parse through rsrcd, emit JSON
   metadata plus decoded RGBA pixels from one transform stream, and route package
   JSON/PNG artifact writing through that payload stream.
+- Done for `crsr` metadata and image output: parse through rsrcd, emit JSON
+  metadata plus decoded color and monochrome cursor PNG payloads from one
+  transform stream, and route package JSON/PNG artifact writing through that
+  payload stream.
 - Done for simple template-backed metadata: parse `RECT` and `TOOL` through
   rsrcd and route package JSON artifact writing through the shared transform
   payload.

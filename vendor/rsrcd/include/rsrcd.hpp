@@ -2956,6 +2956,92 @@ inline auto decode_rgba(Bytes data, const Icon& icon, MutableBytes out) -> Resul
 } // namespace color_icon
 
 // ============================================================================
+// Color cursor metadata (crsr)
+// ============================================================================
+
+namespace color_cursor {
+
+struct Cursor {
+    uint16_t type;
+    uint32_t pixel_map_offset;
+    uint32_t pixel_data_offset;
+    uint32_t expanded_data;
+    uint16_t expanded_depth;
+    uint32_t reserved;
+    Bytes bitmap;
+    Bytes mask;
+    int16_t hotspot_y;
+    int16_t hotspot_x;
+    uint32_t color_table_offset;
+    uint32_t cursor_id;
+    pixel_pattern::PixelMap pixel_map;
+};
+
+inline auto parse(Bytes data, Cursor& cursor) -> Result {
+    constexpr size_t header_size = 96;
+    if (data.size < header_size) return Error::unexpected_end();
+    cursor.type = read_u16be(data.data);
+    if ((cursor.type & 0xFFFEu) != 0x8000u) return Error::invalid_data("unsupported crsr type");
+    cursor.pixel_map_offset = read_u32be(data.data + 2);
+    cursor.pixel_data_offset = read_u32be(data.data + 6);
+    cursor.expanded_data = read_u32be(data.data + 10);
+    cursor.expanded_depth = read_u16be(data.data + 14);
+    cursor.reserved = read_u32be(data.data + 16);
+    cursor.bitmap = Bytes{data.data + 20, 32};
+    cursor.mask = Bytes{data.data + 52, 32};
+    cursor.hotspot_y = read_i16be(data.data + 84);
+    cursor.hotspot_x = read_i16be(data.data + 86);
+    cursor.color_table_offset = read_u32be(data.data + 88);
+    cursor.cursor_id = read_u32be(data.data + 92);
+
+    if (!range_in_bounds(cursor.pixel_map_offset, 4, data.size)) return Error::unexpected_end();
+    if (auto r = pixel_pattern::parse_pixel_map(data, cursor.pixel_map_offset + 4u, cursor.pixel_map); !r) return r;
+    if (cursor.pixel_map.pixel_size != 1 && cursor.pixel_map.pixel_size != 2 &&
+        cursor.pixel_map.pixel_size != 4 && cursor.pixel_map.pixel_size != 8) {
+        return Error::invalid_data("unsupported crsr pixel depth");
+    }
+    return Result::ok();
+}
+
+template<size_t Cap = 256>
+inline auto decode_rgba(Bytes data, const Cursor& cursor, MutableBytes out) -> Result {
+    const int32_t width = color_icon::rect_width(cursor.pixel_map.bounds);
+    const int32_t height = color_icon::rect_height(cursor.pixel_map.bounds);
+    if (width <= 0 || height <= 0) return Error::invalid_data("crsr has empty bounds");
+    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (out.size < pixel_count * 4u) return Error::bounds();
+
+    color_icon::ColorTable<Cap> table;
+    uint32_t next_offset = 0;
+    if (auto r = color_icon::parse_color_table(data, cursor.color_table_offset, table, next_offset); !r) return r;
+    const size_t pixel_data_size = static_cast<size_t>(cursor.pixel_map.row_bytes) * static_cast<size_t>(height);
+    if (!range_in_bounds(cursor.pixel_data_offset, pixel_data_size, data.size)) return Error::unexpected_end();
+    Bytes pixel_data{data.data + cursor.pixel_data_offset, pixel_data_size};
+
+    for (int32_t y = 0; y < height; ++y) {
+        for (int32_t x = 0; x < width; ++x) {
+            uint16_t index = 0;
+            if (auto r = color_icon::lookup_index(pixel_data, cursor.pixel_map.row_bytes, cursor.pixel_map.pixel_size, x, y, index); !r) return r;
+            uint16_t mask_index = 0;
+            if (x < 16 && y < 16) {
+                if (auto r = color_icon::lookup_index(cursor.mask, 2, 1, x, y, mask_index); !r) return r;
+            }
+            const color_icon::ColorTableEntry* entry = table.find(index);
+            if (entry == nullptr) return Error::invalid_data("crsr color index not found");
+            out.data[0] = static_cast<uint8_t>(entry->red >> 8);
+            out.data[1] = static_cast<uint8_t>(entry->green >> 8);
+            out.data[2] = static_cast<uint8_t>(entry->blue >> 8);
+            out.data[3] = mask_index != 0 ? 0xFF : 0x00;
+            out.data += 4;
+            out.size -= 4;
+        }
+    }
+    return Result::ok();
+}
+
+} // namespace color_cursor
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 
