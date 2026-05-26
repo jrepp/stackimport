@@ -209,12 +209,23 @@ Installable build:
 
 The install step writes `bin/stackimport`, `lib/libstackimport_c.*`,
 `lib/libstackimport.a`, `include/stackimport_c.h`, and
-`lib/pkgconfig/stackimport.pc`. A Homebrew tap can wrap the same flow in a
+`lib/pkgconfig/stackimport.pc`. On macOS it also installs
+`Frameworks/StackImport.framework`. A Homebrew tap can wrap the same flow in a
 formula; consumers can discover the C API flags with
 `pkg-config --cflags --libs stackimport` after installing the formula. Use the
 shared C ABI library (`stackimport_c`) when embedding from C, Swift, Python,
 Ruby, or another host that should not inherit C++ link/runtime details from the
 static archive.
+
+Useful release build targets:
+
+    cmake --build build --target stackimport-release
+    cmake --build build --target stackimport-release-package
+
+On macOS, the release aggregate includes the versioned
+`libstackimport_c.dylib`, the combined static archive, and
+`StackImport.framework`. The deployment target defaults to macOS 15.0 unless
+`MACOSX_DEPLOYMENT_TARGET` or `CMAKE_OSX_DEPLOYMENT_TARGET` is set explicitly.
 
 Stable releases update the `jrepp/homebrew-stackimport` tap automatically. After
 a release completes, install with:
@@ -249,7 +260,8 @@ class Stackimport < Formula
         return stackimport_api_version() == STACKIMPORT_API_VERSION ? 0 : 1;
       }
     C
-    system ENV.cc, "smoke.c", "-I#{include}", "-L#{lib}", "-lstackimport_c", "-o", "smoke"
+    system ENV.cc, "smoke.c", "-I#{include}", "-L#{lib}",
+                   "-lstackimport_c", "-Wl,-rpath,#{lib}", "-o", "smoke"
     system "./smoke"
   end
 end

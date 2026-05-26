@@ -32,6 +32,7 @@ option(STACKIMPORT_ENABLE_CLANG_TIDY "Run clang-tidy during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_CPPCHECK "Run cppcheck during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_INCLUDE_WHAT_YOU_USE "Run include-what-you-use during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER "Run Clang static analyzer checks through clang-tidy" OFF)
+set(STACKIMPORT_INSTALL_FRAMEWORKDIR "Frameworks" CACHE PATH "Install destination for Apple frameworks")
 
 if(NOT STACKIMPORT_ENABLE_VENDOR)
     message(FATAL_ERROR "STACKIMPORT_ENABLE_VENDOR=OFF is unsupported; remove unused vendored dependencies instead of compiling without them")
@@ -102,6 +103,10 @@ enable_testing()
 if(STACKIMPORT_ENABLE_VENDOR)
     add_subdirectory(vendor)
 endif()
+set(STACKIMPORT_COMBINE_STATIC_ARCHIVE OFF)
+if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS AND NOT MSVC)
+    set(STACKIMPORT_COMBINE_STATIC_ARCHIVE ON)
+endif()
 
 set(STACKIMPORT_SOURCES
     woba.cpp
@@ -141,7 +146,11 @@ endif()
 
 add_library(stackimport_static STATIC ${STACKIMPORT_SOURCES})
 add_library(stackimport::static ALIAS stackimport_static)
-set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport_core)
+if(STACKIMPORT_COMBINE_STATIC_ARCHIVE)
+    set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport_core)
+else()
+    set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport)
+endif()
 target_compile_definitions(stackimport_static PUBLIC MAC_CODE=0)
 target_include_directories(stackimport_static
     PUBLIC
@@ -185,6 +194,10 @@ set_target_properties(stackimport_shared PROPERTIES
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+    VERSION "${STACKIMPORT_VERSION_CORE}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    MACOSX_RPATH ON
+    INSTALL_NAME_DIR "@rpath"
     PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
 )
 target_compile_definitions(stackimport_shared
@@ -210,9 +223,57 @@ if(STACKIMPORT_ENABLE_VENDOR)
     endif()
 endif()
 
+if(APPLE)
+    set_source_files_properties(stackimport_c.h PROPERTIES MACOSX_PACKAGE_LOCATION Headers)
+    add_library(stackimport_framework SHARED ${STACKIMPORT_SOURCES} stackimport_c.h)
+    add_library(stackimport::framework ALIAS stackimport_framework)
+    set_target_properties(stackimport_framework PROPERTIES
+        FRAMEWORK TRUE
+        FRAMEWORK_VERSION A
+        OUTPUT_NAME StackImport
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        VERSION "${STACKIMPORT_VERSION_CORE}"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        MACOSX_RPATH ON
+        MACOSX_FRAMEWORK_IDENTIFIER "com.jrepp.stackimport"
+        MACOSX_FRAMEWORK_BUNDLE_NAME "StackImport"
+        MACOSX_FRAMEWORK_BUNDLE_VERSION "${STACKIMPORT_VERSION_FULL}"
+        MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${STACKIMPORT_VERSION_CORE}"
+        MACOSX_FRAMEWORK_ICON_FILE ""
+        PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+    )
+    target_compile_definitions(stackimport_framework
+        PRIVATE STACKIMPORT_BUILD_SHARED=1 STACKIMPORT_SHARED=1
+        PUBLIC MAC_CODE=0
+    )
+    target_include_directories(stackimport_framework
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+            "$<INSTALL_INTERFACE:${STACKIMPORT_INSTALL_FRAMEWORKDIR}/StackImport.framework/Headers>"
+    )
+
+    if(STACKIMPORT_ENABLE_VENDOR)
+        target_link_libraries(stackimport_framework
+            PUBLIC ${STACKIMPORT_CORE_VENDOR_PUBLIC_LIBRARIES}
+            PRIVATE ${STACKIMPORT_CORE_VENDOR_PRIVATE_LIBRARIES}
+        )
+        if(STACKIMPORT_BUILD_VENDOR_TOOLS)
+            target_sources(stackimport_framework PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
+            target_link_libraries(stackimport_framework PRIVATE vendor_resource_file_static)
+            target_compile_definitions(stackimport_framework PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
+            add_dependencies(stackimport_framework vendor_resource_dasm)
+        endif()
+    endif()
+endif()
+
 add_executable(stackimport main.cpp)
 target_link_libraries(stackimport PRIVATE stackimport_static)
 set(STACKIMPORT_CORE_TARGETS stackimport_static stackimport_shared stackimport)
+if(TARGET stackimport_framework)
+    list(APPEND STACKIMPORT_CORE_TARGETS stackimport_framework)
+endif()
 
 if(STACKIMPORT_BUILD_TESTS)
     add_executable(stackimport-tests TestsMain.cpp Tests.cpp)
@@ -231,7 +292,12 @@ install(TARGETS stackimport stackimport_shared
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
-if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
+if(TARGET stackimport_framework)
+    install(TARGETS stackimport_framework
+        FRAMEWORK DESTINATION "${STACKIMPORT_INSTALL_FRAMEWORKDIR}"
+    )
+endif()
+if(STACKIMPORT_COMBINE_STATIC_ARCHIVE)
     set(STACKIMPORT_VENDOR_ARCHIVE "${CMAKE_BINARY_DIR}/libstackimport.a")
     install(FILES "${STACKIMPORT_VENDOR_ARCHIVE}"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -245,7 +311,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stackimport.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
 )
 
-if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
+if(STACKIMPORT_COMBINE_STATIC_ARCHIVE)
     set(STACKIMPORT_COMBINED_STATIC_INPUTS "$<TARGET_FILE:stackimport_static>")
     foreach(vendor_static_library_target IN LISTS STACKIMPORT_VENDOR_STATIC_LIBRARY_TARGETS)
         string(APPEND STACKIMPORT_COMBINED_STATIC_INPUTS "|$<TARGET_FILE:${vendor_static_library_target}>")
@@ -270,6 +336,52 @@ if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
         DEPENDS "${STACKIMPORT_VENDOR_ARCHIVE}"
     )
 endif()
+
+set(STACKIMPORT_RELEASE_TARGETS
+    stackimport
+    stackimport_shared
+    stackimport_static
+)
+if(TARGET stackimport-vendor-static)
+    list(APPEND STACKIMPORT_RELEASE_TARGETS stackimport-vendor-static)
+endif()
+if(TARGET stackimport_framework)
+    list(APPEND STACKIMPORT_RELEASE_TARGETS stackimport_framework)
+endif()
+add_custom_target(stackimport-release
+    DEPENDS ${STACKIMPORT_RELEASE_TARGETS}
+)
+if(APPLE)
+    add_custom_target(stackimport-macos-dylib
+        DEPENDS stackimport_shared
+        COMMENT "Build the macOS-compatible stackimport_c dylib"
+    )
+    add_custom_target(stackimport-macos-framework
+        DEPENDS stackimport_framework
+        COMMENT "Build the StackImport.framework bundle"
+    )
+endif()
+
+set(STACKIMPORT_RELEASE_PLATFORM "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(STACKIMPORT_RELEASE_PACKAGE_NAME "stackimport-${STACKIMPORT_VERSION_FULL}-${STACKIMPORT_RELEASE_PLATFORM}")
+set(STACKIMPORT_RELEASE_ROOT "${CMAKE_BINARY_DIR}/release")
+set(STACKIMPORT_RELEASE_PACKAGE_DIR "${STACKIMPORT_RELEASE_ROOT}/${STACKIMPORT_RELEASE_PACKAGE_NAME}")
+set(STACKIMPORT_RELEASE_PACKAGE_ZIP "${STACKIMPORT_RELEASE_ROOT}/${STACKIMPORT_RELEASE_PACKAGE_NAME}.zip")
+file(MAKE_DIRECTORY "${STACKIMPORT_RELEASE_ROOT}")
+add_custom_target(stackimport-release-package
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${STACKIMPORT_RELEASE_PACKAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${STACKIMPORT_RELEASE_ROOT}"
+    COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --config $<CONFIG> --prefix "${STACKIMPORT_RELEASE_PACKAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+        "${STACKIMPORT_RELEASE_PACKAGE_DIR}/"
+    COMMAND "${CMAKE_COMMAND}" -E tar cf "${STACKIMPORT_RELEASE_PACKAGE_ZIP}" --format=zip -- "${STACKIMPORT_RELEASE_PACKAGE_NAME}"
+    WORKING_DIRECTORY "${STACKIMPORT_RELEASE_ROOT}"
+    DEPENDS stackimport-release
+    COMMENT "Packaging ${STACKIMPORT_RELEASE_PACKAGE_ZIP}"
+    VERBATIM
+)
 
 if(STACKIMPORT_STRICT_WARNINGS)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")

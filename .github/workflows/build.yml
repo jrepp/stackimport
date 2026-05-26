@@ -48,11 +48,10 @@ jobs:
           -S .
           -B build
           -DCMAKE_BUILD_TYPE=Release
-          -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
           -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
 
-      - name: Build static library, CLI, and tests
-        run: cmake --build build --config Release --target stackimport_static stackimport stackimport-tests stackimport-rsrcd-tests --parallel
+      - name: Build release artifacts, CLI, and tests
+        run: cmake --build build --config Release --target stackimport-release stackimport-tests stackimport-rsrcd-tests --parallel
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
@@ -72,6 +71,11 @@ jobs:
             cp build/stackimport "${artifact_dir}/bin/"
             cp build/stackimport-tests "${artifact_dir}/bin/"
             cp build/libstackimport.a "${artifact_dir}/lib/"
+            cp build/libstackimport_c.* "${artifact_dir}/lib/"
+            if [[ -d build/StackImport.framework ]]; then
+              mkdir -p "${artifact_dir}/Frameworks"
+              cp -R build/StackImport.framework "${artifact_dir}/Frameworks/"
+            fi
           fi
 
           cp stackimport_c.h "${artifact_dir}/include/"

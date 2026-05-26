@@ -58,8 +58,9 @@ manually with a `version` input. It:
 
 1. Validates `VERSION.txt`, the requested version, and the tag name.
 2. Builds and tests the same six platform targets as the build workflow.
-3. Packages the CLI, test binary, static library, public header, `VERSION.txt`, and
-   `README.md` into per-platform zip archives.
+3. Packages the CLI, test binary, shared C ABI library, combined static library,
+   public header, `VERSION.txt`, and `README.md` into per-platform zip archives.
+   macOS artifacts also include `StackImport.framework`.
 4. Publishes a GitHub release and uploads those archives.
 5. For stable releases, updates the `jrepp/homebrew-stackimport` tap formula
    after the GitHub release is published successfully.
@@ -72,6 +73,10 @@ as GitHub prereleases and do not update the Homebrew tap.
 The tap repository is `jrepp/homebrew-stackimport`. The release workflow renders
 `Formula/stackimport.rb` with `scripts/render_homebrew_formula.py`, using the
 release tag's GitHub source archive and its SHA-256 hash.
+
+The formula builds from source with the default vendored conversion-tool support
+enabled. It installs the CLI, shared dylib, combined static archive, public C
+header, `pkg-config` file, and on macOS `StackImport.framework`.
 
 Cross-repository writes use the `HOMEBREW_TAP_DEPLOY_KEY` Actions secret on
 `jrepp/stackimport`. The matching public deploy key must be installed on

@@ -41,7 +41,6 @@ class Stackimport < Formula
     system "cmake", "-S", ".", "-B", "build",
                     "-DSTACKIMPORT_BUILD_TESTS=OFF",
                     "-DSTACKIMPORT_BUILD_VENDOR_TESTS=OFF",
-                    "-DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF",
                     *std_cmake_args
     system "cmake", "--build", "build", "--target", "install"
   end
@@ -55,8 +54,24 @@ class Stackimport < Formula
         return stackimport_api_version() == STACKIMPORT_API_VERSION ? 0 : 1;
       }}
     C
-    system ENV.cc, "smoke.c", "-I#{{include}}", "-L#{{lib}}", "-lstackimport_c", "-o", "smoke"
+    system ENV.cc, "smoke.c", "-I#{{include}}", "-L#{{lib}}",
+                   "-lstackimport_c", "-Wl,-rpath,#{{lib}}", "-o", "smoke"
     system "./smoke"
+
+    if OS.mac?
+      assert_path_exists prefix/"Frameworks/StackImport.framework/Headers/stackimport_c.h"
+
+      (testpath/"framework_smoke.c").write <<~C
+        #include <StackImport/stackimport_c.h>
+        int main(void) {{
+          return stackimport_api_version() == STACKIMPORT_API_VERSION ? 0 : 1;
+        }}
+      C
+      system ENV.cc, "framework_smoke.c", "-F#{{prefix}}/Frameworks",
+                     "-framework", "StackImport", "-Wl,-rpath,#{{prefix}}/Frameworks",
+                     "-o", "framework_smoke"
+      system "./framework_smoke"
+    end
   end
 end
 '''
