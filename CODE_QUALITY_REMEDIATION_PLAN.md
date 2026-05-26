@@ -170,20 +170,28 @@ when parser behavior changes, updates to the relevant format documentation under
 - Resource reference conversion, native/converted payload construction, and
   callback filtering/delivery now share helpers between the SAX walker and
   package exporter.
-- Still open: conversion logic is duplicated between
-  `include/stackimport_sax.hpp` and `StackImportResourceFork.cpp`; the SAX path
-  only covers a subset of converted resource families.
-- Remaining work: move conversion handlers behind one owned event/converter
-  pipeline and make SAX/resource walking delegate to it or remove the duplicate
-  conversion surface.
+- Resource domain types and callback helpers moved to
+  `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
+  for ICON, CURS, and PAT# moved to `StackImportResourceTransforms.cpp`.
+  `ResourceForkParser` and the package exporter now share those transform rules
+  for callback payload delivery.
+- Still open: package artifact writing still performs its own ICON, CURS, and
+  PAT# PNG decode/write pass, and PLTE, `snd `, 68K disassembly, and PowerPC
+  disassembly have not yet been moved into the shared transform interface.
+- Remaining work: expand the shared transform interface into one owned
+  event/converter pipeline and make package output consume transform events for
+  artifact writing instead of decoding the same resource families locally.
 
 ### Tasks
 
 - Partly done: define a `ResourceEvent` or equivalent owned domain model:
   native resource, converted payload, conversion diagnostic, output artifact, and
   summary metadata.
-- Move ICON, CURS, PAT#, PLTE, `snd `, 68K disassembly, and PowerPC disassembly
-  into resource converter handlers.
+- Partly done: move ICON, CURS, and PAT# callback transforms into
+  `StackImportResourceTransforms.cpp`.
+- Move PLTE, `snd `, 68K disassembly, and PowerPC disassembly into resource
+  converter handlers, then route package artifact writing through the same event
+  stream.
 - Let package output, C resource callbacks, and future corpus indexing consume
   the same event stream.
 - Remove duplicate conversion code from `include/stackimport_sax.hpp` and
@@ -216,6 +224,10 @@ when parser behavior changes, updates to the relevant format documentation under
   pointer/size shims as if it were an opaque third-party vendor. Prefer improving
   and reusing its typed views, parsers, and bounded byte utilities across the
   importer.
+- StackImport-owned headers now include `rsrcd.hpp` through the `vendor_rsrcd`
+  target include path instead of spelling the filesystem path
+  `vendor/rsrcd/include/rsrcd.hpp`; `vendor_rsrcd` is a public usage
+  requirement for StackImport targets that expose typed resource APIs.
 - MACE decoding now goes through `StackImportMaceResourceDasmAdapter`; the
   private `resource_dasm/src/AudioCodecs.hh` include is isolated to the narrow
   adapter source under `vendor/`.

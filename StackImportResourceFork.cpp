@@ -1,6 +1,8 @@
 #include "CStackFile.h"
 #include "Mac68kDisassembly.h"
 #include "StackImportPngWriter.h"
+#include "StackImportResourceTransforms.h"
+#include "StackImportResourceTypes.h"
 #include "StackImportSoundConverter.h"
 
 #include <cerrno>
@@ -9,7 +11,7 @@
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
 #include "stackimport_rapidjson_allocator.h"
-#include "vendor/rsrcd/include/rsrcd.hpp"
+#include "rsrcd.hpp"
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
@@ -236,6 +238,8 @@ bool stackimport_load_resource_fork(
 		const stackimport::ResourceRef resourceRef = stackimport::resource_ref_from_resref(res);
 		if(!resourceStreamingStopped && !stackimport::emit_resource_payload(resourceOutput, stackimport::make_native_resource_payload(resourceRef, res.data)))
 			resourceStreamingStopped = true;
+		if(resourceOutput != nullptr && !resourceStreamingStopped && !stackimport::emit_builtin_resource_transforms(res, resourceRef, *resourceOutput))
+			resourceStreamingStopped = true;
 
 		const bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
 		const bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
@@ -260,15 +264,6 @@ bool stackimport_load_resource_fork(
 				if(rsrcd::img::decode_icon_bw(res.data, dst))
 				{
 					swap_bgra_to_rgba(bgra, 32 * 32);
-					if(!resourceStreamingStopped)
-					{
-						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 32x32 ICON pixels");
-						payload.width = 32;
-						payload.height = 32;
-						payload.row_bytes = 32 * 4;
-						if(!stackimport::emit_resource_payload(resourceOutput, payload))
-							resourceStreamingStopped = true;
-					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "ICON_%d.png", res.id);
 					if(stackimport::WritePngFile(output_path(basePath, fname), 32, 32, 4, bgra, 32 * 4))
@@ -294,17 +289,6 @@ bool stackimport_load_resource_fork(
 				if(rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y))
 				{
 					swap_bgra_to_rgba(bgra, 16 * 16);
-					if(!resourceStreamingStopped)
-					{
-						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 16x16 CURS pixels");
-						payload.width = 16;
-						payload.height = 16;
-						payload.row_bytes = 16 * 4;
-						payload.hotspot_x = hot_x;
-						payload.hotspot_y = hot_y;
-						if(!stackimport::emit_resource_payload(resourceOutput, payload))
-							resourceStreamingStopped = true;
-					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "CURS_%d.png", res.id);
 					if(stackimport::WritePngFile(output_path(basePath, fname), 16, 16, 4, bgra, 16 * 4))
@@ -333,16 +317,6 @@ bool stackimport_load_resource_fork(
 					rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
 					rsrcd::img::decode_pat(pat, dst);
 					swap_bgra_to_rgba(bgra, 8 * 8);
-					if(!resourceStreamingStopped)
-					{
-						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 8x8 PAT# pattern pixels");
-						payload.variant_index = static_cast<uint32_t>(pi);
-						payload.width = 8;
-						payload.height = 8;
-						payload.row_bytes = 8 * 4;
-						if(!stackimport::emit_resource_payload(resourceOutput, payload))
-							resourceStreamingStopped = true;
-					}
 					char fname[64];
 					snprintf(fname, sizeof(fname), "PAT#_%d_%02zu.png", res.id, pi);
 					if(stackimport::WritePngFile(output_path(basePath, fname), 8, 8, 4, bgra, 8 * 4))

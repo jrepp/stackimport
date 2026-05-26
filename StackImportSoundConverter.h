@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "stackimport_platform_internal.h"
-#include "vendor/rsrcd/include/rsrcd.hpp"
+#include "rsrcd.hpp"
 
 namespace stackimport {
 
