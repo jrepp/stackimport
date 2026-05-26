@@ -174,24 +174,25 @@ when parser behavior changes, updates to the relevant format documentation under
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# moved to `StackImportResourceTransforms.cpp`.
   `ResourceForkParser` and the package exporter now share those transform rules
-  for callback payload delivery.
-- Still open: package artifact writing still performs its own ICON, CURS, and
-  PAT# PNG decode/write pass, and PLTE, `snd `, 68K disassembly, and PowerPC
-  disassembly have not yet been moved into the shared transform interface.
+  for callback payload delivery; the package exporter also writes ICON, CURS,
+  and PAT# PNG artifacts from the same transform payloads instead of decoding
+  them a second time.
+- Still open: PLTE, `snd `, 68K disassembly, and PowerPC disassembly have not
+  yet been moved into the shared transform interface.
 - Remaining work: expand the shared transform interface into one owned
-  event/converter pipeline and make package output consume transform events for
-  artifact writing instead of decoding the same resource families locally.
+  event/converter pipeline for metadata, diagnostics, and artifacts beyond the
+  current image-payload transform cases.
 
 ### Tasks
 
 - Partly done: define a `ResourceEvent` or equivalent owned domain model:
   native resource, converted payload, conversion diagnostic, output artifact, and
   summary metadata.
-- Partly done: move ICON, CURS, and PAT# callback transforms into
-  `StackImportResourceTransforms.cpp`.
+- Done for image resources: move ICON, CURS, and PAT# transforms into
+  `StackImportResourceTransforms.cpp`, and route package PNG artifact writing
+  through those transform payloads.
 - Move PLTE, `snd `, 68K disassembly, and PowerPC disassembly into resource
-  converter handlers, then route package artifact writing through the same event
-  stream.
+  converter handlers, including their diagnostics and package artifacts.
 - Let package output, C resource callbacks, and future corpus indexing consume
   the same event stream.
 - Remove duplicate conversion code from `include/stackimport_sax.hpp` and

@@ -134,16 +134,6 @@ bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 	return closeStatus == 0;
 }
 
-static void swap_bgra_to_rgba(uint8_t* data, int pixel_count)
-{
-	for(int i = 0; i < pixel_count; i++)
-	{
-		uint8_t tmp = data[i * 4];
-		data[i * 4] = data[i * 4 + 2];
-		data[i * 4 + 2] = tmp;
-	}
-}
-
 std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
 {
 	std::string result;
@@ -162,6 +152,99 @@ std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
 	}
 	return result;
 }
+
+bool resource_type_is(const rsrcd::ResRef& res, const char* type)
+{
+	return res.type.size == 4 && res.type.data != nullptr && std::memcmp(res.type.data, type, 4) == 0;
+}
+
+class PackageBuiltinTransformOutput final : public stackimport::IResourceOutput {
+public:
+	PackageBuiltinTransformOutput(
+		const rsrcd::ResRef& res,
+		const std::string& basePath,
+		stackimport::IResourceOutput* downstream,
+		CResourceSummary& summary,
+		bool& downstreamStopped)
+		: res_(res)
+		, basePath_(basePath)
+		, downstream_(downstream)
+		, summary_(summary)
+		, downstreamStopped_(downstreamStopped)
+	{}
+
+	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
+	{
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
+			return true;
+		if(downstream_ == nullptr || downstreamStopped_)
+			return false;
+		return downstream_->wants_resource_payload(payload);
+	}
+
+	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
+	{
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
+			write_png_payload(payload);
+		if(downstream_ != nullptr && !downstreamStopped_ && !stackimport::emit_resource_payload(*downstream_, payload))
+			downstreamStopped_ = true;
+		return true;
+	}
+
+	auto exported_count() const -> int { return exportedCount_; }
+
+private:
+	void write_png_payload(const stackimport::ResourcePayload& payload)
+	{
+		if(payload.data.data == nullptr || payload.width == 0 || payload.height == 0 || payload.row_bytes == 0)
+			return;
+
+		char fname[64];
+		if(resource_type_is(res_, "ICON"))
+		{
+			snprintf(fname, sizeof(fname), "ICON_%d.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = fname;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote ICON #%d as PNG.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
+		if(resource_type_is(res_, "CURS"))
+		{
+			snprintf(fname, sizeof(fname), "CURS_%d.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = fname;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote CURS #%d as PNG (hotspot %u,%u).\n", res_.id, static_cast<unsigned>(payload.hotspot_x), static_cast<unsigned>(payload.hotspot_y));
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
+		if(resource_type_is(res_, "PAT#"))
+		{
+			snprintf(fname, sizeof(fname), "PAT#_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+				exportedCount_++;
+		}
+	}
+
+	const rsrcd::ResRef& res_;
+	const std::string& basePath_;
+	stackimport::IResourceOutput* downstream_;
+	CResourceSummary& summary_;
+	bool& downstreamStopped_;
+	int exportedCount_ = 0;
+};
 
 } // namespace
 
@@ -238,8 +321,6 @@ bool stackimport_load_resource_fork(
 		const stackimport::ResourceRef resourceRef = stackimport::resource_ref_from_resref(res);
 		if(!resourceStreamingStopped && !stackimport::emit_resource_payload(resourceOutput, stackimport::make_native_resource_payload(resourceRef, res.data)))
 			resourceStreamingStopped = true;
-		if(resourceOutput != nullptr && !resourceStreamingStopped && !stackimport::emit_builtin_resource_transforms(res, resourceRef, *resourceOutput))
-			resourceStreamingStopped = true;
 
 		const bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
 		const bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
@@ -257,72 +338,24 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "ICON", 4) == 0)
 		{
-			if(res.data.size == 128)
-			{
-				uint8_t bgra[32 * 32 * 4];
-				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
-				if(rsrcd::img::decode_icon_bw(res.data, dst))
-				{
-					swap_bgra_to_rgba(bgra, 32 * 32);
-					char fname[64];
-					snprintf(fname, sizeof(fname), "ICON_%d.png", res.id);
-					if(stackimport::WritePngFile(output_path(basePath, fname), 32, 32, 4, bgra, 32 * 4))
-					{
-						summary.status = "exported";
-						summary.outputFile = fname;
-						stackimport_emit_infof("Status: Wrote ICON #%d as PNG.\n", res.id);
-					}
-					else
-						summary.status = "export_failed";
-				}
-			}
+			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "CURS", 4) == 0)
 		{
-			if(res.data.size >= 68)
-			{
-				uint8_t bgra[16 * 16 * 4];
-				rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
-				int16_t hot_x = 0, hot_y = 0;
-				if(rsrcd::img::decode_curs(res.data, dst, hot_x, hot_y))
-				{
-					swap_bgra_to_rgba(bgra, 16 * 16);
-					char fname[64];
-					snprintf(fname, sizeof(fname), "CURS_%d.png", res.id);
-					if(stackimport::WritePngFile(output_path(basePath, fname), 16, 16, 4, bgra, 16 * 4))
-					{
-						summary.status = "exported";
-						summary.outputFile = fname;
-						stackimport_emit_infof("Status: Wrote CURS #%d as PNG (hotspot %u,%u).\n", res.id, static_cast<unsigned>(hot_x), static_cast<unsigned>(hot_y));
-					}
-					else
-						summary.status = "export_failed";
-				}
-			}
+			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "PAT#", 4) == 0)
 		{
 			size_t patCount = rsrcd::patlist::count(res.data);
-			int exported = 0;
-			for(size_t pi = 0; pi < patCount; pi++)
-			{
-				rsrcd::Bytes pat = rsrcd::patlist::pattern_at(res.data, pi);
-				if(pat.size == 8)
-				{
-					uint8_t bgra[8 * 8 * 4];
-					rsrcd::MutableBytes dst{bgra, sizeof(bgra)};
-					rsrcd::img::decode_pat(pat, dst);
-					swap_bgra_to_rgba(bgra, 8 * 8);
-					char fname[64];
-					snprintf(fname, sizeof(fname), "PAT#_%d_%02zu.png", res.id, pi);
-					if(stackimport::WritePngFile(output_path(basePath, fname), 8, 8, 4, bgra, 8 * 4))
-						exported++;
-				}
-			}
+			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			int exported = transformOutput.exported_count();
 			if(exported > 0)
 			{
 				summary.status = "exported";
