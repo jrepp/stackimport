@@ -42,6 +42,33 @@ auto resource_type_is(const rsrcd::ResRef& resource, const char* type) -> bool
 		std::memcmp(resource.type.data, type, 4) == 0;
 }
 
+struct IndexedIconSpec
+{
+	uint16_t width;
+	uint16_t height;
+	uint8_t bits_per_pixel;
+	const char* description;
+};
+
+auto indexed_icon_spec(const rsrcd::ResRef& resource, IndexedIconSpec& spec) -> bool
+{
+	if(resource_type_is(resource, "icl4"))
+		spec = {32, 32, 4, "decoded 32x32 4-bit large color icon pixels"};
+	else if(resource_type_is(resource, "icl8"))
+		spec = {32, 32, 8, "decoded 32x32 8-bit large color icon pixels"};
+	else if(resource_type_is(resource, "icm4"))
+		spec = {16, 12, 4, "decoded 16x12 4-bit mini color icon pixels"};
+	else if(resource_type_is(resource, "icm8"))
+		spec = {16, 12, 8, "decoded 16x12 8-bit mini color icon pixels"};
+	else if(resource_type_is(resource, "ics4"))
+		spec = {16, 16, 4, "decoded 16x16 4-bit small color icon pixels"};
+	else if(resource_type_is(resource, "ics8"))
+		spec = {16, 16, 8, "decoded 16x16 8-bit small color icon pixels"};
+	else
+		return false;
+	return true;
+}
+
 auto json_string(const std::string& value, JsonPoolAllocator& allocator) -> JsonValue
 {
 	JsonValue result;
@@ -1028,6 +1055,34 @@ auto emit_builtin_resource_transforms(
 			if(!output.on_resource_payload(descriptor))
 				return false;
 		}
+	}
+
+	IndexedIconSpec indexedSpec{};
+	if(indexed_icon_spec(resource, indexedSpec))
+	{
+		const size_t pixelCount = static_cast<size_t>(indexedSpec.width) * indexedSpec.height;
+		ResourcePayload descriptor = make_converted_resource_payload(
+			ref,
+			ResourcePayloadFormat::Rgba32,
+			rsrcd::Bytes{nullptr, pixelCount * 4u},
+			"image/x-rgba32",
+			indexedSpec.description);
+		descriptor.width = indexedSpec.width;
+		descriptor.height = indexedSpec.height;
+		descriptor.row_bytes = indexedSpec.width * 4;
+		if(!output.wants_resource_payload(descriptor))
+			return true;
+
+		uint8_t rgba[32 * 32 * 4];
+		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+		rsrcd::Result decodeResult = indexedSpec.bits_per_pixel == 4 ?
+			rsrcd::img::decode_icon_4bit(resource.data, indexedSpec.width, indexedSpec.height, dst) :
+			rsrcd::img::decode_icon_8bit(resource.data, indexedSpec.width, indexedSpec.height, dst);
+		if(!decodeResult)
+			return output.on_resource_error(ref, decodeResult.message());
+		swap_bgra_to_rgba(rgba, pixelCount);
+		descriptor.data = rsrcd::Bytes{rgba, pixelCount * 4u};
+		return output.on_resource_payload(descriptor);
 	}
 
 	if(resource_type_is(resource, "PLTE"))

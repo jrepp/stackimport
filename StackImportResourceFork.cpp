@@ -118,6 +118,13 @@ bool resource_type_is(const rsrcd::ResRef& res, const char* type)
 	return res.type.size == 4 && res.type.data != nullptr && std::memcmp(res.type.data, type, 4) == 0;
 }
 
+bool resource_type_is_indexed_icon(const rsrcd::ResRef& res)
+{
+	return resource_type_is(res, "icl4") || resource_type_is(res, "icl8") ||
+		resource_type_is(res, "icm4") || resource_type_is(res, "icm8") ||
+		resource_type_is(res, "ics4") || resource_type_is(res, "ics8");
+}
+
 class PackageBuiltinTransformOutput final : public stackimport::IResourceOutput {
 public:
 	PackageBuiltinTransformOutput(
@@ -277,6 +284,21 @@ private:
 			snprintf(fname, sizeof(fname), "SICN_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 				exportedCount_++;
+			return;
+		}
+
+		if(resource_type_is_indexed_icon(res_))
+		{
+			snprintf(fname, sizeof(fname), "%c%c%c%c_%d.png",
+				static_cast<char>(res_.type.data[0]),
+				static_cast<char>(res_.type.data[1]),
+				static_cast<char>(res_.type.data[2]),
+				static_cast<char>(res_.type.data[3]),
+				res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+				exportedCount_++;
+			else
+				summary_.status = "export_failed";
 			return;
 		}
 	}
@@ -586,6 +608,15 @@ bool stackimport_load_resource_fork(
 				summary.status = "exported";
 				stackimport_emit_infof("Status: Wrote %d small icons from SICN #%d as PNG.\n", exported, res.id);
 			}
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(resource_type_is_indexed_icon(res))
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			if(transformOutput.exported_count() > 0)
+				summary.status = "exported";
 			resourceSummaries.push_back(summary);
 			continue;
 		}

@@ -626,6 +626,38 @@ inline void decode_8bit(const Bytes& src, const Bytes& mask, int w, int h, Mutab
     }
 }
 
+// Decode an opaque indexed 4-bit icon bitmap to BGRA.
+// out must be w*h*4 bytes. The input must be exactly w*h/2 bytes.
+inline auto decode_icon_4bit(Bytes data, int w, int h, MutableBytes out) -> Result {
+    if ((w <= 0) || (h <= 0) || (w & 1)) return Error::invalid_data("invalid 4-bit icon dimensions");
+    const size_t expected = static_cast<size_t>(w) * static_cast<size_t>(h) / 2u;
+    const size_t bgra_size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    if (data.size != expected) return Error::invalid_data("incorrect 4-bit icon data size");
+    if (out.size < bgra_size) return Error::bounds();
+
+    uint8_t opaque_mask[128];
+    for (auto& b : opaque_mask) b = 0xFF;
+    Bytes mask{opaque_mask, static_cast<size_t>(((w + 15) >> 4) * h)};
+    decode_4bit(data, mask, w, h, out);
+    return Result::ok();
+}
+
+// Decode an opaque indexed 8-bit icon bitmap to BGRA.
+// out must be w*h*4 bytes. The input must be exactly w*h bytes.
+inline auto decode_icon_8bit(Bytes data, int w, int h, MutableBytes out) -> Result {
+    if ((w <= 0) || (h <= 0)) return Error::invalid_data("invalid 8-bit icon dimensions");
+    const size_t expected = static_cast<size_t>(w) * static_cast<size_t>(h);
+    const size_t bgra_size = expected * 4u;
+    if (data.size != expected) return Error::invalid_data("incorrect 8-bit icon data size");
+    if (out.size < bgra_size) return Error::bounds();
+
+    uint8_t opaque_mask[1024];
+    for (auto& b : opaque_mask) b = 0xFF;
+    Bytes mask{opaque_mask, expected};
+    decode_8bit(data, mask, w, h, out);
+    return Result::ok();
+}
+
 // Decode plain ICON resource (128 bytes, 32x32 1-bit, no mask).
 // out must be 32*32*4 = 4096 bytes.
 inline auto decode_icon_bw(Bytes data, MutableBytes out) -> Result {

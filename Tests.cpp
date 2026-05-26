@@ -599,6 +599,36 @@ void	RunTests()
 	assert(sicnOutput.last_height == 16);
 	assert(sicnOutput.last_payload_size == 16u * 16u * 4u);
 
+	struct IndexedIconCase
+	{
+		const char* type;
+		uint16_t width;
+		uint16_t height;
+		uint8_t bits_per_pixel;
+	};
+	const IndexedIconCase indexedIconCases[] = {
+		{"icl4", 32, 32, 4},
+		{"icl8", 32, 32, 8},
+		{"icm4", 16, 12, 4},
+		{"icm8", 16, 12, 8},
+		{"ics4", 16, 16, 4},
+		{"ics8", 16, 16, 8},
+	};
+	for(const IndexedIconCase& c : indexedIconCases)
+	{
+		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height * c.bits_per_pixel / 8u;
+		std::vector<uint8_t> indexedPayload(bytesPerIcon);
+		indexedPayload[0] = c.bits_per_pixel == 4 ? 0x0Fu : 0xFFu;
+		const std::vector<uint8_t> indexedFork = make_single_resource_fork(c.type, 11, indexedPayload);
+		CountingResourceOutput indexedOutput;
+		assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{indexedFork.data(), indexedFork.size()}, indexedOutput));
+		assert(indexedOutput.native_count == 1);
+		assert(indexedOutput.rgba_count == 1);
+		assert(indexedOutput.last_width == c.width);
+		assert(indexedOutput.last_height == c.height);
+		assert(indexedOutput.last_payload_size == static_cast<size_t>(c.width) * c.height * 4u);
+	}
+
 	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
 	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);

@@ -699,6 +699,54 @@ static void test_decode_sicn_too_small() {
     CHECK(!r, "small icon too small should fail");
 }
 
+static void test_decode_icon_4bit() {
+    uint8_t data[16 * 16 / 2] = {};
+    data[0] = 0x0F;
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icon_4bit({data, sizeof(data)}, 16, 16, out);
+    CHECK_RESULT(r, "decode 4-bit icon");
+    CHECK(bgra[0] == 0xFF, "4-bit first pixel blue channel");
+    CHECK(bgra[1] == 0xFF, "4-bit first pixel green channel");
+    CHECK(bgra[2] == 0xFF, "4-bit first pixel red channel");
+    CHECK(bgra[3] == 0xFF, "4-bit first pixel opaque");
+    CHECK(bgra[4] == 0x00, "4-bit second pixel black");
+    CHECK(bgra[7] == 0xFF, "4-bit second pixel opaque");
+}
+
+static void test_decode_icon_8bit() {
+    uint8_t data[16 * 16] = {};
+    data[0] = 0xFF;
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icon_8bit({data, sizeof(data)}, 16, 16, out);
+    CHECK_RESULT(r, "decode 8-bit icon");
+    CHECK(bgra[0] == 0x00, "8-bit first pixel black");
+    CHECK(bgra[3] == 0xFF, "8-bit first pixel opaque");
+    CHECK(bgra[4] == 0xFF, "8-bit second pixel white");
+    CHECK(bgra[7] == 0xFF, "8-bit second pixel opaque");
+}
+
+static void test_decode_icon_4bit_bad_size() {
+    uint8_t data[127] = {};
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icon_4bit({data, sizeof(data)}, 16, 16, out);
+    CHECK(!r, "4-bit icon bad size should fail");
+}
+
+static void test_decode_icon_8bit_bad_size() {
+    uint8_t data[255] = {};
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icon_8bit({data, sizeof(data)}, 16, 16, out);
+    CHECK(!r, "8-bit icon bad size should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1406,6 +1454,10 @@ int main() {
     test_decode_pat_checkerboard();
     test_decode_sicn();
     test_decode_sicn_too_small();
+    test_decode_icon_4bit();
+    test_decode_icon_8bit();
+    test_decode_icon_4bit_bad_size();
+    test_decode_icon_8bit_bad_size();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();
