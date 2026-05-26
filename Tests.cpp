@@ -66,7 +66,6 @@ int STACKIMPORT_CALL test_resource_payload(const stackimport_resource_payload* p
 	return payload && payload->payload_size == size && (size == 0 || data != nullptr);
 }
 
-
 struct CountingPlatformState {
 	int opens = 0;
 	int reads = 0;
@@ -188,14 +187,13 @@ void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t
 	rsrcd::write_u32be(fork + 12, map_len);
 }
 
-
-void append_snd_u16be(std::vector<uint8_t>& data, uint16_t value)
+void append_u16be(std::vector<uint8_t>& data, uint16_t value)
 {
 	data.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
 	data.push_back(static_cast<uint8_t>(value & 0xFFu));
 }
 
-void append_snd_u32be(std::vector<uint8_t>& data, uint32_t value)
+void append_u32be(std::vector<uint8_t>& data, uint32_t value)
 {
 	data.push_back(static_cast<uint8_t>((value >> 24u) & 0xFFu));
 	data.push_back(static_cast<uint8_t>((value >> 16u) & 0xFFu));
@@ -203,20 +201,26 @@ void append_snd_u32be(std::vector<uint8_t>& data, uint32_t value)
 	data.push_back(static_cast<uint8_t>(value & 0xFFu));
 }
 
-std::vector<uint8_t> make_minimal_snd_fixture()
+std::vector<uint8_t> make_snd_format2_fixture(bool extraNullCommand, uint32_t commandOffset)
 {
 	std::vector<uint8_t> snd;
-	append_snd_u16be(snd, 2);
-	append_snd_u16be(snd, 0);
-	append_snd_u16be(snd, 1);
-	append_snd_u16be(snd, 0x8051);
-	append_snd_u16be(snd, 0);
-	append_snd_u32be(snd, 14);
-	append_snd_u32be(snd, 0);
-	append_snd_u32be(snd, 4);
-	append_snd_u32be(snd, 22050u << 16u);
-	append_snd_u32be(snd, 0);
-	append_snd_u32be(snd, 4);
+	append_u16be(snd, 2);
+	append_u16be(snd, 0);
+	append_u16be(snd, extraNullCommand ? 2 : 1);
+	if(extraNullCommand)
+	{
+		append_u16be(snd, 0);
+		append_u16be(snd, 0x5354);
+		append_u32be(snd, 0);
+	}
+	append_u16be(snd, 0x8051);
+	append_u16be(snd, 0);
+	append_u32be(snd, commandOffset);
+	append_u32be(snd, 0);
+	append_u32be(snd, 4);
+	append_u32be(snd, 22050u << 16u);
+	append_u32be(snd, 0);
+	append_u32be(snd, 4);
 	snd.push_back(0);
 	snd.push_back(60);
 	snd.insert(snd.end(), {0x80, 0x81, 0x82, 0x83});
@@ -403,7 +407,6 @@ void	RunTests()
 	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_UNSUPPORTED_OPTION);
 	stackimport_context_destroy(context);
 
-
 	std::vector<uint8_t> truncatedBlock;
 	append_block_header(truncatedBlock, 16, "STAK", -1);
 	truncatedBlock.insert(truncatedBlock.end(), {0xAA, 0xBB});
@@ -452,6 +455,61 @@ void	RunTests()
 	assert(countingOutput.last_width == 32);
 	assert(countingOutput.last_height == 32);
 	assert(countingOutput.last_payload_size == 32u * 32u * 4u);
+
+	stackimport::PlatformByteVector wavData;
+	std::string soundError;
+	const std::vector<uint8_t> multiCommandSnd = make_snd_format2_fixture(true, 22);
+	assert(stackimport::ConvertSndResourceToWav(rsrcd::Bytes{multiCommandSnd.data(), multiCommandSnd.size()}, wavData, soundError));
+	assert(wavData.size() == 48);
+	assert(std::memcmp(wavData.data(), "RIFF", 4) == 0);
+	assert(wavData[44] == 0x80);
+	assert(wavData[47] == 0x83);
+	uint8_t wavBuffer[64] = {};
+	const char* cSoundError = nullptr;
+	const size_t cWavSize = stackimport_convert_snd_to_wav(
+		multiCommandSnd.data(),
+		multiCommandSnd.size(),
+		wavBuffer,
+		sizeof(wavBuffer),
+		&cSoundError);
+	assert(cWavSize == 48);
+	assert(cSoundError == nullptr);
+	assert(std::memcmp(wavBuffer, "RIFF", 4) == 0);
+	assert(wavBuffer[44] == 0x80);
+	assert(wavBuffer[47] == 0x83);
+	assert(stackimport_convert_snd_to_wav(
+		multiCommandSnd.data(),
+		multiCommandSnd.size(),
+		wavBuffer,
+		8,
+		&cSoundError) == 0);
+	assert(std::strcmp(cSoundError, "output buffer too small") == 0);
+	assert(stackimport_convert_snd_to_wav(nullptr, 0, nullptr, 0, nullptr) == 0);
+
+	const std::vector<uint8_t> badOffsetSnd = make_snd_format2_fixture(false, 20);
+	wavData.clear();
+	soundError.clear();
+	assert(stackimport::ConvertSndResourceToWav(rsrcd::Bytes{badOffsetSnd.data(), badOffsetSnd.size()}, wavData, soundError));
+	assert(wavData.size() == 48);
+	assert(std::memcmp(wavData.data(), "RIFF", 4) == 0);
+	assert(wavData[44] == 0x80);
+	assert(wavData[47] == 0x83);
+
+	CountingPlatformState failingSoundState;
+	failingSoundState.fail_after_allocations = 0;
+	stackimport_platform failingSoundPlatform = {};
+	stackimport_platform_init(&failingSoundPlatform);
+	failingSoundPlatform.allocate = counting_allocate;
+	failingSoundPlatform.deallocate = counting_deallocate;
+	failingSoundPlatform.user_data = &failingSoundState;
+	stackimport_internal_platform failingSoundInternal = stackimport_internal_platform_from_api(&failingSoundPlatform);
+	{
+		stackimport_platform_scope failingSoundScope(failingSoundInternal);
+		stackimport::PlatformByteVector failingWavData;
+		soundError.clear();
+		assert(!stackimport::ConvertSndResourceToWav(rsrcd::Bytes{multiCommandSnd.data(), multiCommandSnd.size()}, failingWavData, soundError));
+		assert(soundError == "allocation failed");
+	}
 
 	const std::span<const uint8_t> code(codeBytes, sizeof(codeBytes));
 	const auto fullDisassembly = stackimport::DisassembleMac68kCodeResource(code, 0, 4, 0x1000);
@@ -575,23 +633,6 @@ void	RunTests()
 	stackimport_context_deinit(failingContext);
 	assert(failingPlatformState.allocations > 0);
 
-	const std::vector<uint8_t> failingSound = make_minimal_snd_fixture();
-	CountingPlatformState failingSoundState;
-	failingSoundState.fail_after_allocations = 0;
-	stackimport_platform failingSoundPlatform = {};
-	stackimport_platform_init(&failingSoundPlatform);
-	failingSoundPlatform.allocate = counting_allocate;
-	failingSoundPlatform.deallocate = counting_deallocate;
-	failingSoundPlatform.user_data = &failingSoundState;
-	stackimport_internal_platform failingSoundInternal = stackimport_internal_platform_from_api(&failingSoundPlatform);
-	{
-		stackimport_platform_scope failingSoundScope(failingSoundInternal);
-		stackimport::PlatformByteVector failingWavData;
-		std::string soundError;
-		assert(!stackimport::ConvertSndResourceToWav(rsrcd::Bytes{failingSound.data(), failingSound.size()}, failingWavData, soundError));
-		assert(soundError == "allocation failed");
-	}
-
 	CountingPlatformState rapidJsonFailingState;
 	rapidJsonFailingState.fail_after_allocations = 0;
 	stackimport_platform rapidJsonFailingPlatform = failingPlatform;
@@ -637,5 +678,4 @@ void	RunTests()
 		assert(copiedView.size() == 4);
 		assert(copiedView[0] == 'A');
 	}
-
 }

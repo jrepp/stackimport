@@ -183,6 +183,18 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	stackimport_context* context,
 	const stackimport_import_options* options);
 
+/*
+ * Standalone snd-to-WAV conversion. Does not require a context or platform scope.
+ * Returns WAV size on success, 0 on failure. On failure, sets *out_error to a
+ * string that remains valid until the next call on the same thread.
+ */
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
+	const void* snd_data,
+	size_t snd_size,
+	void* wav_buffer,
+	size_t wav_capacity,
+	const char** out_error);
+
 #ifdef __cplusplus
 }
 #endif

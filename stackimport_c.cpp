@@ -1,6 +1,7 @@
 #include "stackimport_c.h"
 
 #include "CStackFile.h"
+#include "StackImportSoundConverter.h"
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
 
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -371,4 +373,41 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	if(stackimport_internal_had_allocation_failure())
 		return STACKIMPORT_STATUS_ALLOCATION_FAILED;
 	return STACKIMPORT_STATUS_OK;
+}
+
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
+	const void* snd_data,
+	size_t snd_size,
+	void* wav_buffer,
+	size_t wav_capacity,
+	const char** out_error)
+{
+	if(out_error)
+		*out_error = nullptr;
+	if(!snd_data || !wav_buffer || !out_error)
+	{
+		if(out_error)
+			*out_error = "invalid argument";
+		return 0;
+	}
+
+	thread_local std::string error;
+	error.clear();
+	stackimport::PlatformByteVector wav;
+	const rsrcd::Bytes snd{static_cast<const uint8_t*>(snd_data), snd_size};
+	if(!stackimport::ConvertSndResourceToWav(snd, wav, error))
+	{
+		*out_error = error.empty() ? "conversion failed" : error.c_str();
+		return 0;
+	}
+
+	if(wav.size() > wav_capacity)
+	{
+		*out_error = "output buffer too small";
+		return 0;
+	}
+
+	std::memcpy(wav_buffer, wav.data(), wav.size());
+	*out_error = nullptr;
+	return wav.size();
 }
