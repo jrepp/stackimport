@@ -878,6 +878,20 @@ void	RunTests()
 	assert(bndlOutput.last_json.find("\"typeString\": \"ICON\"") != std::string::npos);
 	assert(bndlOutput.last_json.find("\"resourceId\": 1001") != std::string::npos);
 
+	std::vector<uint8_t> rovPayload;
+	append_u16be(rovPayload, 0x0750);
+	append_u16be(rovPayload, 1);
+	append_u32be(rovPayload, 0x4D454E55);
+	append_u16be(rovPayload, 128);
+	const std::vector<uint8_t> rovFork = make_single_resource_fork("ROv#", 1, rovPayload);
+	CountingResourceOutput rovOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rovFork.data(), rovFork.size()}, rovOutput));
+	assert(rovOutput.native_count == 1);
+	assert(rovOutput.json_count == 1);
+	assert(rovOutput.last_json.find("\"romVersion\": 1872") != std::string::npos);
+	assert(rovOutput.last_json.find("\"typeString\": \"MENU\"") != std::string::npos);
+	assert(rovOutput.last_json.find("\"id\": 128") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

@@ -927,6 +927,38 @@ static void test_parse_bndl_truncated() {
     CHECK(!r, "truncated BNDL should fail");
 }
 
+static void test_parse_rov() {
+    uint8_t data[10] = {};
+    rsrcd::write_u16be(data, 0x0750);
+    rsrcd::write_u16be(data + 2, 1);
+    rsrcd::write_u32be(data + 4, 0x4D454E55);
+    rsrcd::write_u16be(data + 8, 128);
+
+    rsrcd::rov::OverrideList<4> overrides;
+    auto r = rsrcd::rov::parse({data, sizeof(data)}, overrides);
+    CHECK_RESULT(r, "parse ROv#");
+    CHECK(overrides.rom_version == 0x0750, "ROv# ROM version");
+    CHECK(overrides.count() == 1, "ROv# count");
+    CHECK(overrides[0].type == 0x4D454E55, "ROv# type");
+    CHECK(overrides[0].id == 128, "ROv# id");
+}
+
+static void test_parse_rov_empty() {
+    rsrcd::rov::OverrideList<4> overrides;
+    auto r = rsrcd::rov::parse({}, overrides);
+    CHECK_RESULT(r, "parse empty ROv#");
+    CHECK(overrides.count() == 0, "empty ROv# count");
+}
+
+static void test_parse_rov_truncated() {
+    uint8_t data[9] = {};
+    rsrcd::write_u16be(data + 2, 1);
+
+    rsrcd::rov::OverrideList<4> overrides;
+    auto r = rsrcd::rov::parse({data, sizeof(data)}, overrides);
+    CHECK(!r, "truncated ROv# should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1649,6 +1681,9 @@ int main() {
     test_parse_fref();
     test_parse_bndl();
     test_parse_bndl_truncated();
+    test_parse_rov();
+    test_parse_rov_empty();
+    test_parse_rov_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

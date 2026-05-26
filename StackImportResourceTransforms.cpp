@@ -514,6 +514,49 @@ auto emit_bndl_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_rov_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed ROM override metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::rov::OverrideList<256> overrides;
+	auto parse_result = rsrcd::rov::parse(resource.data, overrides);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("romVersion", overrides.rom_version, allocator);
+	JsonValue items(rapidjson::kArrayType);
+	for(const auto& item : overrides)
+	{
+		JsonValue value(rapidjson::kObjectType);
+		value.AddMember("type", item.type, allocator);
+		value.AddMember("typeString", json_string(resource_type_string(item.type), allocator), allocator);
+		value.AddMember("id", item.id, allocator);
+		items.PushBack(value, allocator);
+	}
+	doc.AddMember("overrides", items, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1476,6 +1519,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "BNDL"))
 		return emit_bndl_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "ROv#"))
+		return emit_rov_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

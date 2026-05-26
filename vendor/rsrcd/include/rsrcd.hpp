@@ -1907,6 +1907,61 @@ auto parse_bndl(Bytes data, Bundle<TypeCapacity, IdCapacity>& bundle) -> Result 
 } // namespace finder
 
 // ============================================================================
+// ROM override list resources (ROv#)
+// ============================================================================
+
+namespace rov {
+
+struct Override {
+    uint32_t type;
+    int16_t id;
+};
+
+template<size_t InlineCapacity = 128>
+class OverrideList {
+public:
+    uint16_t rom_version = 0;
+
+    auto add(Override item) -> Result {
+        if (count_ < InlineCapacity) {
+            overrides_[count_++] = item;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many ROM override entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Override& { return overrides_[i]; }
+    auto begin() const -> const Override* { return overrides_; }
+    auto end() const -> const Override* { return overrides_ + count_; }
+
+private:
+    Override overrides_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 128>
+auto parse(Bytes data, OverrideList<Cap>& list) -> Result {
+    if (data.empty()) return Result::ok();
+    if (data.size < 4) return Error::unexpected_end();
+    list.rom_version = read_u16be(data.data);
+    uint16_t count = read_u16be(data.data + 2);
+    if (count > Cap) return Error::invalid_data("too many ROM override entries");
+    if (!range_in_bounds(4, static_cast<size_t>(count) * 6u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 4;
+    for (uint16_t i = 0; i < count; ++i) {
+        Override item{};
+        item.type = read_u32be(data.data + offset);
+        item.id = read_i16be(data.data + offset + 4);
+        if (auto r = list.add(item); !r) return r;
+        offset += 6;
+    }
+    return Result::ok();
+}
+
+} // namespace rov
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

@@ -213,6 +213,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Finder/UI metadata resources `ALRT`, `FREF`, and `BNDL` now have rsrcd typed
   parsers and shared JSON transforms for alert parameters, file references, and
   bundle mappings.
+- `ROv#` ROM override lists now have an rsrcd typed parser and shared JSON
+  transform for ROM version plus overridden resource type/id entries.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -278,6 +280,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for Finder/UI metadata: parse `ALRT`, `FREF`, and `BNDL` through rsrcd
   and route package JSON artifact writing through the shared transform payload.
+- Done for `ROv#` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -340,8 +344,8 @@ all consumers listed in the lateral audit above have been updated and tested.
   `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`,
   `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `,
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
-  `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `PICT`, `snd `, `XCMD`,
-  `XFCN`, `xcmd`, `xfcn`.
+  `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
+  `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
