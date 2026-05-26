@@ -1371,6 +1371,46 @@ static void test_parse_dcmp_system() {
     CHECK(dcmp.code.size == 8, "system dcmp code size");
 }
 
+static void test_parse_ppat_mono() {
+    uint8_t data[28] = {};
+    rsrcd::write_u16be(data, 0);
+    rsrcd::write_u32be(data + 20, 0x80000000);
+    rsrcd::write_u32be(data + 24, 0x00000001);
+
+    rsrcd::pixel_pattern::Pattern pattern{};
+    auto r = rsrcd::pixel_pattern::parse_ppat({data, sizeof(data)}, pattern);
+    CHECK_RESULT(r, "parse ppat mono");
+    CHECK(pattern.type == 0, "ppat mono type");
+    CHECK(!pattern.has_pixel_map, "ppat mono has no pixel map");
+    CHECK(pattern.monochrome_pattern == 0x8000000000000001ULL, "ppat mono pattern");
+}
+
+static void test_parse_ppt_list() {
+    uint8_t data[34] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u32be(data + 2, 6);
+    rsrcd::write_u16be(data + 6, 0);
+    rsrcd::write_u32be(data + 26, 0x11111111);
+    rsrcd::write_u32be(data + 30, 0x22222222);
+
+    rsrcd::pixel_pattern::PatternList<4> patterns;
+    auto r = rsrcd::pixel_pattern::parse_ppt_list({data, sizeof(data)}, patterns);
+    CHECK_RESULT(r, "parse ppt#");
+    CHECK(patterns.count() == 1, "ppt# count");
+    CHECK(patterns.offset(0) == 6, "ppt# offset");
+    CHECK(patterns[0].monochrome_pattern == 0x1111111122222222ULL, "ppt# mono pattern");
+}
+
+static void test_parse_ppt_bad_offset() {
+    uint8_t data[34] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u32be(data + 2, 40);
+
+    rsrcd::pixel_pattern::PatternList<4> patterns;
+    auto r = rsrcd::pixel_pattern::parse_ppt_list({data, sizeof(data)}, patterns);
+    CHECK(!r, "bad ppt# offset should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -2122,6 +2162,9 @@ int main() {
     test_parse_drvr_bad_label();
     test_parse_dcmp_labels();
     test_parse_dcmp_system();
+    test_parse_ppat_mono();
+    test_parse_ppt_list();
+    test_parse_ppt_bad_offset();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

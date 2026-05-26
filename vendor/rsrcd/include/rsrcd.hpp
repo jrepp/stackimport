@@ -2605,6 +2605,133 @@ inline auto parse(Bytes data, Decompressor& decompressor) -> Result {
 } // namespace dcmp
 
 // ============================================================================
+// Pixel pattern metadata (ppat / ppt#)
+// ============================================================================
+
+namespace pixel_pattern {
+
+struct PixelMap {
+    uint16_t row_bytes;
+    ui::Rect bounds;
+    uint16_t version;
+    uint16_t pack_format;
+    uint32_t pack_size;
+    uint32_t h_resolution;
+    uint32_t v_resolution;
+    uint16_t pixel_type;
+    uint16_t pixel_size;
+    uint16_t component_count;
+    uint16_t component_size;
+    uint32_t plane_offset;
+    uint32_t color_table_offset;
+    uint32_t reserved;
+};
+
+struct Pattern {
+    uint16_t type;
+    uint32_t pixel_map_offset;
+    uint32_t pixel_data_offset;
+    uint32_t expanded_data;
+    uint16_t expanded_depth;
+    uint32_t reserved;
+    uint64_t monochrome_pattern;
+    bool has_pixel_map;
+    PixelMap pixel_map;
+};
+
+template<size_t InlineCapacity = 64>
+class PatternList {
+public:
+    auto add(uint32_t offset, Pattern pattern) -> Result {
+        if (count_ < InlineCapacity) {
+            offsets_[count_] = offset;
+            patterns_[count_] = pattern;
+            count_++;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many pixel patterns");
+    }
+    auto count() const -> size_t { return count_; }
+    auto offset(size_t i) const -> uint32_t { return offsets_[i]; }
+    auto operator[](size_t i) const -> const Pattern& { return patterns_[i]; }
+
+private:
+    uint32_t offsets_[InlineCapacity];
+    Pattern patterns_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+inline auto parse_pattern_rect(Bytes data, size_t offset, ui::Rect& rect) -> Result {
+    if (!range_in_bounds(offset, 8, data.size)) return Error::unexpected_end();
+    rect.top = read_i16be(data.data + offset);
+    rect.left = read_i16be(data.data + offset + 2);
+    rect.bottom = read_i16be(data.data + offset + 4);
+    rect.right = read_i16be(data.data + offset + 6);
+    return Result::ok();
+}
+
+inline auto parse_pixel_map(Bytes data, size_t offset, PixelMap& pixel_map) -> Result {
+    constexpr size_t header_size = 46;
+    if (!range_in_bounds(offset, header_size, data.size)) return Error::unexpected_end();
+    pixel_map.row_bytes = read_u16be(data.data + offset) & 0x3FFFu;
+    if (auto r = parse_pattern_rect(data, offset + 2, pixel_map.bounds); !r) return r;
+    pixel_map.version = read_u16be(data.data + offset + 10);
+    pixel_map.pack_format = read_u16be(data.data + offset + 12);
+    pixel_map.pack_size = read_u32be(data.data + offset + 14);
+    pixel_map.h_resolution = read_u32be(data.data + offset + 18);
+    pixel_map.v_resolution = read_u32be(data.data + offset + 22);
+    pixel_map.pixel_type = read_u16be(data.data + offset + 26);
+    pixel_map.pixel_size = read_u16be(data.data + offset + 28);
+    pixel_map.component_count = read_u16be(data.data + offset + 30);
+    pixel_map.component_size = read_u16be(data.data + offset + 32);
+    pixel_map.plane_offset = read_u32be(data.data + offset + 34);
+    pixel_map.color_table_offset = read_u32be(data.data + offset + 38);
+    pixel_map.reserved = read_u32be(data.data + offset + 42);
+    return Result::ok();
+}
+
+inline auto parse_ppat(Bytes data, Pattern& pattern) -> Result {
+    constexpr size_t header_size = 28;
+    if (data.size < header_size) return Error::unexpected_end();
+    pattern.type = read_u16be(data.data);
+    pattern.pixel_map_offset = read_u32be(data.data + 2);
+    pattern.pixel_data_offset = read_u32be(data.data + 6);
+    pattern.expanded_data = read_u32be(data.data + 10);
+    pattern.expanded_depth = read_u16be(data.data + 14);
+    pattern.reserved = read_u32be(data.data + 16);
+    pattern.monochrome_pattern =
+        (static_cast<uint64_t>(read_u32be(data.data + 20)) << 32) |
+        static_cast<uint64_t>(read_u32be(data.data + 24));
+    pattern.has_pixel_map = false;
+    if (pattern.type == 0 || pattern.type == 2) return Result::ok();
+    if (pattern.type != 1 && pattern.type != 3) return Error::invalid_data("unsupported pixel pattern type");
+    if (!range_in_bounds(pattern.pixel_map_offset, 4, data.size)) return Error::unexpected_end();
+    if (auto r = parse_pixel_map(data, static_cast<size_t>(pattern.pixel_map_offset) + 4u, pattern.pixel_map); !r) return r;
+    pattern.has_pixel_map = true;
+    if (pattern.pixel_data_offset > data.size) return Error::unexpected_end();
+    if (pattern.pixel_map.color_table_offset > data.size) return Error::unexpected_end();
+    return Result::ok();
+}
+
+template<size_t Cap = 64>
+auto parse_ppt_list(Bytes data, PatternList<Cap>& list) -> Result {
+    if (data.size < 2) return Error::unexpected_end();
+    const uint16_t count = read_u16be(data.data);
+    if (!range_in_bounds(2, static_cast<size_t>(count) * 4u, data.size)) return Error::unexpected_end();
+    for (uint16_t i = 0; i < count; ++i) {
+        const uint32_t start = read_u32be(data.data + 2 + (i * 4u));
+        const uint32_t end = (i + 1u == count) ? static_cast<uint32_t>(data.size) : read_u32be(data.data + 2 + ((i + 1u) * 4u));
+        if (start > end || end > data.size) return Error::invalid_data("pixel pattern offset out of range");
+        Pattern pattern{};
+        if (auto r = parse_ppat(data.slice(start, end - start), pattern); !r) return r;
+        if (auto r = list.add(start, pattern); !r) return r;
+    }
+    return Result::ok();
+}
+
+} // namespace pixel_pattern
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

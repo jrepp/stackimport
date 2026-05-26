@@ -248,6 +248,9 @@ when parser behavior changes, updates to the relevant format documentation under
   16-bit RGB entries.
 - `pltt` palettes now have an rsrcd typed parser and shared JSON transform for
   16-bit RGB entries.
+- `ppat` and `ppt#` pixel patterns now have rsrcd typed metadata parsers and
+  shared JSON transforms for pattern headers, monochrome bits, list offsets, and
+  pixmap metadata where present.
 - `SIZE` metadata now has an rsrcd typed parser and shared JSON transform for
   application flags plus preferred/minimum memory sizes.
 - `finf` font metadata now has an rsrcd typed parser and shared JSON transform
@@ -338,6 +341,8 @@ when parser behavior changes, updates to the relevant format documentation under
   through the shared transform payload.
 - Done for `pltt` palettes: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for pixel pattern metadata: parse `ppat` and `ppt#` through rsrcd and
+  route package JSON artifact writing through the shared transform payload.
 - Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for `finf` font metadata: parse through rsrcd and route package JSON
@@ -391,7 +396,7 @@ all consumers listed in the lateral audit above have been updated and tested.
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
   `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`,
-  `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `,
+  `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `ppat`, `ppt#`, `HCbg`, `HCcd`, `STR `,
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
   `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
   `RSSC`, `TxSt`, `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, `XCMD`, `XFCN`,

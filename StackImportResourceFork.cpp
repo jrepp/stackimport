@@ -182,6 +182,7 @@ public:
 			resource_type_is(res_, "vers") || resource_type_is(res_, "cfrg") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
 			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
 			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") || resource_type_is(res_, "pltt") ||
+			resource_type_is(res_, "ppat") || resource_type_is(res_, "ppt#") ||
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
 			resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
 			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") ||
@@ -409,6 +410,10 @@ private:
 			snprintf(fname, sizeof(fname), "wctb_%d.json", res_.id);
 		else if(resource_type_is(res_, "pltt"))
 			snprintf(fname, sizeof(fname), "pltt_%d.json", res_.id);
+		else if(resource_type_is(res_, "ppat"))
+			snprintf(fname, sizeof(fname), "ppat_%d.json", res_.id);
+		else if(resource_type_is(res_, "ppt#"))
+			snprintf(fname, sizeof(fname), "ppt#_%d.json", res_.id);
 		else if(resource_type_is(res_, "SIZE"))
 			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
 		else if(resource_type_is(res_, "finf"))
@@ -751,7 +756,8 @@ bool stackimport_load_resource_fork(
 		else if(std::memcmp(res.type.data, "clut", 4) == 0 || std::memcmp(res.type.data, "CTBL", 4) == 0 ||
 			std::memcmp(res.type.data, "actb", 4) == 0 || std::memcmp(res.type.data, "cctb", 4) == 0 ||
 			std::memcmp(res.type.data, "dctb", 4) == 0 || std::memcmp(res.type.data, "fctb", 4) == 0 ||
-			std::memcmp(res.type.data, "wctb", 4) == 0 || std::memcmp(res.type.data, "pltt", 4) == 0)
+			std::memcmp(res.type.data, "wctb", 4) == 0 || std::memcmp(res.type.data, "pltt", 4) == 0 ||
+			std::memcmp(res.type.data, "ppat", 4) == 0 || std::memcmp(res.type.data, "ppt#", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

@@ -138,6 +138,14 @@ auto bytes_to_hex(rsrcd::Bytes bytes) -> std::string
 	return result;
 }
 
+auto u64_to_hex(uint64_t value) -> std::string
+{
+	uint8_t bytes[8];
+	for(size_t i = 0; i < 8; ++i)
+		bytes[i] = static_cast<uint8_t>((value >> ((7u - i) * 8u)) & 0xFFu);
+	return bytes_to_hex(rsrcd::Bytes{bytes, sizeof(bytes)});
+}
+
 auto resource_type_string(uint32_t type) -> std::string
 {
 	std::string result;
@@ -1678,6 +1686,103 @@ auto emit_pltt_transform(
 	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
+void add_json_pixel_map(JsonValue& object, const rsrcd::pixel_pattern::PixelMap& pixel_map, JsonPoolAllocator& allocator)
+{
+	JsonValue value(rapidjson::kObjectType);
+	value.AddMember("rowBytes", pixel_map.row_bytes, allocator);
+	add_json_ui_rect(value, pixel_map.bounds, allocator);
+	value.AddMember("version", pixel_map.version, allocator);
+	value.AddMember("packFormat", pixel_map.pack_format, allocator);
+	value.AddMember("packSize", pixel_map.pack_size, allocator);
+	value.AddMember("horizontalResolution", pixel_map.h_resolution, allocator);
+	value.AddMember("verticalResolution", pixel_map.v_resolution, allocator);
+	value.AddMember("pixelType", pixel_map.pixel_type, allocator);
+	value.AddMember("pixelSize", pixel_map.pixel_size, allocator);
+	value.AddMember("componentCount", pixel_map.component_count, allocator);
+	value.AddMember("componentSize", pixel_map.component_size, allocator);
+	value.AddMember("planeOffset", pixel_map.plane_offset, allocator);
+	value.AddMember("colorTableOffset", pixel_map.color_table_offset, allocator);
+	value.AddMember("reserved", pixel_map.reserved, allocator);
+	object.AddMember("pixelMap", value, allocator);
+}
+
+void add_json_pixel_pattern(JsonValue& object, const rsrcd::pixel_pattern::Pattern& pattern, JsonPoolAllocator& allocator)
+{
+	object.AddMember("type", pattern.type, allocator);
+	object.AddMember("pixelMapOffset", pattern.pixel_map_offset, allocator);
+	object.AddMember("pixelDataOffset", pattern.pixel_data_offset, allocator);
+	object.AddMember("expandedData", pattern.expanded_data, allocator);
+	object.AddMember("expandedDepth", pattern.expanded_depth, allocator);
+	object.AddMember("reserved", pattern.reserved, allocator);
+	object.AddMember("monochromePatternHex", json_string(u64_to_hex(pattern.monochrome_pattern), allocator), allocator);
+	if(pattern.has_pixel_map)
+		add_json_pixel_map(object, pattern.pixel_map, allocator);
+}
+
+auto emit_ppat_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed pixel pattern metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::pixel_pattern::Pattern pattern{};
+	auto parse_result = rsrcd::pixel_pattern::parse_ppat(resource.data, pattern);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_pixel_pattern(doc, pattern, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
+auto emit_ppt_list_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed pixel pattern list metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::pixel_pattern::PatternList<64> patterns;
+	auto parse_result = rsrcd::pixel_pattern::parse_ppt_list(resource.data, patterns);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(4096, &base_alloc);
+	JsonDocument doc(&pool, 4096, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	JsonValue entries(rapidjson::kArrayType);
+	for(size_t i = 0; i < patterns.count(); ++i)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("offset", patterns.offset(i), allocator);
+		add_json_pixel_pattern(item, patterns[i], allocator);
+		entries.PushBack(item, allocator);
+	}
+	doc.AddMember("patterns", entries, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 void add_json_size_flag(JsonValue& flags, JsonPoolAllocator& allocator, const char* name, bool value)
 {
 	flags.AddMember(JsonValue().SetString(name, allocator), value, allocator);
@@ -2201,6 +2306,12 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "pltt"))
 		return emit_pltt_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "ppat"))
+		return emit_ppat_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "ppt#"))
+		return emit_ppt_list_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);

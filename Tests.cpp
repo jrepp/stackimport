@@ -862,6 +862,27 @@ void test_resource_color_and_ui_transforms()
 	rsrcd::write_u16be(plttPayload.data() + 22, 0x3333);
 	assert_json_resource_contains("pltt", 3, plttPayload, {"\"green\": 8738"});
 
+	std::vector<uint8_t> ppatPayload(28);
+	rsrcd::write_u16be(ppatPayload.data(), 0);
+	rsrcd::write_u32be(ppatPayload.data() + 20, 0x80000000);
+	rsrcd::write_u32be(ppatPayload.data() + 24, 0x00000001);
+	assert_json_resource_contains("ppat", 3, ppatPayload, {
+		"\"type\": 0",
+		"\"monochromePatternHex\": \"8000000000000001\"",
+	});
+
+	std::vector<uint8_t> pptPayload(34);
+	rsrcd::write_u16be(pptPayload.data(), 1);
+	rsrcd::write_u32be(pptPayload.data() + 2, 6);
+	rsrcd::write_u16be(pptPayload.data() + 6, 0);
+	rsrcd::write_u32be(pptPayload.data() + 26, 0x11111111);
+	rsrcd::write_u32be(pptPayload.data() + 30, 0x22222222);
+	assert_json_resource_contains("ppt#", 3, pptPayload, {
+		"\"patterns\"",
+		"\"offset\": 6",
+		"\"monochromePatternHex\": \"1111111122222222\"",
+	});
+
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
 	append_u32be(sizePayload, 0x00100000);
