@@ -566,7 +566,7 @@ void	RunTests()
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;
 	const std::vector<uint8_t> multiCommandSnd = make_snd_format2_fixture(true, 22);
-	assert(stackimport::ConvertSndResourceToWav(rsrcd::Bytes{multiCommandSnd.data(), multiCommandSnd.size()}, wavData, soundError));
+	assert(stackimport::ConvertSndResourceToWav(multiCommandSnd.data(), multiCommandSnd.size(), wavData, soundError));
 	assert(wavData.size() == 48);
 	assert(std::memcmp(wavData.data(), "RIFF", 4) == 0);
 	assert(wavData[44] == 0x80);
@@ -596,7 +596,7 @@ void	RunTests()
 	const std::vector<uint8_t> badOffsetSnd = make_snd_format2_fixture(false, 20);
 	wavData.clear();
 	soundError.clear();
-	assert(stackimport::ConvertSndResourceToWav(rsrcd::Bytes{badOffsetSnd.data(), badOffsetSnd.size()}, wavData, soundError));
+	assert(stackimport::ConvertSndResourceToWav(badOffsetSnd.data(), badOffsetSnd.size(), wavData, soundError));
 	assert(wavData.size() == 48);
 	assert(std::memcmp(wavData.data(), "RIFF", 4) == 0);
 	assert(wavData[44] == 0x80);
@@ -614,7 +614,7 @@ void	RunTests()
 		stackimport_platform_scope failingSoundScope(failingSoundInternal);
 		stackimport::PlatformByteVector failingWavData;
 		soundError.clear();
-		assert(!stackimport::ConvertSndResourceToWav(rsrcd::Bytes{multiCommandSnd.data(), multiCommandSnd.size()}, failingWavData, soundError));
+		assert(!stackimport::ConvertSndResourceToWav(multiCommandSnd.data(), multiCommandSnd.size(), failingWavData, soundError));
 		assert(soundError == "allocation failed");
 	}
 

@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "vendor/rsrcd/include/rsrcd.hpp"
+
 namespace stackimport {
 namespace {
 
@@ -308,10 +310,10 @@ private:
 
 } // namespace
 
-bool ConvertSndResourceToWav(rsrcd::Bytes snd, PlatformByteVector& wav, std::string& error)
+bool ConvertSndResourceToWav(const uint8_t* sndData, std::size_t sndSize, PlatformByteVector& wav, std::string& error)
 {
 	error.clear();
-	return SndToWavConverter(snd).convert(wav, error);
+	return SndToWavConverter(rsrcd::Bytes{sndData, sndSize}).convert(wav, error);
 }
 
 } // namespace stackimport

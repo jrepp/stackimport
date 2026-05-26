@@ -361,7 +361,7 @@ bool stackimport_load_resource_fork(
 		{
 			stackimport::PlatformByteVector wavData;
 			std::string error;
-			if(stackimport::ConvertSndResourceToWav(res.data, wavData, error))
+			if(stackimport::ConvertSndResourceToWav(res.data.data, res.data.size, wavData, error))
 			{
 				if(!resourceStreamingStopped)
 				{

@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "stackimport_platform_internal.h"
-#include "vendor/rsrcd/include/rsrcd.hpp"
 
 namespace stackimport {
 
@@ -127,6 +126,6 @@ private:
 	bool failed_ = false;
 };
 
-bool ConvertSndResourceToWav(rsrcd::Bytes snd, PlatformByteVector& wav, std::string& error);
+bool ConvertSndResourceToWav(const uint8_t* sndData, std::size_t sndSize, PlatformByteVector& wav, std::string& error);
 
 } // namespace stackimport

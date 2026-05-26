@@ -225,6 +225,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - ROM SHA-256 hashing now goes through `StackImportPhosgHashAdapter`; the
   direct `phosg/Hash.hh` include is isolated to an adapter source under
   `vendor/`.
+- `StackImportSoundConverter.h` no longer exposes `rsrcd::Bytes`; sound
+  conversion callers pass plain byte pointers and sizes.
 - Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
   configurations build and pass tests after the adapter split.
 - Remaining work: resource-fork parser/decoder adapter boundaries and broader
