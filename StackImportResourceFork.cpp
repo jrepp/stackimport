@@ -168,6 +168,8 @@ public:
 		(void)msg;
 		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd") ||
 			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
+			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
+			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") ||
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
 			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") || resource_type_is(res_, "DITL"))
 			summary_.status = "parse_failed";
@@ -330,6 +332,16 @@ private:
 			snprintf(fname, sizeof(fname), "clut_%d.json", res_.id);
 		else if(resource_type_is(res_, "CTBL"))
 			snprintf(fname, sizeof(fname), "CTBL_%d.json", res_.id);
+		else if(resource_type_is(res_, "actb"))
+			snprintf(fname, sizeof(fname), "actb_%d.json", res_.id);
+		else if(resource_type_is(res_, "cctb"))
+			snprintf(fname, sizeof(fname), "cctb_%d.json", res_.id);
+		else if(resource_type_is(res_, "dctb"))
+			snprintf(fname, sizeof(fname), "dctb_%d.json", res_.id);
+		else if(resource_type_is(res_, "fctb"))
+			snprintf(fname, sizeof(fname), "fctb_%d.json", res_.id);
+		else if(resource_type_is(res_, "wctb"))
+			snprintf(fname, sizeof(fname), "wctb_%d.json", res_.id);
 		else if(resource_type_is(res_, "SIZE"))
 			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
 		else if(resource_type_is(res_, "CNTL"))
@@ -591,7 +603,10 @@ bool stackimport_load_resource_fork(
 			resourceSummaries.push_back(summary);
 			continue;
 		}
-		else if(std::memcmp(res.type.data, "clut", 4) == 0 || std::memcmp(res.type.data, "CTBL", 4) == 0)
+		else if(std::memcmp(res.type.data, "clut", 4) == 0 || std::memcmp(res.type.data, "CTBL", 4) == 0 ||
+			std::memcmp(res.type.data, "actb", 4) == 0 || std::memcmp(res.type.data, "cctb", 4) == 0 ||
+			std::memcmp(res.type.data, "dctb", 4) == 0 || std::memcmp(res.type.data, "fctb", 4) == 0 ||
+			std::memcmp(res.type.data, "wctb", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

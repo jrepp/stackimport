@@ -939,7 +939,10 @@ auto emit_builtin_resource_transforms(
 	if(resource_type_is(resource, "vers"))
 		return emit_vers_transform(resource, ref, output);
 
-	if(resource_type_is(resource, "clut") || resource_type_is(resource, "CTBL"))
+	if(resource_type_is(resource, "clut") || resource_type_is(resource, "CTBL") ||
+		resource_type_is(resource, "actb") || resource_type_is(resource, "cctb") ||
+		resource_type_is(resource, "dctb") || resource_type_is(resource, "fctb") ||
+		resource_type_is(resource, "wctb"))
 		return emit_color_table_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "SIZE"))

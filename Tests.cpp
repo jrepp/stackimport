@@ -728,6 +728,13 @@ void	RunTests()
 	assert(colorTableOutput.last_json.find("\"flags\": 32768") != std::string::npos);
 	assert(colorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
 
+	const std::vector<uint8_t> windowColorTableFork = make_single_resource_fork("wctb", 0, colorTablePayload);
+	CountingResourceOutput windowColorTableOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{windowColorTableFork.data(), windowColorTableFork.size()}, windowColorTableOutput));
+	assert(windowColorTableOutput.native_count == 1);
+	assert(windowColorTableOutput.json_count == 1);
+	assert(windowColorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
+
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
 	append_u32be(sizePayload, 0x00100000);

@@ -197,8 +197,9 @@ when parser behavior changes, updates to the relevant format documentation under
   helpers and shared RGBA transforms, with PNG package artifacts.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
-- `clut` and `CTBL` color tables now have an rsrcd typed parser and shared JSON
-  transform for seed, flags, and 16-bit RGB entries.
+- `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
+  have an rsrcd typed parser and shared JSON transform for seed, flags, and
+  16-bit RGB entries.
 - `SIZE` metadata now has an rsrcd typed parser and shared JSON transform for
   application flags plus preferred/minimum memory sizes.
 - `CNTL`, `DLOG`, and `WIND` UI metadata now have rsrcd typed parsers and
@@ -240,8 +241,9 @@ when parser behavior changes, updates to the relevant format documentation under
   transform payloads.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
-- Done for `clut`/`CTBL` color tables: parse through rsrcd and route package
-  JSON artifact writing through the shared transform payload.
+- Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
+  `fctb`, and `wctb` through rsrcd and route package JSON artifact writing
+  through the shared transform payload.
 - Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for fixed-record UI metadata: parse `CNTL`, `DLOG`, and `WIND` through
@@ -291,9 +293,10 @@ resource-fork coverage. Mark a type done only after parser/transform support and
 all consumers listed in the lateral audit above have been updated and tested.
 
 - Current typed StackImport/core coverage:
-  `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `HCbg`,
-  `HCcd`, `STR `, `STR#`, `TEXT`, `vers`, `SIZE`, `CNTL`, `DLOG`, `WIND`,
-  `MENU`, `DITL`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
+  `cctb`, `dctb`, `fctb`, `wctb`, `HCbg`, `HCcd`, `STR `, `STR#`, `TEXT`,
+  `vers`, `SIZE`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `PICT`, `snd `,
+  `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
