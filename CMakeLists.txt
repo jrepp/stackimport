@@ -100,6 +100,7 @@ set(STACKIMPORT_SOURCES
 
 if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
     add_library(stackimport_mace_resource_dasm_adapter OBJECT
+        vendor/phosg_stackimport_hash_adapter.cpp
         vendor/resource_dasm_stackimport_mace_adapter.cpp
         vendor/resource_dasm_stackimport_disassembly_adapter.cpp
         vendor/resource_dasm/src/AudioCodecs.cc

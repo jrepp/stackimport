@@ -8,6 +8,7 @@
 #include "RomDasm.h"
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+#include "StackImportPhosgHashAdapter.h"
 #include "StackImportResourceDasmDisassemblyAdapter.h"
 #endif
 
@@ -18,10 +19,6 @@
 #include <algorithm>
 #include <set>
 #include <unordered_map>
-
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-#include <phosg/Hash.hh>
-#endif
 
 namespace stackimport {
 namespace RomDasm {
@@ -127,7 +124,7 @@ uint32_t compute_crc32(std::span<const uint8_t> data) {
 
 std::string compute_sha256(std::span<const uint8_t> data) {
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-  return phosg::SHA256(data.data(), data.size()).hex();
+  return Sha256WithPhosg(data.data(), data.size());
 #else
   char hex[65] = {0};
   for(size_t i = 0; i < data.size() && i < 32; i++) {
