@@ -356,6 +356,21 @@ private:
 			return;
 		}
 
+		if(resource_type_is(res_, "cicn"))
+		{
+			snprintf(fname, sizeof(fname), "cicn_%d.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				record_output_artifact(fname, payload, true);
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote cicn #%d as PNG.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
 		if(resource_type_is_indexed_icon(res_))
 		{
 			snprintf(fname, sizeof(fname), "%c%c%c%c_%d.png",

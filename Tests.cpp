@@ -490,6 +490,25 @@ std::vector<uint8_t> make_icon_payload()
 	return payload;
 }
 
+std::vector<uint8_t> make_cicn_payload()
+{
+	std::vector<uint8_t> data(100, 0);
+	rsrcd::write_u16be(data.data() + 4, 1);
+	rsrcd::write_u16be(data.data() + 10, 1);
+	rsrcd::write_u16be(data.data() + 12, 1);
+	rsrcd::write_u16be(data.data() + 32, 1);
+	rsrcd::write_u16be(data.data() + 54, 1);
+	rsrcd::write_u16be(data.data() + 60, 1);
+	rsrcd::write_u16be(data.data() + 62, 1);
+	rsrcd::write_u16be(data.data() + 74, 1);
+	rsrcd::write_u16be(data.data() + 76, 1);
+	data[82] = 0x80;
+	rsrcd::write_u16be(data.data() + 87, 0x8000);
+	rsrcd::write_u16be(data.data() + 89, 0);
+	rsrcd::write_u16be(data.data() + 93, 0xFFFF);
+	return data;
+}
+
 void test_resource_image_transforms()
 {
 	assert_rgba_resource("ICON", 128, make_icon_payload(), 32, 32);
@@ -883,18 +902,13 @@ void test_resource_color_and_ui_transforms()
 		"\"monochromePatternHex\": \"1111111122222222\"",
 	});
 
-	std::vector<uint8_t> cicnPayload(83);
-	rsrcd::write_u16be(cicnPayload.data() + 4, 1);
-	rsrcd::write_u16be(cicnPayload.data() + 10, 1);
-	rsrcd::write_u16be(cicnPayload.data() + 32, 1);
-	rsrcd::write_u16be(cicnPayload.data() + 54, 1);
-	rsrcd::write_u16be(cicnPayload.data() + 60, 1);
-	rsrcd::write_u16be(cicnPayload.data() + 74, 1);
+	std::vector<uint8_t> cicnPayload = make_cicn_payload();
 	assert_json_resource_contains("cicn", 3, cicnPayload, {
 		"\"pixelSize\": 1",
 		"\"maskDataOffset\": 82",
 		"\"colorTableOffset\": 83",
 	});
+	assert_rgba_resource("cicn", 3, cicnPayload, 1, 1);
 
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
@@ -1065,6 +1079,42 @@ void test_resource_package_writes()
 	assert(addColorSummaries[0].outputArtifacts[0].mediaType == "application/json");
 	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
 	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
+
+	const std::vector<uint8_t> cicnFork = make_single_resource_fork("cicn", 22, make_cicn_payload());
+	const std::string cicnOutputPath = std::string("/tmp/stackimport-cicn-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(cicnOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState cicnPlatformState;
+	cicnPlatformState.resource_fork_data = cicnFork.data();
+	cicnPlatformState.resource_fork_size = cicnFork.size();
+	stackimport_platform cicnPlatform = resourceForkPlatform;
+	cicnPlatform.user_data = &cicnPlatformState;
+	const stackimport_internal_platform cicnInternalPlatform = stackimport_internal_platform_from_api(&cicnPlatform);
+	CountingResourceOutput cicnOutput;
+	std::vector<CResourceSummary> cicnSummaries;
+	std::string cicnStatus;
+	uint64_t cicnBytes = 0;
+	{
+		stackimport_platform_scope cicnScope(cicnInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			cicnOutputPath,
+			"Stack",
+			&cicnOutput,
+			cicnSummaries,
+			cicnStatus,
+			cicnBytes));
+	}
+	assert(cicnStatus == "ok");
+	assert(cicnSummaries.size() == 1);
+	assert(cicnSummaries[0].type == "cicn");
+	assert(cicnSummaries[0].status == "exported");
+	assert(cicnSummaries[0].outputFile == "cicn_22.json");
+	assert(cicnSummaries[0].outputArtifacts.size() == 2);
+	assert(cicnSummaries[0].outputArtifacts[0].path == "cicn_22.json");
+	assert(cicnSummaries[0].outputArtifacts[0].format == "json");
+	assert(cicnSummaries[0].outputArtifacts[1].path == "cicn_22.png");
+	assert(cicnSummaries[0].outputArtifacts[1].format == "png");
+	assert(cicnSummaries[0].outputArtifacts[1].mediaType == "image/png");
 
 	std::vector<uint8_t> sicnPayload(64, 0x00);
 	for(size_t row = 0; row < 16; row++)

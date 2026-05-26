@@ -1796,13 +1796,23 @@ auto emit_cicn_transform(
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
-	ResourcePayload descriptor = make_converted_resource_payload(
+	ResourcePayload jsonDescriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::JsonUtf8,
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed color icon metadata");
-	if(!output.wants_resource_payload(descriptor))
+
+	ResourcePayload imageDescriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		"decoded color icon pixels");
+
+	const bool wantsJson = output.wants_resource_payload(jsonDescriptor);
+	const bool wantsImage = output.wants_resource_payload(imageDescriptor);
+	if(!wantsJson && !wantsImage)
 		return true;
 
 	rsrcd::color_icon::Icon icon{};
@@ -1810,22 +1820,56 @@ auto emit_cicn_transform(
 	if(!parse_result)
 		return output.on_resource_error(ref, parse_result.message());
 
-	StackImportRapidJsonAllocator base_alloc;
-	JsonPoolAllocator pool(2048, &base_alloc);
-	JsonDocument doc(&pool, 2048, &base_alloc);
-	doc.SetObject();
-	JsonPoolAllocator& allocator = doc.GetAllocator();
-	doc.AddMember("pixMapUnused", icon.pix_map_unused, allocator);
-	add_json_pixel_map(doc, icon.pix_map, allocator);
-	doc.AddMember("maskUnused", icon.mask_unused, allocator);
-	add_json_bitmap_header(doc, "mask", icon.mask, allocator);
-	doc.AddMember("bitmapUnused", icon.bitmap_unused, allocator);
-	add_json_bitmap_header(doc, "bitmap", icon.bitmap, allocator);
-	doc.AddMember("iconData", icon.icon_data, allocator);
-	doc.AddMember("maskDataOffset", icon.mask_data_offset, allocator);
-	doc.AddMember("bitmapDataOffset", icon.bitmap_data_offset, allocator);
-	doc.AddMember("colorTableOffset", icon.color_table_offset, allocator);
-	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+	if(wantsJson)
+	{
+		StackImportRapidJsonAllocator base_alloc;
+		JsonPoolAllocator pool(2048, &base_alloc);
+		JsonDocument doc(&pool, 2048, &base_alloc);
+		doc.SetObject();
+		JsonPoolAllocator& allocator = doc.GetAllocator();
+		doc.AddMember("pixMapUnused", icon.pix_map_unused, allocator);
+		add_json_pixel_map(doc, icon.pix_map, allocator);
+		doc.AddMember("maskUnused", icon.mask_unused, allocator);
+		add_json_bitmap_header(doc, "mask", icon.mask, allocator);
+		doc.AddMember("bitmapUnused", icon.bitmap_unused, allocator);
+		add_json_bitmap_header(doc, "bitmap", icon.bitmap, allocator);
+		doc.AddMember("iconData", icon.icon_data, allocator);
+		doc.AddMember("maskDataOffset", icon.mask_data_offset, allocator);
+		doc.AddMember("bitmapDataOffset", icon.bitmap_data_offset, allocator);
+		doc.AddMember("colorTableOffset", icon.color_table_offset, allocator);
+		if(!finish_json_resource_payload(jsonDescriptor, doc, base_alloc, output))
+			return false;
+	}
+
+	if(!wantsImage)
+		return true;
+
+	const int32_t width = rsrcd::color_icon::rect_width(icon.pix_map.bounds);
+	const int32_t height = rsrcd::color_icon::rect_height(icon.pix_map.bounds);
+	if(width <= 0 || height <= 0)
+		return output.on_resource_error(ref, "cicn has empty bounds");
+	const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+	if(pixelCount > (static_cast<size_t>(1) << 26))
+		return output.on_resource_error(ref, "cicn image is too large");
+
+	StackImportRapidJsonAllocator imageAlloc;
+	uint8_t* rgba = static_cast<uint8_t*>(imageAlloc.Malloc(pixelCount * 4u));
+	if(rgba == nullptr)
+		return output.on_resource_error(ref, "allocation failed");
+	rsrcd::MutableBytes dst{rgba, pixelCount * 4u};
+	rsrcd::Result decodeResult = rsrcd::color_icon::decode_rgba(resource.data, icon, dst);
+	if(!decodeResult)
+	{
+		StackImportRapidJsonAllocator::Free(rgba);
+		return output.on_resource_error(ref, decodeResult.message());
+	}
+	imageDescriptor.width = static_cast<uint32_t>(width);
+	imageDescriptor.height = static_cast<uint32_t>(height);
+	imageDescriptor.row_bytes = static_cast<uint32_t>(width) * 4u;
+	imageDescriptor.data = rsrcd::Bytes{rgba, pixelCount * 4u};
+	const bool emitted = output.on_resource_payload(imageDescriptor);
+	StackImportRapidJsonAllocator::Free(rgba);
+	return emitted;
 }
 
 void add_json_size_flag(JsonValue& flags, JsonPoolAllocator& allocator, const char* name, bool value)

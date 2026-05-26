@@ -2755,6 +2755,44 @@ struct Icon {
     uint32_t color_table_offset;
 };
 
+struct ColorTableEntry {
+    uint16_t value;
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+};
+
+template<size_t InlineCapacity = 256>
+class ColorTable {
+public:
+    auto add(ColorTableEntry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many cicn color table entries");
+    }
+
+    auto count() const -> size_t { return count_; }
+    auto flags() const -> uint16_t { return flags_; }
+    void set_flags(uint16_t flags) { flags_ = flags; }
+
+    auto find(uint16_t index) const -> const ColorTableEntry* {
+        if ((flags_ & 0x8000u) != 0) {
+            return index < count_ ? &entries_[index] : nullptr;
+        }
+        for (size_t i = 0; i < count_; ++i) {
+            if (entries_[i].value == index) return &entries_[i];
+        }
+        return nullptr;
+    }
+
+private:
+    ColorTableEntry entries_[InlineCapacity];
+    size_t count_ = 0;
+    uint16_t flags_ = 0;
+};
+
 inline auto rect_width(const ui::Rect& rect) -> int32_t {
     return static_cast<int32_t>(rect.right) - rect.left;
 }
@@ -2809,6 +2847,109 @@ inline auto parse(Bytes data, Icon& icon) -> Result {
     icon.bitmap_data_offset = static_cast<uint32_t>(header_size + mask_bytes);
     icon.color_table_offset = static_cast<uint32_t>(header_size + mask_bytes + bitmap_bytes_value);
     if (icon.color_table_offset > data.size) return Error::unexpected_end();
+    return Result::ok();
+}
+
+template<size_t Cap = 256>
+inline auto parse_color_table(Bytes data, uint32_t offset, ColorTable<Cap>& table, uint32_t& next_offset) -> Result {
+    if (!range_in_bounds(offset, 8, data.size)) return Error::unexpected_end();
+    table.set_flags(read_u16be(data.data + offset + 4));
+    const uint16_t max_index = read_u16be(data.data + offset + 6);
+    const size_t count = static_cast<size_t>(max_index) + 1u;
+    if (count > Cap) return Error::invalid_data("too many cicn color table entries");
+    const size_t table_size = 8u + count * 8u;
+    if (!range_in_bounds(offset, table_size, data.size)) return Error::unexpected_end();
+
+    size_t entry_offset = static_cast<size_t>(offset) + 8u;
+    for (size_t i = 0; i < count; ++i) {
+        ColorTableEntry entry{};
+        entry.value = read_u16be(data.data + entry_offset);
+        entry.red = read_u16be(data.data + entry_offset + 2);
+        entry.green = read_u16be(data.data + entry_offset + 4);
+        entry.blue = read_u16be(data.data + entry_offset + 6);
+        if (auto r = table.add(entry); !r) return r;
+        entry_offset += 8u;
+    }
+    next_offset = static_cast<uint32_t>(entry_offset);
+    return Result::ok();
+}
+
+inline auto lookup_index(Bytes data, uint16_t row_bytes, uint16_t pixel_size, int32_t x, int32_t y, uint16_t& index) -> Result {
+    const size_t row_offset = static_cast<size_t>(y) * row_bytes;
+    if (row_offset >= data.size) return Error::unexpected_end();
+    switch (pixel_size) {
+        case 1: {
+            const size_t offset = row_offset + static_cast<size_t>(x / 8);
+            if (offset >= data.size) return Error::unexpected_end();
+            index = static_cast<uint16_t>((data.data[offset] >> (7 - (x & 7))) & 0x01u);
+            return Result::ok();
+        }
+        case 2: {
+            const size_t offset = row_offset + static_cast<size_t>(x / 4);
+            if (offset >= data.size) return Error::unexpected_end();
+            index = static_cast<uint16_t>((data.data[offset] >> (6 - ((x & 3) * 2))) & 0x03u);
+            return Result::ok();
+        }
+        case 4: {
+            const size_t offset = row_offset + static_cast<size_t>(x / 2);
+            if (offset >= data.size) return Error::unexpected_end();
+            index = static_cast<uint16_t>((data.data[offset] >> (4 - ((x & 1) * 4))) & 0x0Fu);
+            return Result::ok();
+        }
+        case 8: {
+            const size_t offset = row_offset + static_cast<size_t>(x);
+            if (offset >= data.size) return Error::unexpected_end();
+            index = data.data[offset];
+            return Result::ok();
+        }
+        default:
+            return Error::invalid_data("unsupported cicn pixel depth");
+    }
+}
+
+template<size_t Cap = 256>
+inline auto decode_rgba(Bytes data, const Icon& icon, MutableBytes out) -> Result {
+    const int32_t width = rect_width(icon.pix_map.bounds);
+    const int32_t height = rect_height(icon.pix_map.bounds);
+    if (width <= 0 || height <= 0) return Error::invalid_data("cicn has empty bounds");
+    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (out.size < pixel_count * 4u) return Error::bounds();
+
+    ColorTable<Cap> table;
+    uint32_t pixel_data_offset = 0;
+    if (auto r = parse_color_table(data, icon.color_table_offset, table, pixel_data_offset); !r) return r;
+    size_t pixel_data_size = 0;
+    if (auto r = bitmap_bytes({icon.pix_map.row_bytes, icon.pix_map.bounds}, pixel_data_size); !r) return r;
+    if (!range_in_bounds(pixel_data_offset, pixel_data_size, data.size)) return Error::unexpected_end();
+    Bytes pixel_data{data.data + pixel_data_offset, pixel_data_size};
+    Bytes mask_data{data.data + icon.mask_data_offset, static_cast<size_t>(icon.mask.row_bytes) * static_cast<size_t>(height)};
+
+    for (int32_t y = 0; y < height; ++y) {
+        for (int32_t x = 0; x < width; ++x) {
+            uint16_t index = 0;
+            if (auto r = lookup_index(pixel_data, icon.pix_map.row_bytes, icon.pix_map.pixel_size, x, y, index); !r) return r;
+            uint16_t mask_index = 0;
+            if (auto r = lookup_index(mask_data, icon.mask.row_bytes, 1, x, y, mask_index); !r) return r;
+            const ColorTableEntry* entry = table.find(index);
+            if (entry == nullptr) {
+                if (index == static_cast<uint16_t>((1u << icon.pix_map.pixel_size) - 1u)) {
+                    out.data[0] = 0;
+                    out.data[1] = 0;
+                    out.data[2] = 0;
+                    out.data[3] = mask_index != 0 ? 0xFF : 0x00;
+                } else {
+                    return Error::invalid_data("cicn color index not found");
+                }
+            } else {
+                out.data[0] = static_cast<uint8_t>(entry->red >> 8);
+                out.data[1] = static_cast<uint8_t>(entry->green >> 8);
+                out.data[2] = static_cast<uint8_t>(entry->blue >> 8);
+                out.data[3] = mask_index != 0 ? 0xFF : 0x00;
+            }
+            out.data += 4;
+            out.size -= 4;
+        }
+    }
     return Result::ok();
 }
 

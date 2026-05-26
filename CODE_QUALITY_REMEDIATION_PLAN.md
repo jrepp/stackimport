@@ -174,6 +174,9 @@ when parser behavior changes, updates to the relevant format documentation under
   the legacy `outputFile` field, so one converted resource stream can emit JSON,
   PNG, text, WAV, or disassembly files without losing secondary artifacts in
   `source-manifest.json`.
+- `cicn` color icons now exercise that combined stream: the rsrcd-owned parser
+  decodes bounded indexed pixels through the embedded color table, and the
+  package writer emits both `cicn_<id>.json` metadata and `cicn_<id>.png`.
 - Resource domain types and callback helpers moved to
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
@@ -325,8 +328,9 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `KCHR` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
-- Done for `cicn` metadata: parse through rsrcd and route package JSON artifact
-  writing through the shared transform payload.
+- Done for `cicn` metadata and image output: parse through rsrcd, emit JSON
+  metadata plus decoded RGBA pixels from one transform stream, and route package
+  JSON/PNG artifact writing through that payload stream.
 - Done for simple template-backed metadata: parse `RECT` and `TOOL` through
   rsrcd and route package JSON artifact writing through the shared transform
   payload.
