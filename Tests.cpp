@@ -12,6 +12,7 @@
 #include "StackImportSoundConverter.h"
 #include "stackimport_c.h"
 #include "stackimport_platform_internal.h"
+#include "stackimport_rapidjson_allocator.h"
 #include <assert.h>
 #include <cstdlib>
 #include <cstddef>
@@ -550,6 +551,22 @@ void	RunTests()
 		std::string soundError;
 		assert(!stackimport::ConvertSndResourceToWav(rsrcd::Bytes{failingSound.data(), failingSound.size()}, failingWavData, soundError));
 		assert(soundError == "allocation failed");
+	}
+
+	CountingPlatformState rapidJsonFailingState;
+	rapidJsonFailingState.fail_after_allocations = 0;
+	stackimport_platform rapidJsonFailingPlatform = failingPlatform;
+	rapidJsonFailingPlatform.user_data = &rapidJsonFailingState;
+	const stackimport_internal_platform rapidJsonInternalPlatform = stackimport_internal_platform_from_api(&rapidJsonFailingPlatform);
+	{
+		stackimport_platform_scope scope(rapidJsonInternalPlatform);
+		StackImportRapidJsonAllocator rapidJsonAllocator;
+		stackimport_internal_reset_allocation_failure();
+		assert(rapidJsonAllocator.Malloc(16) == nullptr);
+		assert(stackimport_internal_had_allocation_failure());
+		stackimport_internal_reset_allocation_failure();
+		assert(rapidJsonAllocator.Realloc(nullptr, 0, 16) == nullptr);
+		assert(stackimport_internal_had_allocation_failure());
 	}
 
 }

@@ -14,7 +14,10 @@ public:
 	{
 		if(size == 0)
 			return nullptr;
-		return allocate_with_header(size);
+		void* ptr = allocate_with_header(size);
+		if(!ptr)
+			stackimport_internal_note_allocation_failure();
+		return ptr;
 	}
 
 	void* Realloc(void* originalPtr, size_t originalSize, size_t newSize)
@@ -25,6 +28,11 @@ public:
 			return nullptr;
 		}
 		void* newPtr = allocate_with_header(newSize);
+		if(!newPtr)
+		{
+			stackimport_internal_note_allocation_failure();
+			return nullptr;
+		}
 		if(newPtr && originalPtr && originalSize > 0)
 			std::memcpy(newPtr, originalPtr, std::min(originalSize, newSize));
 		Free(originalPtr);
