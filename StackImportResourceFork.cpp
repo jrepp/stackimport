@@ -1,5 +1,4 @@
 #include "CStackFile.h"
-#include "Mac68kDisassembly.h"
 #include "StackImportPngWriter.h"
 #include "StackImportResourceTransforms.h"
 #include "StackImportResourceTypes.h"
@@ -140,7 +139,8 @@ public:
 	{
 		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32 ||
 			payload.format == stackimport::ResourcePayloadFormat::JsonUtf8 ||
-			payload.format == stackimport::ResourcePayloadFormat::Binary)
+			payload.format == stackimport::ResourcePayloadFormat::Binary ||
+			payload.format == stackimport::ResourcePayloadFormat::TextUtf8)
 			return true;
 		if(downstream_ == nullptr || downstreamStopped_)
 			return false;
@@ -155,6 +155,8 @@ public:
 			write_json_payload(payload);
 		else if(payload.format == stackimport::ResourcePayloadFormat::Binary)
 			write_binary_payload(payload);
+		else if(payload.format == stackimport::ResourcePayloadFormat::TextUtf8)
+			write_text_payload(payload);
 		if(downstream_ != nullptr && !downstreamStopped_ && !stackimport::emit_resource_payload(*downstream_, payload))
 			downstreamStopped_ = true;
 		return true;
@@ -170,6 +172,12 @@ public:
 		{
 			summary_.status = "convert_failed";
 			stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res_.id, msg);
+		}
+		else if(resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
+			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn"))
+		{
+			summary_.status = "disassembly_failed";
+			stackimport_emit_diagnosticf("Warning: Couldn't disassemble '%s' #%d: %s.\n", summary_.type.c_str(), summary_.id, msg);
 		}
 		return true;
 	}
@@ -261,6 +269,28 @@ private:
 			summary_.status = "export_failed";
 	}
 
+	void write_text_payload(const stackimport::ResourcePayload& payload)
+	{
+		if(payload.data.data == nullptr)
+			return;
+		if(!resource_type_is(res_, "XCMD") && !resource_type_is(res_, "XFCN") &&
+			!resource_type_is(res_, "xcmd") && !resource_type_is(res_, "xfcn"))
+			return;
+
+		const std::string typeAndArchitecture = summary_.type + "_" + summary_.architecture;
+		const std::string relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName_, typeAndArchitecture, summary_.id, summary_.name, ".s");
+		const std::string text(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
+		if(write_text_file(output_path(basePath_, relativePath.c_str()), text))
+		{
+			summary_.status = "disassembled";
+			summary_.disassemblyFile = relativePath;
+			exportedCount_++;
+			stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary_.architecture.c_str(), summary_.type.c_str(), summary_.id);
+		}
+		else
+			summary_.status = "disassembly_write_failed";
+	}
+
 	const rsrcd::ResRef& res_;
 	const std::string& basePath_;
 	const std::string& stackFileName_;
@@ -349,16 +379,21 @@ bool stackimport_load_resource_fork(
 		const bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
 		const bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
 
-		stackimport::Mac68kDisassemblyResult disassembly;
 		if(is68K)
 		{
 			summary.architecture = "mac68k";
-			disassembly = stackimport::DisassembleMac68kCodeResource(std::span<const uint8_t>(res.data.data, res.data.size), 0, res.data.size, 0);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
 		}
 		else if(isPPC)
 		{
 			summary.architecture = "macppc";
-			disassembly = stackimport::DisassemblePowerPCCodeResource(std::span<const uint8_t>(res.data.data, res.data.size), 0, res.data.size, 0);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
 		}
 		else if(std::memcmp(res.type.data, "ICON", 4) == 0)
 		{
@@ -408,32 +443,6 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 
-		if(disassembly.ok)
-		{
-			if(!resourceStreamingStopped)
-			{
-				auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::TextUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()}, "text/x-asm; charset=utf-8", is68K ? "Mac 68K disassembly" : "PowerPC disassembly");
-				if(!stackimport::emit_resource_payload(resourceOutput, payload))
-					resourceStreamingStopped = true;
-			}
-			const std::string typeAndArchitecture = summary.type + "_" + summary.architecture;
-			const std::string relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName, typeAndArchitecture, summary.id, summary.name, ".s");
-			if(write_text_file(output_path(basePath, relativePath.c_str()), disassembly.text))
-			{
-				summary.status = "disassembled";
-				summary.disassemblyFile = relativePath;
-				stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary.architecture.c_str(), summary.type.c_str(), summary.id);
-			}
-			else
-				summary.status = "disassembly_write_failed";
-		}
-		else
-		{
-			summary.status = is68K || isPPC ? "disassembly_failed" : summary.status;
-			if(!disassembly.error.empty())
-				stackimport_emit_diagnosticf("Warning: Couldn't disassemble '%s' #%d: %s.\n", summary.type.c_str(), summary.id, disassembly.error.c_str());
-		}
-		resourceSummaries.push_back(summary);
 	}
 
 	resourceForkStatus = resourceForkHadInvalidResources ? "partial" : "ok";

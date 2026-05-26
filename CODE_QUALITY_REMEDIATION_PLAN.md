@@ -174,13 +174,16 @@ when parser behavior changes, updates to the relevant format documentation under
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
   `StackImportResourceTransforms.cpp`. `snd ` to WAV conversion now also emits
-  through this transform surface.
+  through this transform surface, as do 68K and PowerPC code-resource
+  disassembly payloads.
   `ResourceForkParser` and the package exporter now share those transform rules
   for callback payload delivery; the package exporter also writes ICON, CURS,
-  PAT#, PLTE, and `snd ` artifacts from the same transform payloads instead of
-  decoding, serializing, or converting them a second time.
-- Still open: 68K disassembly and PowerPC disassembly have not yet been moved
-  into the shared transform interface.
+  PAT#, PLTE, `snd `, and code-resource disassembly artifacts from the same
+  transform payloads instead of decoding, serializing, converting, or
+  disassembling them a second time.
+- Still open: promote the transform surface from payload-only callbacks to a
+  fuller event model for summaries, diagnostics, artifact metadata, and future
+  resource families.
 - Remaining work: expand the shared transform interface into one owned
   event/converter pipeline for metadata, diagnostics, and artifacts beyond the
   current image-payload transform cases.
@@ -199,8 +202,12 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for `snd ` audio: move WAV conversion into
   `StackImportResourceTransforms.cpp`, and route package WAV artifact writing
   through that transform payload.
-- Move 68K disassembly and PowerPC disassembly into resource converter handlers,
-  including their diagnostics and package artifacts.
+- Done for code resources: move 68K and PowerPC disassembly into
+  `StackImportResourceTransforms.cpp`, and route package `.s` artifact writing
+  through that transform payload.
+- Promote transform handlers from payload callbacks to a richer resource-event
+  stream that can carry summaries, diagnostics, artifact metadata, and future
+  typed resource outputs without adding ad hoc package-export branches.
 - Let package output, C resource callbacks, and future corpus indexing consume
   the same event stream.
 - Remove duplicate conversion code from `include/stackimport_sax.hpp` and

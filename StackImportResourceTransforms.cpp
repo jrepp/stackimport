@@ -1,9 +1,11 @@
+#include "Mac68kDisassembly.h"
 #include "StackImportResourceTransforms.h"
 
 #include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
 #include <cstring>
+#include <span>
 #include <string>
 
 #include <rapidjson/document.h>
@@ -144,6 +146,31 @@ auto emit_snd_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_code_resource_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	bool powerpc) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/x-asm; charset=utf-8",
+		powerpc ? "PowerPC disassembly" : "Mac 68K disassembly");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	Mac68kDisassemblyResult disassembly = powerpc
+		? DisassemblePowerPCCodeResource(std::span<const uint8_t>(resource.data.data, resource.data.size), 0, resource.data.size, 0)
+		: DisassembleMac68kCodeResource(std::span<const uint8_t>(resource.data.data, resource.data.size), 0, resource.data.size, 0);
+	if(!disassembly.ok)
+		return output.on_resource_error(ref, disassembly.error.c_str());
+
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()};
+	return output.on_resource_payload(descriptor);
+}
+
 } // namespace
 
 auto emit_builtin_resource_transforms(
@@ -151,6 +178,12 @@ auto emit_builtin_resource_transforms(
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
+	if(resource_type_is(resource, "XCMD") || resource_type_is(resource, "XFCN"))
+		return emit_code_resource_transform(resource, ref, output, false);
+
+	if(resource_type_is(resource, "xcmd") || resource_type_is(resource, "xfcn"))
+		return emit_code_resource_transform(resource, ref, output, true);
+
 	if(resource_type_is(resource, "ICON") && resource.data.size == 128)
 	{
 		ResourcePayload descriptor = make_converted_resource_payload(
