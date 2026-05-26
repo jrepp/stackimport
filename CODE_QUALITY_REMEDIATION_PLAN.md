@@ -260,6 +260,53 @@ when parser behavior changes, updates to the relevant format documentation under
 - Check resource names and type codes for MacRoman/high-bit byte preservation.
 - Check output filename sanitization for collisions after percent encoding.
 - Check payload lifetime documentation against actual callback storage.
+- For every resource type below, audit the full consumer chain when converted
+  support is added: package artifact writer, C resource callbacks and payload
+  flags, corpus report/index tables, embedded conversion manifests/provenance,
+  fixture coverage, and any CLI summary/status output.
+
+### Resource Type Audit Inventory
+
+This inventory is seeded from the local `resource_dasm` type registry plus
+StackImport-specific resource coverage. Keep it as the checklist for full
+resource-fork coverage. Mark a type done only after parser/transform support and
+all consumers listed in the lateral audit above have been updated and tested.
+
+- Current typed StackImport/core coverage:
+  `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `HCbg`,
+  `HCcd`, `STR `, `STR#`, `TEXT`, `vers`, `PICT`, `snd `, `XCMD`, `XFCN`,
+  `xcmd`, `xfcn`.
+- Audit inventory:
+  `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
+  `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
+  `CDEF`, `cdek`, `cdev`, `CDRV`, `cfrg`, `cicn`, `citt`, `clok`, `clut`,
+  `CMDK`, `cmid`, `CMNU`, `cmnu`, `cmtb`, `cmu#`, `CNTL`, `CODE`, `code`,
+  `crsr`, `csnd`, `CTBL`, `CTY#`, `CURS`, `dbex`, `dcmp`, `dcod`, `dctb`,
+  `dem `, `dimg`, `DITL`, `DLOG`, `DRVR`, `drvr`, `ecmi`, `emid`, `enet`,
+  `epch`, `errs`, `ESnd`, `esnd`, `expt`, `FBTN`, `FCMT`, `fctb`, `FDIR`,
+  `finf`, `FKEY`, `fld#`, `flst`, `fmap`, `FONT`, `fovr`, `FREF`, `FRSV`,
+  `FWID`, `gbly`, `gcko`, `GDEF`, `gdef`, `gnld`, `GNRL`, `gpch`, `h8mk`,
+  `hqda`, `hwin`, `ic04`, `ic05`, `ic07`, `ic08`, `ic09`, `ic10`, `ic11`,
+  `ic12`, `ic13`, `ic14`, `ich4`, `ich8`, `ich#`, `icl4`, `icl8`, `icm4`,
+  `icm8`, `icm#`, `icmt`, `ICN#`, `icns`, `icnV`, `ICON`, `icp4`, `icp5`,
+  `icp6`, `ics4`, `ics8`, `icsb`, `icsB`, `ics#`, `ih32`, `il32`, `inbb`,
+  `indm`, `info`, `infs`, `INIT`, `inpk`, `inra`, `insc`, `INTL`, `INST`,
+  `is32`, `it32`, `itl0`, `itl1`, `ITL1`, `itlb`, `itlc`, `itlk`, `KBDN`,
+  `KCHR`, `kcs4`, `kcs8`, `kcs#`, `krnl`, `l8mk`, `LAYO`, `LDEF`, `lmgr`,
+  `lodr`, `lstr`, `ltlk`, `mach`, `MACS`, `MADH`, `MADI`, `MBAR`, `MBDF`,
+  `mcky`, `MDEF`, `mem!`, `MENU`, `MIDI`, `Midi`, `midi`, `minf`, `mitq`,
+  `mntr`, `MOOV`, `MooV`, `moov`, `mstr`, `mst#`, `name`, `ncmp`, `ndlc`,
+  `ndmc`, `ndrv`, `NFNT`, `nift`, `nitt`, `nlib`, `nrct`, `nsnd`, `nsrd`,
+  `ntrb`, `osl `, `otdr`, `otlm`, `PACK`, `PAPA`, `PAT `, `PAT#`, `PICK`,
+  `PICT`, `pltt`, `pnll`, `ppat`, `ppc!`, `ppcc`, `ppci`, `ppct`, `PPic`,
+  `ppt#`, `PRC0`, `PRC3`, `PREC`, `proc`, `PSAP`, `pslt`, `ptbl`, `PTCH`,
+  `ptch`, `pthg`, `qrsc`, `qtcm`, `res!`, `RECT`, `resf`, `RMAP`, `ROv#`,
+  `ROvr`, `RSSC`, `rtt#`, `RVEW`, `s8mk`, `sb24`, `SB24`, `sbtp`, `scal`,
+  `scod`, `scrn`, `sect`, `seg!`, `SERD`, `sfnt`, `sfvr`, `shal`, `SICN`,
+  `sift`, `SIGN`, `SIZE`, `slct`, `slut`, `SMOD`, `SMSD`, `snd `, `snth`,
+  `SONG`, `SOUN`, `STR `, `STR#`, `styl`, `t8mk`, `tdig`, `TEXT`, `thn#`,
+  `TMPL`, `TOC `, `tokn`, `TOOL`, `Tune`, `TwCS`, `TxSt`, `vdig`, `vers`,
+  `wart`, `wctb`, `WDEF`, `WIND`, `wstr`, `XCMD`, `XFCN`, `Ysnd`.
 
 ## Phase 5: Dependency Integration Cleanup
 
