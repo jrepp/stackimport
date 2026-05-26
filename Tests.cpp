@@ -1048,6 +1048,28 @@ void	RunTests()
 	assert(codeOutput.last_json.find("\"kind\": \"nearSegment\"") != std::string::npos);
 	assert(codeOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
 
+	std::vector<uint8_t> drvrPayload(26);
+	rsrcd::write_u16be(drvrPayload.data(), 0x0100);
+	rsrcd::write_u16be(drvrPayload.data() + 2, 60);
+	rsrcd::write_u16be(drvrPayload.data() + 4, 0xFFFF);
+	rsrcd::write_u16be(drvrPayload.data() + 6, 128);
+	rsrcd::write_u16be(drvrPayload.data() + 8, 24);
+	drvrPayload[18] = 4;
+	drvrPayload[19] = 'D';
+	drvrPayload[20] = 'r';
+	drvrPayload[21] = 'v';
+	drvrPayload[22] = 'r';
+	drvrPayload[24] = 0x4E;
+	drvrPayload[25] = 0x75;
+	const std::vector<uint8_t> drvrFork = make_single_resource_fork("DRVR", 1, drvrPayload);
+	CountingResourceOutput drvrOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{drvrFork.data(), drvrFork.size()}, drvrOutput));
+	assert(drvrOutput.native_count == 1);
+	assert(drvrOutput.json_count == 1);
+	assert(drvrOutput.last_json.find("\"name\": \"Drvr\"") != std::string::npos);
+	assert(drvrOutput.last_json.find("\"codeStartOffset\": 24") != std::string::npos);
+	assert(drvrOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

@@ -231,6 +231,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - `CODE` resources now have an rsrcd typed metadata parser and shared JSON
   transform for CODE 0 jump tables and near/far segment headers; disassembly
   remains future code-resource adapter work.
+- `DRVR` resources now have an rsrcd typed metadata parser and shared JSON
+  transform for driver flags, entry labels, names, and code size.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -313,6 +315,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `CODE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `DRVR` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -377,7 +381,7 @@ all consumers listed in the lateral audit above have been updated and tested.
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
   `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
   `RSSC`, `TxSt`, `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, `XCMD`, `XFCN`,
-  `LAYO`, `CODE`, `xcmd`, `xfcn`.
+  `LAYO`, `CODE`, `DRVR`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

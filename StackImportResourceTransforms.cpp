@@ -964,6 +964,51 @@ auto emit_code_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_drvr_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed driver metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::drvr::Driver driver{};
+	auto parse_result = rsrcd::drvr::parse(resource.data, driver);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("flags", driver.flags, allocator);
+	doc.AddMember("delay", driver.delay, allocator);
+	doc.AddMember("eventMask", driver.event_mask, allocator);
+	doc.AddMember("menuId", driver.menu_id, allocator);
+	doc.AddMember("openLabel", driver.open_label, allocator);
+	doc.AddMember("primeLabel", driver.prime_label, allocator);
+	doc.AddMember("controlLabel", driver.control_label, allocator);
+	doc.AddMember("statusLabel", driver.status_label, allocator);
+	doc.AddMember("closeLabel", driver.close_label, allocator);
+	std::string name = mac_roman_from_bytes(driver.name.data, driver.name.size);
+	doc.AddMember("name", json_string(name, allocator), allocator);
+	doc.AddMember("codeStartOffset", driver.code_start_offset, allocator);
+	doc.AddMember("codeSize", static_cast<uint64_t>(driver.code.size), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1956,6 +2001,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "CODE"))
 		return emit_code_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "DRVR"))
+		return emit_drvr_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

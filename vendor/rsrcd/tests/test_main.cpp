@@ -1229,6 +1229,41 @@ static void test_parse_code_segment_far() {
     CHECK(segment.code.size == 2, "far CODE size");
 }
 
+static void test_parse_drvr() {
+    uint8_t data[26] = {};
+    rsrcd::write_u16be(data, 0x0100);
+    rsrcd::write_u16be(data + 2, 60);
+    rsrcd::write_u16be(data + 4, 0xFFFF);
+    rsrcd::write_u16be(data + 6, 128);
+    rsrcd::write_u16be(data + 8, 24);
+    data[18] = 4;
+    data[19] = 'D';
+    data[20] = 'r';
+    data[21] = 'v';
+    data[22] = 'r';
+    data[24] = 0x4E;
+    data[25] = 0x75;
+
+    rsrcd::drvr::Driver driver{};
+    auto r = rsrcd::drvr::parse({data, sizeof(data)}, driver);
+    CHECK_RESULT(r, "parse DRVR");
+    CHECK(driver.flags == 0x0100, "DRVR flags");
+    CHECK(driver.name.size == 4, "DRVR name size");
+    CHECK(driver.code_start_offset == 24, "DRVR code start");
+    CHECK(driver.code.size == 2, "DRVR code size");
+}
+
+static void test_parse_drvr_bad_label() {
+    uint8_t data[22] = {};
+    rsrcd::write_u16be(data + 8, 2);
+    data[18] = 1;
+    data[19] = 'D';
+
+    rsrcd::drvr::Driver driver{};
+    auto r = rsrcd::drvr::parse({data, sizeof(data)}, driver);
+    CHECK(!r, "DRVR bad label should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1972,6 +2007,8 @@ int main() {
     test_parse_code0();
     test_parse_code_segment_near();
     test_parse_code_segment_far();
+    test_parse_drvr();
+    test_parse_drvr_bad_label();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

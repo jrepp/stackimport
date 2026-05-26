@@ -2351,6 +2351,59 @@ inline auto parse_segment(Bytes data, Segment& segment) -> Result {
 } // namespace code_resource
 
 // ============================================================================
+// Driver resource metadata (DRVR)
+// ============================================================================
+
+namespace drvr {
+
+struct Driver {
+    uint16_t flags;
+    uint16_t delay;
+    uint16_t event_mask;
+    int16_t menu_id;
+    uint16_t open_label;
+    uint16_t prime_label;
+    uint16_t control_label;
+    uint16_t status_label;
+    uint16_t close_label;
+    Bytes name;
+    uint32_t code_start_offset;
+    Bytes code;
+};
+
+inline auto parse(Bytes data, Driver& driver) -> Result {
+    constexpr size_t header_size = 18;
+    if (data.size < header_size + 1u) return Error::unexpected_end();
+    driver.flags = read_u16be(data.data);
+    driver.delay = read_u16be(data.data + 2);
+    driver.event_mask = read_u16be(data.data + 4);
+    driver.menu_id = read_i16be(data.data + 6);
+    driver.open_label = read_u16be(data.data + 8);
+    driver.prime_label = read_u16be(data.data + 10);
+    driver.control_label = read_u16be(data.data + 12);
+    driver.status_label = read_u16be(data.data + 14);
+    driver.close_label = read_u16be(data.data + 16);
+    const uint8_t name_len = data.data[18];
+    if (!range_in_bounds(19, name_len, data.size)) return Error::unexpected_end();
+    driver.name = Bytes{data.data + 19, name_len};
+    size_t code_start = 19u + name_len;
+    if ((code_start & 1u) != 0) code_start++;
+    if (code_start > data.size) return Error::unexpected_end();
+    if ((driver.open_label != 0 && driver.open_label < code_start) ||
+        (driver.prime_label != 0 && driver.prime_label < code_start) ||
+        (driver.control_label != 0 && driver.control_label < code_start) ||
+        (driver.status_label != 0 && driver.status_label < code_start) ||
+        (driver.close_label != 0 && driver.close_label < code_start)) {
+        return Error::invalid_data("driver label is before code start");
+    }
+    driver.code_start_offset = static_cast<uint32_t>(code_start);
+    driver.code = data.slice(code_start, data.size - code_start);
+    return Result::ok();
+}
+
+} // namespace drvr
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 
