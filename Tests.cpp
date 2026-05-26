@@ -30,6 +30,15 @@
 #include <direct.h>
 #endif
 
+bool stackimport_load_resource_fork(
+	const std::string& fpath,
+	const std::string& basePath,
+	const std::string& stackFileName,
+	stackimport::IResourceOutput* resourceOutput,
+	std::vector<CResourceSummary>& resourceSummaries,
+	std::string& resourceForkStatus,
+	uint64_t& resourceForkBytes);
+
 namespace {
 
 void* STACKIMPORT_CALL test_allocate(size_t size, size_t alignment, void*)
@@ -75,6 +84,12 @@ struct CountingPlatformState {
 	size_t fail_after_allocations = SIZE_MAX;
 	bool fail_writes = false;
 	bool fail_closes = false;
+};
+
+struct ResourceForkPlatformState : CountingPlatformState {
+	const uint8_t* resource_fork_data = nullptr;
+	size_t resource_fork_size = 0;
+	size_t resource_fork_pos = 0;
 };
 
 void* STACKIMPORT_CALL counting_allocate(size_t size, size_t alignment, void* user_data)
@@ -130,6 +145,57 @@ int STACKIMPORT_CALL counting_make_directory(const char* path, void*)
 	const int result = mkdir(path, 0777);
 #endif
 	return result == 0 || errno == EEXIST ? 0 : result;
+}
+
+bool has_resource_fork_suffix(const char* path)
+{
+	const std::string text(path ? path : "");
+	const std::string suffix = "/..namedfork/rsrc";
+	return text.size() >= suffix.size() && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+stackimport_file_handle STACKIMPORT_CALL resource_fork_open_file(const char* path, const char* mode, void* user_data)
+{
+	auto* state = static_cast<ResourceForkPlatformState*>(user_data);
+	state->opens++;
+	if(mode && std::strcmp(mode, "rb") == 0 && has_resource_fork_suffix(path))
+	{
+		state->resource_fork_pos = 0;
+		return state;
+	}
+	return std::fopen(path, mode);
+}
+
+size_t STACKIMPORT_CALL resource_fork_read_file(stackimport_file_handle file, void* data, size_t size, void* user_data)
+{
+	auto* state = static_cast<ResourceForkPlatformState*>(user_data);
+	state->reads++;
+	if(file == state)
+	{
+		const size_t available = state->resource_fork_pos < state->resource_fork_size ? state->resource_fork_size - state->resource_fork_pos : 0;
+		const size_t count = size < available ? size : available;
+		if(count > 0)
+			std::memcpy(data, state->resource_fork_data + state->resource_fork_pos, count);
+		state->resource_fork_pos += count;
+		return count;
+	}
+	return std::fread(data, 1, size, static_cast<FILE*>(file));
+}
+
+size_t STACKIMPORT_CALL resource_fork_write_file(stackimport_file_handle file, const void* data, size_t size, void* user_data)
+{
+	auto* state = static_cast<ResourceForkPlatformState*>(user_data);
+	state->writes++;
+	return std::fwrite(data, 1, size, static_cast<FILE*>(file));
+}
+
+int STACKIMPORT_CALL resource_fork_close_file(stackimport_file_handle file, void* user_data)
+{
+	auto* state = static_cast<ResourceForkPlatformState*>(user_data);
+	state->closes++;
+	if(file == state)
+		return 0;
+	return std::fclose(static_cast<FILE*>(file));
 }
 
 class TestResourceOutput final : public stackimport::IResourceOutput {
@@ -455,6 +521,47 @@ void	RunTests()
 	assert(countingOutput.last_width == 32);
 	assert(countingOutput.last_height == 32);
 	assert(countingOutput.last_payload_size == 32u * 32u * 4u);
+
+	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
+	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);
+	ResourceForkPlatformState resourceForkPlatformState;
+	resourceForkPlatformState.resource_fork_data = fork;
+	resourceForkPlatformState.resource_fork_size = sizeof(fork);
+	stackimport_platform resourceForkPlatform = {};
+	stackimport_platform_init(&resourceForkPlatform);
+	resourceForkPlatform.open_file = resource_fork_open_file;
+	resourceForkPlatform.read_file = resource_fork_read_file;
+	resourceForkPlatform.write_file = resource_fork_write_file;
+	resourceForkPlatform.close_file = resource_fork_close_file;
+	resourceForkPlatform.make_directory = counting_make_directory;
+	resourceForkPlatform.user_data = &resourceForkPlatformState;
+	const stackimport_internal_platform resourceForkInternalPlatform = stackimport_internal_platform_from_api(&resourceForkPlatform);
+	CountingResourceOutput packageResourceOutput;
+	std::vector<CResourceSummary> resourceSummaries;
+	std::string resourceForkStatus;
+	uint64_t resourceForkBytes = 0;
+	{
+		stackimport_platform_scope resourceForkScope(resourceForkInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			resourceForkOutput,
+			"Stack",
+			&packageResourceOutput,
+			resourceSummaries,
+			resourceForkStatus,
+			resourceForkBytes));
+	}
+	assert(resourceForkStatus == "ok");
+	assert(resourceForkBytes == sizeof(fork));
+	assert(resourceSummaries.size() == 1);
+	assert(resourceSummaries[0].type == "ICON");
+	assert(resourceSummaries[0].status == "exported");
+	assert(packageResourceOutput.native_count == 1);
+	assert(packageResourceOutput.rgba_count == 1);
+	assert(resourceForkPlatformState.opens > 0);
+	assert(resourceForkPlatformState.reads > 0);
+	assert(resourceForkPlatformState.writes > 0);
 
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;

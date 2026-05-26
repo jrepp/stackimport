@@ -80,11 +80,14 @@ when parser behavior changes, updates to the relevant format documentation under
   PNG writing uses `stbi_write_png_to_func`.
 - Removed the unused `FileStackReader` helper from `include/stackimport_sax.hpp`
   so the internal SAX parser no longer carries its own direct `fopen` reader.
+- Added a resource-fork platform callback regression that supplies
+  `..namedfork/rsrc` bytes through the configured platform and verifies converted
+  ICON output also writes through platform callbacks.
 - Remaining direct filesystem calls are either CLI/default-platform/test
   shims or still need a deliberate CLI-local versus library-backed decision.
 - Remaining work: resource-fork input callback coverage, failing-write result
-  coverage for every output kind, path-separator behavior, and close/partial
-  write diagnostics.
+  coverage for every output kind beyond the current package-level checks,
+  path-separator behavior, and close/partial write diagnostics.
 
 ### Tasks
 
@@ -106,7 +109,7 @@ when parser behavior changes, updates to the relevant format documentation under
   filesystem access.
 - Add a failing-write callback test that verifies import returns failure and
   reports the affected output.
-- Add a resource-fork callback test once resource-fork input is platform-backed.
+- Done: add a resource-fork callback test once resource-fork input is platform-backed.
 
 ### Lateral Audit
 
