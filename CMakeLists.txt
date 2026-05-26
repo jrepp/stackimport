@@ -87,7 +87,6 @@ set(STACKIMPORT_SOURCES
     CStackFile.cpp
     StackImportResourceFork.cpp
     StackImportSoundConverter.cpp
-    vendor/resource_dasm/src/AudioCodecs.cc
     Mac68kDisassembly.cpp
     CBuf.cpp
     byteutils.cpp
@@ -95,6 +94,9 @@ set(STACKIMPORT_SOURCES
     stackimport_logging.cpp
     stackimport_platform_internal.cpp
 )
+if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
+    list(APPEND STACKIMPORT_SOURCES vendor/resource_dasm/src/AudioCodecs.cc)
+endif()
 
 add_library(stackimport_static STATIC ${STACKIMPORT_SOURCES})
 add_library(stackimport::static ALIAS stackimport_static)
@@ -109,6 +111,7 @@ if(STACKIMPORT_ENABLE_VENDOR)
     target_link_libraries(stackimport_static PUBLIC vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_link_libraries(stackimport_static PUBLIC vendor_resource_file_static)
+        target_compile_definitions(stackimport_static PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_static vendor_resource_dasm)
     endif()
 endif()
@@ -132,6 +135,7 @@ if(STACKIMPORT_ENABLE_VENDOR)
     target_link_libraries(stackimport_shared PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_snd2wav vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_link_libraries(stackimport_shared PRIVATE vendor_resource_file_static)
+        target_compile_definitions(stackimport_shared PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_shared vendor_resource_dasm)
     endif()
 endif()

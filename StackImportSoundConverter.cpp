@@ -1,9 +1,12 @@
 #include "StackImportSoundConverter.h"
 
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 #include "vendor/resource_dasm/src/AudioCodecs.hh"
+#endif
 
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 namespace stackimport {
 namespace {
@@ -96,7 +99,8 @@ public:
 		uint32_t dataSize = numBytes;
 		uint32_t rate = static_cast<uint32_t>(sampleRate);
 		uint32_t bytesPerSample = 1;
-		std::vector<phosg::le_int16_t> decodedSamples;
+		std::vector<uint8_t> decodedSamples;
+		bool hasDecodedSamples = false;
 		if(sampleEncoding == compressedSH || sampleEncoding == extSH)
 		{
 			if(numBytes > 0)
@@ -120,15 +124,22 @@ public:
 			rate = static_cast<uint32_t>(aiffSampleRate);
 			if(compressionId == 3 || compressionId == 4)
 			{
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 				const bool isMace3 = compressionId == 3;
 				const uint32_t encodedBytes = numFrames * (isMace3 ? 2u : 1u) * channels;
 				if(pos_ + encodedBytes > input_.size)
 					return fail(error, "truncated compressed sample data");
-				decodedSamples = ResourceDASM::decode_mace(input_.data + pos_, encodedBytes, channels == 2, isMace3);
+				auto decoded = ResourceDASM::decode_mace(input_.data + pos_, encodedBytes, channels == 2, isMace3);
 				pos_ += encodedBytes;
 				bytesPerSample = 2;
-				dataSize = static_cast<uint32_t>(decodedSamples.size() * sizeof(phosg::le_int16_t));
+				const auto* sampleBytes = reinterpret_cast<const uint8_t*>(decoded.data());
+				decodedSamples.assign(sampleBytes, sampleBytes + decoded.size() * sizeof(decoded[0]));
+				hasDecodedSamples = true;
+				dataSize = static_cast<uint32_t>(decodedSamples.size());
 				numBytes = dataSize;
+#else
+				return fail(error, "MACE compression unavailable");
+#endif
 			}
 			else if(compressionId == 0 || compressionId == 0xFFFF)
 			{
@@ -144,7 +155,7 @@ public:
 		}
 		if(!error.empty())
 			return false;
-		if(decodedSamples.empty() && pos_ + numBytes > input_.size)
+		if(!hasDecodedSamples && pos_ + numBytes > input_.size)
 			return fail(error, "truncated sample data");
 
 		wav.clear();
@@ -164,10 +175,9 @@ public:
 		append_ascii(wav, "data");
 		append_u32le(wav, dataSize);
 
-		if(!decodedSamples.empty())
+		if(hasDecodedSamples)
 		{
-			const auto* sampleBytes = reinterpret_cast<const uint8_t*>(decodedSamples.data());
-			wav.append(sampleBytes, sampleBytes + decodedSamples.size() * sizeof(phosg::le_int16_t));
+			wav.append(decodedSamples.data(), decodedSamples.data() + decodedSamples.size());
 		}
 		else if(bytesPerSample == 2)
 		{
