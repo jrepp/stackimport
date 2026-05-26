@@ -3,7 +3,6 @@
 #include "StackImportPngWriter.h"
 #include "StackImportResourceTransforms.h"
 #include "StackImportResourceTypes.h"
-#include "StackImportSoundConverter.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -125,11 +124,13 @@ public:
 	PackageBuiltinTransformOutput(
 		const rsrcd::ResRef& res,
 		const std::string& basePath,
+		const std::string& stackFileName,
 		stackimport::IResourceOutput* downstream,
 		CResourceSummary& summary,
 		bool& downstreamStopped)
 		: res_(res)
 		, basePath_(basePath)
+		, stackFileName_(stackFileName)
 		, downstream_(downstream)
 		, summary_(summary)
 		, downstreamStopped_(downstreamStopped)
@@ -137,7 +138,9 @@ public:
 
 	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
 	{
-		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32 || payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32 ||
+			payload.format == stackimport::ResourcePayloadFormat::JsonUtf8 ||
+			payload.format == stackimport::ResourcePayloadFormat::Binary)
 			return true;
 		if(downstream_ == nullptr || downstreamStopped_)
 			return false;
@@ -150,6 +153,8 @@ public:
 			write_png_payload(payload);
 		else if(payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
 			write_json_payload(payload);
+		else if(payload.format == stackimport::ResourcePayloadFormat::Binary)
+			write_binary_payload(payload);
 		if(downstream_ != nullptr && !downstreamStopped_ && !stackimport::emit_resource_payload(*downstream_, payload))
 			downstreamStopped_ = true;
 		return true;
@@ -161,6 +166,11 @@ public:
 		(void)msg;
 		if(resource_type_is(res_, "PLTE"))
 			summary_.status = "parse_failed";
+		else if(resource_type_is(res_, "snd "))
+		{
+			summary_.status = "convert_failed";
+			stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res_.id, msg);
+		}
 		return true;
 	}
 
@@ -211,6 +221,29 @@ private:
 		}
 	}
 
+	void write_binary_payload(const stackimport::ResourcePayload& payload)
+	{
+		if(!resource_type_is(res_, "snd ") || payload.data.data == nullptr)
+			return;
+
+		const std::string soundsDir = output_path(basePath_, "sounds");
+		if(stackimport_internal_make_directory(soundsDir.c_str()) == 0 || errno == EEXIST)
+		{
+			const std::string wavFileName = sanitized_resource_file_name(stackFileName_, "snd", res_.id, summary_.name, ".wav");
+			if(write_binary_file(soundsDir + "/" + wavFileName, payload.data))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = std::string("sounds/") + wavFileName;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote snd #%d as WAV.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
+		}
+		else
+			summary_.status = "output_directory_failed";
+	}
+
 	void write_json_payload(const stackimport::ResourcePayload& payload)
 	{
 		if(!resource_type_is(res_, "PLTE") || payload.data.data == nullptr)
@@ -230,6 +263,7 @@ private:
 
 	const rsrcd::ResRef& res_;
 	const std::string& basePath_;
+	const std::string& stackFileName_;
 	stackimport::IResourceOutput* downstream_;
 	CResourceSummary& summary_;
 	bool& downstreamStopped_;
@@ -328,14 +362,14 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "ICON", 4) == 0)
 		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "CURS", 4) == 0)
 		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
@@ -343,7 +377,7 @@ bool stackimport_load_resource_fork(
 		else if(std::memcmp(res.type.data, "PAT#", 4) == 0)
 		{
 			size_t patCount = rsrcd::patlist::count(res.data);
-			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			int exported = transformOutput.exported_count();
 			if(exported > 0)
@@ -356,43 +390,14 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "snd ", 4) == 0)
 		{
-			stackimport::PlatformByteVector wavData;
-			std::string error;
-			if(stackimport::ConvertSndResourceToWav(res.data, wavData, error))
-			{
-				if(!resourceStreamingStopped)
-				{
-					auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Binary, rsrcd::Bytes{wavData.data(), wavData.size()}, "audio/wav", "converted 'snd ' resource audio");
-					if(!stackimport::emit_resource_payload(resourceOutput, payload))
-						resourceStreamingStopped = true;
-				}
-				const std::string soundsDir = output_path(basePath, "sounds");
-				if(stackimport_internal_make_directory(soundsDir.c_str()) == 0 || errno == EEXIST)
-				{
-					const std::string wavFileName = sanitized_resource_file_name(stackFileName, "snd", res.id, summary.name, ".wav");
-					if(write_binary_file(soundsDir + "/" + wavFileName, rsrcd::Bytes{wavData.data(), wavData.size()}))
-					{
-						summary.status = "exported";
-						summary.outputFile = std::string("sounds/") + wavFileName;
-						stackimport_emit_infof("Status: Wrote snd #%d as WAV.\n", res.id);
-					}
-					else
-						summary.status = "export_failed";
-				}
-				else
-					summary.status = "output_directory_failed";
-			}
-			else
-			{
-				summary.status = "convert_failed";
-				stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res.id, error.c_str());
-			}
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
 		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;

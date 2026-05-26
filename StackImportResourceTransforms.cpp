@@ -1,5 +1,6 @@
 #include "StackImportResourceTransforms.h"
 
+#include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
 #include <cstring>
@@ -120,6 +121,29 @@ auto emit_plte_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_snd_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Binary,
+		rsrcd::Bytes{nullptr, 0},
+		"audio/wav",
+		"converted 'snd ' resource audio");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	PlatformByteVector wav_data;
+	std::string error;
+	if(!ConvertSndResourceToWav(resource.data, wav_data, error))
+		return output.on_resource_error(ref, error.c_str());
+
+	descriptor.data = rsrcd::Bytes{wav_data.data(), wav_data.size()};
+	return output.on_resource_payload(descriptor);
+}
+
 } // namespace
 
 auto emit_builtin_resource_transforms(
@@ -212,6 +236,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "PLTE"))
 		return emit_plte_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "snd "))
+		return emit_snd_transform(resource, ref, output);
 
 	return true;
 }
