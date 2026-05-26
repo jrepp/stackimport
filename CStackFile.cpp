@@ -112,8 +112,8 @@ bool write_json_file(const std::string& path, const char* data, size_t size)
 	if(!file)
 		return false;
 	const bool ok = stackimport_internal_write_file(file, data, size) == size;
-	stackimport_internal_close_file(file);
-	return ok;
+	const int closeStatus = stackimport_internal_close_file(file);
+	return ok && closeStatus == 0;
 }
 
 bool write_text_file(const std::string& path, const std::string& text)

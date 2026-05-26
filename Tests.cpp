@@ -71,9 +71,11 @@ struct CountingPlatformState {
 	int opens = 0;
 	int reads = 0;
 	int writes = 0;
+	int closes = 0;
 	size_t allocations = 0;
 	size_t fail_after_allocations = SIZE_MAX;
 	bool fail_writes = false;
+	bool fail_closes = false;
 };
 
 void* STACKIMPORT_CALL counting_allocate(size_t size, size_t alignment, void* user_data)
@@ -113,9 +115,12 @@ size_t STACKIMPORT_CALL counting_write_file(stackimport_file_handle file, const 
 	return std::fwrite(data, 1, size, static_cast<FILE*>(file));
 }
 
-int STACKIMPORT_CALL counting_close_file(stackimport_file_handle file, void*)
+int STACKIMPORT_CALL counting_close_file(stackimport_file_handle file, void* user_data)
 {
-	return std::fclose(static_cast<FILE*>(file));
+	auto* state = static_cast<CountingPlatformState*>(user_data);
+	state->closes++;
+	const int result = std::fclose(static_cast<FILE*>(file));
+	return state->fail_closes ? -1 : result;
 }
 
 int STACKIMPORT_CALL counting_make_directory(const char* path, void*)
@@ -529,6 +534,22 @@ void	RunTests()
 	assert(stackimport_import(failingWriteContext, &failingWriteOptions) == STACKIMPORT_STATUS_IMPORT_FAILED);
 	stackimport_context_destroy(failingWriteContext);
 	assert(failingWriteState.writes > 0);
+
+	const std::string failingClosePackage = platformStackPath + ".close-failed.xstk";
+	CountingPlatformState failingCloseState;
+	failingCloseState.fail_closes = true;
+	stackimport_platform failingClosePlatform = platform;
+	failingClosePlatform.user_data = &failingCloseState;
+	stackimport_context* failingCloseContext = nullptr;
+	assert(stackimport_context_create_with_platform(&failingClosePlatform, &failingCloseContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options failingCloseOptions = {};
+	stackimport_import_options_init(&failingCloseOptions);
+	failingCloseOptions.input_path = platformStackPath.c_str();
+	failingCloseOptions.output_package_path = failingClosePackage.c_str();
+	assert(stackimport_import(failingCloseContext, &failingCloseOptions) == STACKIMPORT_STATUS_IMPORT_FAILED);
+	stackimport_context_destroy(failingCloseContext);
+	assert(failingCloseState.writes > 0);
+	assert(failingCloseState.closes > 0);
 
 	const std::string failingStackPackage = platformStackPath + ".allocation-failed.xstk";
 	CountingPlatformState failingPlatformState;
