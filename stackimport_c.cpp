@@ -375,7 +375,7 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	return STACKIMPORT_STATUS_OK;
 }
 
-STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_snd_to_wav(
 	const void* snd_data,
 	size_t snd_size,
 	void* wav_buffer,
@@ -419,4 +419,14 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
 	std::memcpy(wav_buffer, wav.data(), wav.size());
 	*out_error = nullptr;
 	return wav.size();
+}
+
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
+	const void* snd_data,
+	size_t snd_size,
+	void* wav_buffer,
+	size_t wav_capacity,
+	const char** out_error)
+{
+	return stackimport_snd_to_wav(snd_data, snd_size, wav_buffer, wav_capacity, out_error);
 }

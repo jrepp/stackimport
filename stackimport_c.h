@@ -196,6 +196,14 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
  * on failure. On failure, sets *out_error to a string that remains valid until
  * the next call on the same thread.
  */
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_snd_to_wav(
+	const void* snd_data,
+	size_t snd_size,
+	void* wav_buffer,
+	size_t wav_capacity,
+	const char** out_error);
+
+/* Deprecated compatibility alias. Prefer stackimport_snd_to_wav. */
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
 	const void* snd_data,
 	size_t snd_size,
