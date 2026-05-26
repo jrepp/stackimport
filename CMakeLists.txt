@@ -439,7 +439,7 @@ endif()
 if(STACKIMPORT_BUILD_TESTS)
     add_test(NAME stackimport-tests COMMAND stackimport-tests)
     find_program(STACKIMPORT_PKG_CONFIG_EXE NAMES pkg-config)
-    if(STACKIMPORT_PKG_CONFIG_EXE)
+    if(STACKIMPORT_PKG_CONFIG_EXE AND NOT WIN32)
         add_test(
             NAME stackimport-install-pkg-config-smoke
             COMMAND "${CMAKE_COMMAND}"
