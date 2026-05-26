@@ -786,6 +786,37 @@ void	RunTests()
 	assert(versionOutput.last_json.find("\"minorAndBugRevision\": 35") != std::string::npos);
 	assert(versionOutput.last_json.find("\"shortVersion\": \"1.2\"") != std::string::npos);
 
+	std::vector<uint8_t> cfrgPayload(79);
+	rsrcd::write_u16be(cfrgPayload.data() + 10, 1);
+	rsrcd::write_u16be(cfrgPayload.data() + 30, 1);
+	size_t cfrgOffset = 32;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset, 0x70777063);
+	cfrgPayload[cfrgOffset + 7] = 2;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 8, 0x01020304);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 12, 0x00010000);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 16, 0x00002000);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 20, 7);
+	cfrgPayload[cfrgOffset + 22] = 1;
+	cfrgPayload[cfrgOffset + 23] = 2;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 24, 0x434F4445);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 28, 128);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 36, 1);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 40, 47);
+	cfrgPayload[cfrgOffset + 42] = 4;
+	cfrgPayload[cfrgOffset + 43] = 'M';
+	cfrgPayload[cfrgOffset + 44] = 'a';
+	cfrgPayload[cfrgOffset + 45] = 'i';
+	cfrgPayload[cfrgOffset + 46] = 'n';
+	const std::vector<uint8_t> cfrgFork = make_single_resource_fork("cfrg", 1, cfrgPayload);
+	CountingResourceOutput cfrgOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{cfrgFork.data(), cfrgFork.size()}, cfrgOutput));
+	assert(cfrgOutput.native_count == 1);
+	assert(cfrgOutput.json_count == 1);
+	assert(cfrgOutput.last_json.find("\"architectureType\": \"pwpc\"") != std::string::npos);
+	assert(cfrgOutput.last_json.find("\"usageName\": \"application\"") != std::string::npos);
+	assert(cfrgOutput.last_json.find("\"whereName\": \"resourceFork\"") != std::string::npos);
+	assert(cfrgOutput.last_json.find("\"name\": \"Main\"") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

@@ -124,6 +124,56 @@ auto mac_roman_from_bytes(const uint8_t* data, size_t len) -> std::string
 	return result;
 }
 
+auto bytes_to_hex(rsrcd::Bytes bytes) -> std::string
+{
+	static const char hex[] = "0123456789ABCDEF";
+	std::string result;
+	result.reserve(bytes.size * 2u);
+	for(size_t i = 0; i < bytes.size; ++i)
+	{
+		const uint8_t byte = bytes.data[i];
+		result.push_back(hex[(byte >> 4u) & 0x0Fu]);
+		result.push_back(hex[byte & 0x0Fu]);
+	}
+	return result;
+}
+
+auto resource_type_string(uint32_t type) -> std::string
+{
+	std::string result;
+	result.reserve(4);
+	for(int shift = 24; shift >= 0; shift -= 8)
+	{
+		char ch = static_cast<char>((type >> shift) & 0xFFu);
+		result.push_back(ch >= 0x20 && ch <= 0x7E ? ch : '.');
+	}
+	return result;
+}
+
+auto cfrg_usage_name(uint8_t usage) -> const char*
+{
+	static const char* names[] = {
+		"importLibrary",
+		"application",
+		"dropInAddition",
+		"stubLibrary",
+		"weakStubLibrary",
+	};
+	return usage < 5 ? names[usage] : "invalid";
+}
+
+auto cfrg_where_name(uint8_t where) -> const char*
+{
+	static const char* names[] = {
+		"memory",
+		"dataFork",
+		"resourceFork",
+		"byteStream",
+		"namedFragment",
+	};
+	return where < 5 ? names[where] : "invalid";
+}
+
 auto emit_plte_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -173,6 +223,75 @@ auto emit_plte_transform(
 		buttons.PushBack(btn, allocator);
 	}
 	doc.AddMember("buttons", buttons, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_cfrg_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed code fragment metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::cfrg::FragmentList<128> fragments;
+	auto parse_result = rsrcd::cfrg::parse(resource.data, fragments);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(4096, &base_alloc);
+	JsonDocument doc(&pool, 4096, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("version", fragments.version, allocator);
+	doc.AddMember("reserved3", fragments.reserved3, allocator);
+	doc.AddMember("reserved8", fragments.reserved8, allocator);
+
+	JsonValue entries(rapidjson::kArrayType);
+	for(const auto& entry : fragments)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("architecture", entry.architecture, allocator);
+		item.AddMember("architectureType", json_string(resource_type_string(entry.architecture), allocator), allocator);
+		item.AddMember("reserved1", entry.reserved1, allocator);
+		item.AddMember("reserved2", entry.reserved2, allocator);
+		item.AddMember("updateLevel", entry.update_level, allocator);
+		item.AddMember("currentVersion", entry.current_version, allocator);
+		item.AddMember("oldDefVersion", entry.old_def_version, allocator);
+		item.AddMember("appStackSize", entry.app_stack_size, allocator);
+		item.AddMember("appSubdirIdOrLibFlags", entry.app_subdir_id_or_lib_flags, allocator);
+		item.AddMember("usage", entry.usage, allocator);
+		item.AddMember("usageName", json_string(cfrg_usage_name(entry.usage), allocator), allocator);
+		item.AddMember("where", entry.where, allocator);
+		item.AddMember("whereName", json_string(cfrg_where_name(entry.where), allocator), allocator);
+		item.AddMember("offset", entry.offset, allocator);
+		item.AddMember("length", entry.length, allocator);
+		item.AddMember("spaceIdOrForkKind", entry.space_id_or_fork_kind, allocator);
+		item.AddMember("forkInstance", entry.fork_instance, allocator);
+		item.AddMember("extensionCount", entry.extension_count, allocator);
+		item.AddMember("entrySize", entry.entry_size, allocator);
+		std::string name = mac_roman_from_bytes(entry.name.data, entry.name.size);
+		item.AddMember("name", json_string(name, allocator), allocator);
+		if(entry.extension_data.size > 0)
+		{
+			std::string extension_hex = bytes_to_hex(entry.extension_data);
+			item.AddMember("extensionDataHex", json_string(extension_hex, allocator), allocator);
+		}
+		entries.PushBack(item, allocator);
+	}
+	doc.AddMember("entries", entries, allocator);
 
 	JsonStringBuffer json_buffer(&base_alloc);
 	JsonWriter writer(json_buffer, &base_alloc);
@@ -1176,6 +1295,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "PLTE"))
 		return emit_plte_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "cfrg"))
+		return emit_cfrg_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

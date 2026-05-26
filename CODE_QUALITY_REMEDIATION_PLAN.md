@@ -206,6 +206,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Monochrome icon lists `icm#` and `ics#` now use rsrcd bounded decoding and
   shared RGBA transforms, including bitmap/mask composition when exactly two
   images are present.
+- `cfrg` Code Fragment Manager metadata now has an rsrcd typed parser and shared
+  JSON transform for fragment records, names, locations, and extension bytes.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -265,6 +267,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for monochrome icon lists: decode `icm#` and `ics#` through rsrcd image
   helpers and route package PNG artifact writing through the shared transform
   payload.
+- Done for `cfrg` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -325,9 +329,9 @@ all consumers listed in the lateral audit above have been updated and tested.
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
   `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`,
-  `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`,
-  `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`,
-  `DITL`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `,
+  `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
+  `MENU`, `DITL`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

@@ -1307,6 +1307,116 @@ auto parse(Bytes data, FontInfoList<Cap>& list) -> Result {
 } // namespace finf
 
 // ============================================================================
+// Code Fragment Manager metadata resources (cfrg)
+// ============================================================================
+
+namespace cfrg {
+
+struct Entry {
+    uint32_t architecture;
+    uint16_t reserved1;
+    uint8_t reserved2;
+    uint8_t update_level;
+    uint32_t current_version;
+    uint32_t old_def_version;
+    uint32_t app_stack_size;
+    uint16_t app_subdir_id_or_lib_flags;
+    uint8_t usage;
+    uint8_t where;
+    uint32_t offset;
+    uint32_t length;
+    uint32_t space_id_or_fork_kind;
+    uint16_t fork_instance;
+    uint16_t extension_count;
+    uint16_t entry_size;
+    Bytes name;
+    Bytes extension_data;
+};
+
+template<size_t InlineCapacity = 64>
+class FragmentList {
+public:
+    uint16_t version = 0;
+    uint16_t reserved3 = 0;
+    uint16_t reserved8 = 0;
+
+    auto add(Entry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many code fragment entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Entry& { return entries_[i]; }
+    auto begin() const -> const Entry* { return entries_; }
+    auto end() const -> const Entry* { return entries_ + count_; }
+
+private:
+    Entry entries_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 64>
+auto parse(Bytes data, FragmentList<Cap>& list) -> Result {
+    constexpr size_t header_size = 32;
+    constexpr size_t entry_fixed_size = 42;
+    if (data.size < header_size) return Error::unexpected_end();
+
+    list.reserved3 = read_u16be(data.data + 8);
+    list.version = read_u16be(data.data + 10);
+    list.reserved8 = read_u16be(data.data + 28);
+    if (list.version != 1) return Error::invalid_data("cfrg is not version 1");
+
+    const uint16_t entry_count = read_u16be(data.data + 30);
+    if (entry_count > Cap) return Error::invalid_data("too many code fragment entries");
+
+    size_t offset = header_size;
+    for (uint16_t i = 0; i < entry_count; ++i) {
+        if (!range_in_bounds(offset, entry_fixed_size, data.size)) return Error::unexpected_end();
+        const size_t entry_start = offset;
+        const uint16_t entry_size = read_u16be(data.data + offset + 40);
+        if (entry_size < entry_fixed_size + 1u) return Error::invalid_data("code fragment entry too small");
+        if (!range_in_bounds(entry_start, entry_size, data.size)) return Error::unexpected_end();
+
+        const uint8_t name_len = data.data[offset + 42];
+        if (entry_fixed_size + 1u + name_len > entry_size) {
+            return Error::invalid_data("code fragment name exceeds entry size");
+        }
+
+        Entry entry{};
+        entry.architecture = read_u32be(data.data + offset);
+        entry.reserved1 = read_u16be(data.data + offset + 4);
+        entry.reserved2 = data.data[offset + 6];
+        entry.update_level = data.data[offset + 7];
+        entry.current_version = read_u32be(data.data + offset + 8);
+        entry.old_def_version = read_u32be(data.data + offset + 12);
+        entry.app_stack_size = read_u32be(data.data + offset + 16);
+        entry.app_subdir_id_or_lib_flags = read_u16be(data.data + offset + 20);
+        entry.usage = data.data[offset + 22];
+        if (entry.usage > 4) return Error::invalid_data("code fragment entry usage is invalid");
+        entry.where = data.data[offset + 23];
+        if (entry.where > 4) return Error::invalid_data("code fragment entry location is invalid");
+        entry.offset = read_u32be(data.data + offset + 24);
+        entry.length = read_u32be(data.data + offset + 28);
+        entry.space_id_or_fork_kind = read_u32be(data.data + offset + 32);
+        entry.fork_instance = read_u16be(data.data + offset + 36);
+        entry.extension_count = read_u16be(data.data + offset + 38);
+        entry.entry_size = entry_size;
+        entry.name = Bytes{data.data + offset + 43, name_len};
+
+        const size_t extension_offset = entry_start + entry_fixed_size + 1u + name_len;
+        const size_t extension_size = entry_start + entry_size - extension_offset;
+        entry.extension_data = Bytes{data.data + extension_offset, extension_size};
+        if (auto r = list.add(entry); !r) return r;
+        offset = entry_start + entry_size;
+    }
+    return Result::ok();
+}
+
+} // namespace cfrg
+
+// ============================================================================
 // Classic UI metadata resources (CNTL / DLOG / WIND)
 // ============================================================================
 

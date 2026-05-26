@@ -179,7 +179,7 @@ public:
 		(void)resource;
 		(void)msg;
 		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd") ||
-			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
+			resource_type_is(res_, "vers") || resource_type_is(res_, "cfrg") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
 			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
 			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") || resource_type_is(res_, "pltt") ||
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
@@ -413,6 +413,8 @@ private:
 			snprintf(fname, sizeof(fname), "MENU_%d.json", res_.id);
 		else if(resource_type_is(res_, "DITL"))
 			snprintf(fname, sizeof(fname), "DITL_%d.json", res_.id);
+		else if(resource_type_is(res_, "cfrg"))
+			snprintf(fname, sizeof(fname), "cfrg_%d.json", res_.id);
 		else
 			return;
 
@@ -687,6 +689,13 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "vers", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "cfrg", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

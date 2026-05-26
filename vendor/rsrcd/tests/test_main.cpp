@@ -789,6 +789,48 @@ static void test_decode_icon_1bit_list_bad_size() {
     CHECK(!r, "1-bit icon list bad size should fail");
 }
 
+static void test_parse_cfrg_single_entry() {
+    uint8_t data[79] = {};
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 30, 1);
+    size_t o = 32;
+    rsrcd::write_u32be(data + o, 0x70777063);
+    data[o + 7] = 2;
+    rsrcd::write_u32be(data + o + 8, 0x01020304);
+    rsrcd::write_u32be(data + o + 12, 0x00010000);
+    rsrcd::write_u32be(data + o + 16, 0x00002000);
+    rsrcd::write_u16be(data + o + 20, 0x0007);
+    data[o + 22] = 1;
+    data[o + 23] = 2;
+    rsrcd::write_u32be(data + o + 24, 0x434F4445);
+    rsrcd::write_u32be(data + o + 28, 128);
+    rsrcd::write_u32be(data + o + 32, 0);
+    rsrcd::write_u16be(data + o + 36, 1);
+    rsrcd::write_u16be(data + o + 40, 47);
+    data[o + 42] = 4;
+    data[o + 43] = 'M';
+    data[o + 44] = 'a';
+    data[o + 45] = 'i';
+    data[o + 46] = 'n';
+
+    rsrcd::cfrg::FragmentList<4> fragments;
+    auto r = rsrcd::cfrg::parse({data, sizeof(data)}, fragments);
+    CHECK_RESULT(r, "parse cfrg");
+    CHECK(fragments.count() == 1, "cfrg entry count");
+    CHECK(fragments[0].architecture == 0x70777063, "cfrg architecture");
+    CHECK(fragments[0].where == 2, "cfrg where");
+    CHECK(fragments[0].name.size == 4, "cfrg name size");
+}
+
+static void test_parse_cfrg_bad_version() {
+    uint8_t data[32] = {};
+    rsrcd::write_u16be(data + 10, 2);
+
+    rsrcd::cfrg::FragmentList<4> fragments;
+    auto r = rsrcd::cfrg::parse({data, sizeof(data)}, fragments);
+    CHECK(!r, "cfrg bad version should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1503,6 +1545,8 @@ int main() {
     test_decode_icon_1bit_list_image();
     test_decode_icon_1bit_masked_pair();
     test_decode_icon_1bit_list_bad_size();
+    test_parse_cfrg_single_entry();
+    test_parse_cfrg_bad_version();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();
