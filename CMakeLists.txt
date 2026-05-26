@@ -87,6 +87,7 @@ set(STACKIMPORT_SOURCES
     CStackFile.cpp
     StackImportResourceFork.cpp
     StackImportSoundConverter.cpp
+    StackImportMaceDecoder.cpp
     Mac68kDisassembly.cpp
     RomDasm.cpp
     CBuf.cpp

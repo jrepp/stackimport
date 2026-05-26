@@ -1,8 +1,5 @@
 #include "StackImportSoundConverter.h"
-
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-#include "vendor/resource_dasm/src/AudioCodecs.hh"
-#endif
+#include "StackImportMaceDecoder.h"
 
 #include <cmath>
 #include <cstddef>
@@ -124,22 +121,17 @@ public:
 			rate = static_cast<uint32_t>(aiffSampleRate);
 			if(compressionId == 3 || compressionId == 4)
 			{
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 				const bool isMace3 = compressionId == 3;
 				const uint32_t encodedBytes = numFrames * (isMace3 ? 2u : 1u) * channels;
 				if(pos_ + encodedBytes > input_.size)
 					return fail(error, "truncated compressed sample data");
-				auto decoded = ResourceDASM::decode_mace(input_.data + pos_, encodedBytes, channels == 2, isMace3);
+				if(!DecodeMaceToS16Bytes(input_.data + pos_, encodedBytes, channels == 2, isMace3, decodedSamples))
+					return fail(error, "MACE compression unavailable");
 				pos_ += encodedBytes;
 				bytesPerSample = 2;
-				const auto* sampleBytes = reinterpret_cast<const uint8_t*>(decoded.data());
-				decodedSamples.assign(sampleBytes, sampleBytes + decoded.size() * sizeof(decoded[0]));
 				hasDecodedSamples = true;
 				dataSize = static_cast<uint32_t>(decodedSamples.size());
 				numBytes = dataSize;
-#else
-				return fail(error, "MACE compression unavailable");
-#endif
 			}
 			else if(compressionId == 0 || compressionId == 0xFFFF)
 			{
