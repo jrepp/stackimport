@@ -934,6 +934,23 @@ auto parse_str_list(Bytes data, StringList<Cap>& out) -> Result {
     return Result::ok();
 }
 
+template<size_t Cap = 64>
+auto parse_twcs(Bytes data, StringList<Cap>& out) -> Result {
+    if (data.size < 2) return Error::unexpected_end();
+    uint16_t count = read_u16be(data.data);
+    size_t offset = 2;
+    for (uint16_t i = 0; i < count; ++i) {
+        if (!range_in_bounds(offset, 2, data.size)) return Error::unexpected_end();
+        uint8_t encrypted = data.data[offset++];
+        uint8_t len = data.data[offset++];
+        if (offset + static_cast<size_t>(len) > data.size) return Error::unexpected_end();
+        if (encrypted != 0) return Error::invalid_data("encrypted TwCS string unsupported");
+        if (auto r = out.add(StringRef{data.slice(offset, len)}); !r) return r;
+        offset += static_cast<size_t>(len);
+    }
+    return Result::ok();
+}
+
 inline auto parse_text(Bytes data, StringRef& out) -> Result {
     out.bytes = data;
     return Result::ok();

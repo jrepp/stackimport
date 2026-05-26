@@ -520,17 +520,20 @@ auto emit_string_list_transform(
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
+	const bool is_twcs = resource_type_is(resource, "TwCS");
 	ResourcePayload descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::JsonUtf8,
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
-		"decoded STR# string list");
+		is_twcs ? "decoded TwCS string list" : "decoded STR# string list");
 	if(!output.wants_resource_payload(descriptor))
 		return true;
 
 	rsrcd::text::StringList<256> strings;
-	auto text_result = rsrcd::text::parse_str_list(resource.data, strings);
+	auto text_result = is_twcs
+		? rsrcd::text::parse_twcs(resource.data, strings)
+		: rsrcd::text::parse_str_list(resource.data, strings);
 	if(!text_result)
 		return output.on_resource_error(ref, text_result.message());
 
@@ -1011,6 +1014,9 @@ auto emit_builtin_resource_transforms(
 		return emit_text_transform(resource, ref, output, false);
 
 	if(resource_type_is(resource, "STR#"))
+		return emit_string_list_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "TwCS"))
 		return emit_string_list_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "vers"))

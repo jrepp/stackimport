@@ -699,6 +699,14 @@ void	RunTests()
 	assert(stringListOutput.last_json.find("\"One\"") != std::string::npos);
 	assert(stringListOutput.last_json.find("\"Two\"") != std::string::npos);
 
+	const std::vector<uint8_t> twcsPayload = {0, 1, 0, 5, 'T', 'w', 'C', 'S', '!'};
+	const std::vector<uint8_t> twcsFork = make_single_resource_fork("TwCS", 1, twcsPayload);
+	CountingResourceOutput twcsOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{twcsFork.data(), twcsFork.size()}, twcsOutput));
+	assert(twcsOutput.native_count == 1);
+	assert(twcsOutput.json_count == 1);
+	assert(twcsOutput.last_json.find("\"TwCS!\"") != std::string::npos);
+
 	std::vector<uint8_t> versionPayload = {0x01, 0x23, 0x80, 0x00, 0x00, 0x00};
 	versionPayload.insert(versionPayload.end(), {3, '1', '.', '2'});
 	versionPayload.insert(versionPayload.end(), {7, 'R', 'e', 'l', 'e', 'a', 's', 'e'});

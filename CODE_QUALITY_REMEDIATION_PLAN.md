@@ -193,6 +193,9 @@ when parser behavior changes, updates to the relevant format documentation under
   views plus shared MacRoman-to-UTF-8 transforms; package output writes `STR `
   and `TEXT` as UTF-8 text artifacts and `STR#` as JSON to preserve string
   boundaries.
+- `TwCS` text resources now have an rsrcd typed parser and shared JSON
+  transform for unencrypted MacRoman string lists; encrypted entries currently
+  report a parse diagnostic and preserve native bytes.
 - Additional bounded image resources `ICN#` and `PAT ` now use rsrcd image
   helpers and shared RGBA transforms, with PNG package artifacts.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
@@ -240,6 +243,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for core text resources: parse `STR `, `STR#`, and `TEXT` through rsrcd
   text helpers and route package text/JSON artifact writing through those
   transform payloads.
+- Done for `TwCS` text resources: parse unencrypted string lists through rsrcd
+  and route package JSON artifact writing through the shared transform payload.
 - Done for additional bounded image resources: decode `ICN#` and `PAT ` through
   rsrcd image helpers and route package PNG artifact writing through those
   transform payloads.
@@ -303,7 +308,7 @@ all consumers listed in the lateral audit above have been updated and tested.
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
   `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`,
-  `TEXT`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`,
+  `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`,
   `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,

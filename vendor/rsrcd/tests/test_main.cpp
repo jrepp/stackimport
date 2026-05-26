@@ -938,6 +938,22 @@ static void test_text_str_list_capacity() {
     CHECK(!r, "STR# capacity overflow should fail");
 }
 
+static void test_text_twcs() {
+    uint8_t data[] = {0, 2, 0, 3, 'O', 'n', 'e', 0, 3, 'T', 'w', 'o'};
+    rsrcd::text::StringList<4> strings;
+    auto r = rsrcd::text::parse_twcs({data, sizeof(data)}, strings);
+    CHECK_RESULT(r, "parse TwCS");
+    CHECK(strings.count() == 2, "TwCS count");
+    CHECK(std::memcmp(strings[1].bytes.data, "Two", 3) == 0, "TwCS second");
+}
+
+static void test_text_twcs_encrypted_rejected() {
+    uint8_t data[] = {0, 1, 1, 1, 0};
+    rsrcd::text::StringList<4> strings;
+    auto r = rsrcd::text::parse_twcs({data, sizeof(data)}, strings);
+    CHECK(!r, "encrypted TwCS should fail");
+}
+
 static void test_text_text() {
     uint8_t data[] = {'T', 'E', 'X', 'T'};
     rsrcd::text::StringRef text;
@@ -1381,6 +1397,8 @@ int main() {
     test_text_str_too_small();
     test_text_str_list();
     test_text_str_list_capacity();
+    test_text_twcs();
+    test_text_twcs_encrypted_rejected();
     test_text_text();
     test_vers();
     test_vers_truncated();
