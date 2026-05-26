@@ -2170,6 +2170,68 @@ inline auto parse_papa(Bytes data, PrinterParameters& params) -> Result {
     return Result::ok();
 }
 
+template<size_t InlineCapacity = 128>
+class Layout {
+public:
+    uint16_t font_id = 0;
+    uint16_t font_size = 0;
+    uint16_t screen_header_height = 0;
+    uint16_t top_line_break = 0;
+    uint16_t bottom_line_break = 0;
+    uint16_t printing_header_height = 0;
+    uint16_t printing_footer_height = 0;
+    ui::Rect window_rect{};
+
+    auto add_rect(ui::Rect rect) -> Result {
+        if (count_ < InlineCapacity) {
+            rects_[count_++] = rect;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many layout rectangles");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const ui::Rect& { return rects_[i]; }
+    auto begin() const -> const ui::Rect* { return rects_; }
+    auto end() const -> const ui::Rect* { return rects_ + count_; }
+
+private:
+    ui::Rect rects_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+inline auto read_rect(Bytes data, size_t offset, ui::Rect& rect) -> Result {
+    if (!range_in_bounds(offset, 8, data.size)) return Error::unexpected_end();
+    rect.top = read_i16be(data.data + offset);
+    rect.left = read_i16be(data.data + offset + 2);
+    rect.bottom = read_i16be(data.data + offset + 4);
+    rect.right = read_i16be(data.data + offset + 6);
+    return Result::ok();
+}
+
+template<size_t Cap = 128>
+auto parse_layo(Bytes data, Layout<Cap>& layout) -> Result {
+    if (data.size < 24) return Error::unexpected_end();
+    layout.font_id = read_u16be(data.data);
+    layout.font_size = read_u16be(data.data + 2);
+    layout.screen_header_height = read_u16be(data.data + 4);
+    layout.top_line_break = read_u16be(data.data + 6);
+    layout.bottom_line_break = read_u16be(data.data + 8);
+    layout.printing_header_height = read_u16be(data.data + 10);
+    layout.printing_footer_height = read_u16be(data.data + 12);
+    if (auto r = read_rect(data, 14, layout.window_rect); !r) return r;
+    const size_t rect_count = static_cast<size_t>(read_u16be(data.data + 22)) + 1u;
+    if (rect_count > Cap) return Error::invalid_data("too many layout rectangles");
+    if (!range_in_bounds(24, rect_count * 8u, data.size)) return Error::unexpected_end();
+    size_t offset = 24;
+    for (size_t i = 0; i < rect_count; ++i) {
+        ui::Rect rect{};
+        if (auto r = read_rect(data, offset, rect); !r) return r;
+        if (auto r = layout.add_rect(rect); !r) return r;
+        offset += 8;
+    }
+    return Result::ok();
+}
+
 } // namespace simple_metadata
 
 // ============================================================================

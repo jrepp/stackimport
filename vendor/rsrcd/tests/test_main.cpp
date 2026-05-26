@@ -1134,6 +1134,43 @@ static void test_parse_papa_truncated() {
     CHECK(!r, "truncated PAPA should fail");
 }
 
+static void test_parse_layo() {
+    uint8_t data[32] = {};
+    rsrcd::write_u16be(data, 128);
+    rsrcd::write_u16be(data + 2, 12);
+    rsrcd::write_u16be(data + 4, 20);
+    rsrcd::write_u16be(data + 6, 1);
+    rsrcd::write_u16be(data + 8, 2);
+    rsrcd::write_u16be(data + 10, 30);
+    rsrcd::write_u16be(data + 12, 40);
+    rsrcd::write_u16be(data + 14, 10);
+    rsrcd::write_u16be(data + 16, 20);
+    rsrcd::write_u16be(data + 18, 110);
+    rsrcd::write_u16be(data + 20, 220);
+    rsrcd::write_u16be(data + 22, 0);
+    rsrcd::write_u16be(data + 24, 1);
+    rsrcd::write_u16be(data + 26, 2);
+    rsrcd::write_u16be(data + 28, 3);
+    rsrcd::write_u16be(data + 30, 4);
+
+    rsrcd::simple_metadata::Layout<4> layout;
+    auto r = rsrcd::simple_metadata::parse_layo({data, sizeof(data)}, layout);
+    CHECK_RESULT(r, "parse LAYO");
+    CHECK(layout.font_id == 128, "LAYO font ID");
+    CHECK(layout.window_rect.right == 220, "LAYO window right");
+    CHECK(layout.count() == 1, "LAYO rectangle count");
+    CHECK(layout[0].bottom == 3, "LAYO rectangle bottom");
+}
+
+static void test_parse_layo_truncated() {
+    uint8_t data[31] = {};
+    rsrcd::write_u16be(data + 22, 0);
+
+    rsrcd::simple_metadata::Layout<4> layout;
+    auto r = rsrcd::simple_metadata::parse_layo({data, sizeof(data)}, layout);
+    CHECK(!r, "truncated LAYO should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1872,6 +1909,8 @@ int main() {
     test_parse_kbdn();
     test_parse_papa();
     test_parse_papa_truncated();
+    test_parse_layo();
+    test_parse_layo_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

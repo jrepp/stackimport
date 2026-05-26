@@ -191,7 +191,7 @@ public:
 			resource_type_is(res_, "RSSC") || resource_type_is(res_, "TxSt") ||
 			resource_type_is(res_, "RECT") || resource_type_is(res_, "TOOL") ||
 			resource_type_is(res_, "PICK") || resource_type_is(res_, "KBDN") ||
-			resource_type_is(res_, "PAPA"))
+			resource_type_is(res_, "PAPA") || resource_type_is(res_, "LAYO"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
 			summary_.status = "parse_failed";
@@ -446,6 +446,8 @@ private:
 			snprintf(fname, sizeof(fname), "KBDN_%d.json", res_.id);
 		else if(resource_type_is(res_, "PAPA"))
 			snprintf(fname, sizeof(fname), "PAPA_%d.json", res_.id);
+		else if(resource_type_is(res_, "LAYO"))
+			snprintf(fname, sizeof(fname), "LAYO_%d.json", res_.id);
 		else
 			return;
 
@@ -758,7 +760,7 @@ bool stackimport_load_resource_fork(
 			std::memcmp(res.type.data, "RSSC", 4) == 0 || std::memcmp(res.type.data, "TxSt", 4) == 0 ||
 			std::memcmp(res.type.data, "RECT", 4) == 0 || std::memcmp(res.type.data, "TOOL", 4) == 0 ||
 			std::memcmp(res.type.data, "PICK", 4) == 0 || std::memcmp(res.type.data, "KBDN", 4) == 0 ||
-			std::memcmp(res.type.data, "PAPA", 4) == 0)
+			std::memcmp(res.type.data, "PAPA", 4) == 0 || std::memcmp(res.type.data, "LAYO", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

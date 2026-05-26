@@ -993,6 +993,32 @@ void	RunTests()
 	assert(papaOutput.last_json.find("\"addressBlock\": 305419896") != std::string::npos);
 	assert(papaOutput.last_json.find("\"dataHex\": \"AA\"") != std::string::npos);
 
+	std::vector<uint8_t> layoPayload;
+	append_u16be(layoPayload, 128);
+	append_u16be(layoPayload, 12);
+	append_u16be(layoPayload, 20);
+	append_u16be(layoPayload, 1);
+	append_u16be(layoPayload, 2);
+	append_u16be(layoPayload, 30);
+	append_u16be(layoPayload, 40);
+	append_u16be(layoPayload, 10);
+	append_u16be(layoPayload, 20);
+	append_u16be(layoPayload, 110);
+	append_u16be(layoPayload, 220);
+	append_u16be(layoPayload, 0);
+	append_u16be(layoPayload, 1);
+	append_u16be(layoPayload, 2);
+	append_u16be(layoPayload, 3);
+	append_u16be(layoPayload, 4);
+	const std::vector<uint8_t> layoFork = make_single_resource_fork("LAYO", 1, layoPayload);
+	CountingResourceOutput layoOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{layoFork.data(), layoFork.size()}, layoOutput));
+	assert(layoOutput.native_count == 1);
+	assert(layoOutput.json_count == 1);
+	assert(layoOutput.last_json.find("\"fontId\": 128") != std::string::npos);
+	assert(layoOutput.last_json.find("\"right\": 220") != std::string::npos);
+	assert(layoOutput.last_json.find("\"rectangles\"") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

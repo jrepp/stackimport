@@ -841,6 +841,54 @@ auto emit_papa_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_layo_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed layout metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::simple_metadata::Layout<256> layout;
+	auto parse_result = rsrcd::simple_metadata::parse_layo(resource.data, layout);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("fontId", layout.font_id, allocator);
+	doc.AddMember("fontSize", layout.font_size, allocator);
+	doc.AddMember("screenHeaderHeight", layout.screen_header_height, allocator);
+	doc.AddMember("topLineBreak", layout.top_line_break, allocator);
+	doc.AddMember("bottomLineBreak", layout.bottom_line_break, allocator);
+	doc.AddMember("printingHeaderHeight", layout.printing_header_height, allocator);
+	doc.AddMember("printingFooterHeight", layout.printing_footer_height, allocator);
+	add_json_ui_rect(doc, layout.window_rect, allocator);
+	JsonValue rects(rapidjson::kArrayType);
+	for(const auto& rect : layout)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		add_json_ui_rect(item, rect, allocator);
+		rects.PushBack(item, allocator);
+	}
+	doc.AddMember("rectangles", rects, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1827,6 +1875,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "PAPA"))
 		return emit_papa_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "LAYO"))
+		return emit_layo_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");
