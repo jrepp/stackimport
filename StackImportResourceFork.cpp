@@ -504,6 +504,8 @@ private:
 			snprintf(fname, sizeof(fname), "STR#_%d.json", res_.id);
 		else if(resource_type_is(res_, "TwCS"))
 			snprintf(fname, sizeof(fname), "TwCS_%d.json", res_.id);
+		else if(resource_type_is(res_, "CURS"))
+			snprintf(fname, sizeof(fname), "CURS_%d.json", res_.id);
 		else if(resource_type_is(res_, "vers"))
 			snprintf(fname, sizeof(fname), "vers_%d.json", res_.id);
 		else if(resource_type_is(res_, "clut"))

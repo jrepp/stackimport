@@ -183,6 +183,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - `crsr` color cursors now use the combined stream as well: typed metadata,
   decoded color cursor PNG, and decoded monochrome bitmap PNG are emitted from
   one resource transform.
+- `CURS` monochrome cursors now preserve the existing primary PNG output while
+  also streaming hotspot/dimension metadata as JSON from the same transform.
 - Resource domain types and callback helpers moved to
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
@@ -292,6 +294,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for image resources: move ICON, CURS, and PAT# transforms into
   `StackImportResourceTransforms.cpp`, and route package PNG artifact writing
   through those transform payloads.
+- Done for `CURS` metadata and image output: emit the existing decoded PNG plus
+  hotspot/dimension JSON from one transform stream, preserving the PNG as the
+  legacy primary package artifact.
 - Done for PLTE metadata: move typed PLTE parsing and JSON serialization into
   `StackImportResourceTransforms.cpp`, and route package JSON artifact writing
   through that transform payload.

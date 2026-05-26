@@ -2381,6 +2381,66 @@ auto emit_pict_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_curs_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	if(resource.data.size < 68)
+		return true;
+
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 16u * 16u * 4u},
+		"image/x-rgba32",
+		"decoded 16x16 CURS pixels");
+	image_descriptor.width = 16;
+	image_descriptor.height = 16;
+	image_descriptor.row_bytes = 16 * 4;
+	ResourcePayload json_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed CURS metadata");
+
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	const bool wants_json = output.wants_resource_payload(json_descriptor);
+	if(!wants_image && !wants_json)
+		return true;
+
+	int16_t hot_x = rsrcd::read_i16be(resource.data.data + 66);
+	int16_t hot_y = rsrcd::read_i16be(resource.data.data + 64);
+	if(wants_image)
+	{
+		uint8_t rgba[16 * 16 * 4];
+		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+		if(!rsrcd::img::decode_curs(resource.data, dst, hot_x, hot_y))
+			return true;
+		swap_bgra_to_rgba(rgba, 16u * 16u);
+		image_descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+		image_descriptor.hotspot_x = hot_x;
+		image_descriptor.hotspot_y = hot_y;
+		if(!output.on_resource_payload(image_descriptor))
+			return false;
+	}
+
+	if(!wants_json)
+		return true;
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(512, &base_alloc);
+	JsonDocument doc(&pool, 512, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("width", 16, allocator);
+	doc.AddMember("height", 16, allocator);
+	doc.AddMember("hotspotX", hot_x, allocator);
+	doc.AddMember("hotspotY", hot_y, allocator);
+	return finish_json_resource_payload(json_descriptor, doc, base_alloc, output);
+}
+
 } // namespace
 
 auto emit_builtin_resource_transforms(
@@ -2443,32 +2503,8 @@ auto emit_builtin_resource_transforms(
 		return output.on_resource_payload(descriptor);
 	}
 
-	if(resource_type_is(resource, "CURS") && resource.data.size >= 68)
-	{
-		ResourcePayload descriptor = make_converted_resource_payload(
-			ref,
-			ResourcePayloadFormat::Rgba32,
-			rsrcd::Bytes{nullptr, 16u * 16u * 4u},
-			"image/x-rgba32",
-			"decoded 16x16 CURS pixels");
-		descriptor.width = 16;
-		descriptor.height = 16;
-		descriptor.row_bytes = 16 * 4;
-		if(!output.wants_resource_payload(descriptor))
-			return true;
-
-		uint8_t rgba[16 * 16 * 4];
-		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
-		int16_t hot_x = 0;
-		int16_t hot_y = 0;
-		if(!rsrcd::img::decode_curs(resource.data, dst, hot_x, hot_y))
-			return true;
-		swap_bgra_to_rgba(rgba, 16u * 16u);
-		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
-		descriptor.hotspot_x = hot_x;
-		descriptor.hotspot_y = hot_y;
-		return output.on_resource_payload(descriptor);
-	}
+	if(resource_type_is(resource, "CURS"))
+		return emit_curs_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "PAT#"))
 	{

@@ -490,6 +490,16 @@ std::vector<uint8_t> make_icon_payload()
 	return payload;
 }
 
+std::vector<uint8_t> make_curs_payload()
+{
+	std::vector<uint8_t> payload(68);
+	payload[0] = 0x80;
+	payload[32] = 0x80;
+	rsrcd::write_u16be(payload.data() + 64, 2);
+	rsrcd::write_u16be(payload.data() + 66, 3);
+	return payload;
+}
+
 std::vector<uint8_t> make_cicn_payload()
 {
 	std::vector<uint8_t> data(100, 0);
@@ -588,6 +598,14 @@ void test_resource_image_transforms()
 		payload[0] = 0x80;
 		payload[bytesPerIcon] = 0x80;
 		assert_rgba_resource(c.type, 12, payload, c.width, c.height);
+	}
+
+	{
+		CountingResourceOutput cursOutput = parse_single_resource("CURS", 13, make_curs_payload());
+		assert(cursOutput.rgba_count == 1);
+		assert(cursOutput.json_count == 1);
+		assert(cursOutput.last_json.find("\"hotspotX\": 3") != std::string::npos);
+		assert(cursOutput.last_json.find("\"hotspotY\": 2") != std::string::npos);
 	}
 }
 
@@ -1075,6 +1093,39 @@ void test_resource_package_writes()
 	assert(resourceForkPlatformState.opens > 0);
 	assert(resourceForkPlatformState.reads > 0);
 	assert(resourceForkPlatformState.writes > 0);
+
+	const std::vector<uint8_t> cursFork = make_single_resource_fork("CURS", 24, make_curs_payload());
+	const std::string cursOutputPath = std::string("/tmp/stackimport-curs-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(cursOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState cursPlatformState;
+	cursPlatformState.resource_fork_data = cursFork.data();
+	cursPlatformState.resource_fork_size = cursFork.size();
+	stackimport_platform cursPlatform = resourceForkPlatform;
+	cursPlatform.user_data = &cursPlatformState;
+	const stackimport_internal_platform cursInternalPlatform = stackimport_internal_platform_from_api(&cursPlatform);
+	CountingResourceOutput cursOutput;
+	std::vector<CResourceSummary> cursSummaries;
+	std::string cursStatus;
+	uint64_t cursBytes = 0;
+	{
+		stackimport_platform_scope cursScope(cursInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			cursOutputPath,
+			"Stack",
+			&cursOutput,
+			cursSummaries,
+			cursStatus,
+			cursBytes));
+	}
+	assert(cursStatus == "ok");
+	assert(cursSummaries.size() == 1);
+	assert(cursSummaries[0].type == "CURS");
+	assert(cursSummaries[0].status == "exported");
+	assert(cursSummaries[0].outputFile == "CURS_24.png");
+	assert(cursSummaries[0].outputArtifacts.size() == 2);
+	assert(cursSummaries[0].outputArtifacts[0].path == "CURS_24.png");
+	assert(cursSummaries[0].outputArtifacts[1].path == "CURS_24.json");
 
 	std::vector<uint8_t> addColorData;
 	addColorData.push_back(0x03);
