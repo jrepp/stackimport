@@ -942,6 +942,45 @@ inline auto parse_text(Bytes data, StringRef& out) -> Result {
 } // namespace text
 
 // ============================================================================
+// vers metadata resource parser
+// ============================================================================
+
+namespace vers {
+
+struct Version {
+    uint8_t major_revision;
+    uint8_t minor_and_bug_revision;
+    uint8_t development_stage;
+    uint8_t prerelease_revision;
+    uint16_t region_code;
+    Bytes short_version;
+    Bytes long_version;
+};
+
+inline auto parse(Bytes data, Version& version) -> Result {
+    if (data.size < 8) return Error::unexpected_end();
+    version.major_revision = data.data[0];
+    version.minor_and_bug_revision = data.data[1];
+    version.development_stage = data.data[2];
+    version.prerelease_revision = data.data[3];
+    version.region_code = read_u16be(data.data + 4);
+
+    size_t offset = 6;
+    uint8_t short_len = data.data[offset];
+    if (offset + 1u + static_cast<size_t>(short_len) > data.size) return Error::unexpected_end();
+    version.short_version = data.slice(offset + 1, short_len);
+    offset += 1u + static_cast<size_t>(short_len);
+
+    if (offset >= data.size) return Error::unexpected_end();
+    uint8_t long_len = data.data[offset];
+    if (offset + 1u + static_cast<size_t>(long_len) > data.size) return Error::unexpected_end();
+    version.long_version = data.slice(offset + 1, long_len);
+    return Result::ok();
+}
+
+} // namespace vers
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

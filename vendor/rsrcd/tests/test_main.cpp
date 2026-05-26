@@ -948,6 +948,34 @@ static void test_text_text() {
 }
 
 // ============================================================================
+// vers metadata
+// ============================================================================
+
+static void test_vers() {
+    uint8_t data[] = {
+        0x01, 0x23, 0x80, 0x00, 0x00, 0x00,
+        3, '1', '.', '2',
+        8, 'V', 'e', 'r', 's', 'i', 'o', 'n', '!'
+    };
+    rsrcd::vers::Version version;
+    auto r = rsrcd::vers::parse({data, sizeof(data)}, version);
+    CHECK_RESULT(r, "parse vers");
+    CHECK(version.major_revision == 0x01, "vers major raw");
+    CHECK(version.minor_and_bug_revision == 0x23, "vers minor raw");
+    CHECK(version.development_stage == 0x80, "vers stage raw");
+    CHECK(version.short_version.size == 3, "vers short size");
+    CHECK(std::memcmp(version.short_version.data, "1.2", 3) == 0, "vers short");
+    CHECK(version.long_version.size == 8, "vers long size");
+}
+
+static void test_vers_truncated() {
+    uint8_t data[] = {0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 5, '1'};
+    rsrcd::vers::Version version;
+    auto r = rsrcd::vers::parse({data, sizeof(data)}, version);
+    CHECK(!r, "truncated vers should fail");
+}
+
+// ============================================================================
 // PAT# helpers
 // ============================================================================
 
@@ -1058,6 +1086,8 @@ int main() {
     test_text_str_list();
     test_text_str_list_capacity();
     test_text_text();
+    test_vers();
+    test_vers_truncated();
     test_patlist_count();
     test_palette_lookup();
 

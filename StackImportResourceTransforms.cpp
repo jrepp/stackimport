@@ -298,6 +298,47 @@ auto emit_string_list_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_vers_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed vers metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::vers::Version version;
+	auto vers_result = rsrcd::vers::parse(resource.data, version);
+	if(!vers_result)
+		return output.on_resource_error(ref, vers_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("majorRevision", version.major_revision, allocator);
+	doc.AddMember("minorAndBugRevision", version.minor_and_bug_revision, allocator);
+	doc.AddMember("developmentStage", version.development_stage, allocator);
+	doc.AddMember("prereleaseRevision", version.prerelease_revision, allocator);
+	doc.AddMember("regionCode", version.region_code, allocator);
+	std::string short_version = mac_roman_from_bytes(version.short_version.data, version.short_version.size);
+	std::string long_version = mac_roman_from_bytes(version.long_version.data, version.long_version.size);
+	doc.AddMember("shortVersion", json_string(short_version, allocator), allocator);
+	doc.AddMember("longVersion", json_string(long_version, allocator), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -535,6 +576,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "STR#"))
 		return emit_string_list_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "vers"))
+		return emit_vers_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

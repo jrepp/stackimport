@@ -699,6 +699,18 @@ void	RunTests()
 	assert(stringListOutput.last_json.find("\"One\"") != std::string::npos);
 	assert(stringListOutput.last_json.find("\"Two\"") != std::string::npos);
 
+	std::vector<uint8_t> versionPayload = {0x01, 0x23, 0x80, 0x00, 0x00, 0x00};
+	versionPayload.insert(versionPayload.end(), {3, '1', '.', '2'});
+	versionPayload.insert(versionPayload.end(), {7, 'R', 'e', 'l', 'e', 'a', 's', 'e'});
+	const std::vector<uint8_t> versionFork = make_single_resource_fork("vers", 1, versionPayload);
+	CountingResourceOutput versionOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{versionFork.data(), versionFork.size()}, versionOutput));
+	assert(versionOutput.native_count == 1);
+	assert(versionOutput.json_count == 1);
+	assert(versionOutput.last_json.find("\"majorRevision\": 1") != std::string::npos);
+	assert(versionOutput.last_json.find("\"minorAndBugRevision\": 35") != std::string::npos);
+	assert(versionOutput.last_json.find("\"shortVersion\": \"1.2\"") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;

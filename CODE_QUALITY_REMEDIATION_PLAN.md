@@ -195,6 +195,8 @@ when parser behavior changes, updates to the relevant format documentation under
   boundaries.
 - Additional bounded image resources `ICN#` and `PAT ` now use rsrcd image
   helpers and shared RGBA transforms, with PNG package artifacts.
+- `vers` metadata now has an rsrcd typed parser and shared JSON transform that
+  preserves raw numeric version fields while decoding version strings.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
   preserves native bytes when conversion fails.
@@ -225,6 +227,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for additional bounded image resources: decode `ICN#` and `PAT ` through
   rsrcd image helpers and route package PNG artifact writing through those
   transform payloads.
+- Done for `vers` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.
