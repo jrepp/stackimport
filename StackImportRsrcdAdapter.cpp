@@ -58,4 +58,34 @@ bool DecodePatternAtWithRsrcd(const uint8_t* data, size_t size, size_t index, ui
 	return true;
 }
 
+bool ParsePlteWithRsrcd(const uint8_t* data, size_t size, PltePalette& palette)
+{
+	rsrcd::plte::Palette<64> parsed;
+	const auto result = rsrcd::plte::parse(rsrcd::Bytes{data, size}, parsed);
+	if(!result)
+		return false;
+
+	palette = {};
+	palette.wdef = parsed.wdef;
+	palette.showName = parsed.show_name;
+	palette.selection = parsed.selection;
+	palette.frame = parsed.frame;
+	palette.pictRef = parsed.pict_ref;
+	palette.top = parsed.top;
+	palette.left = parsed.left;
+	palette.buttonCount = parsed.button_count;
+	for(size_t i = 0; i < parsed.button_count && i < 64; i++)
+	{
+		const auto& src = parsed.buttons[i];
+		PlteButton& dst = palette.buttons[i];
+		dst.top = src.top;
+		dst.left = src.left;
+		dst.bottom = src.bottom;
+		dst.right = src.right;
+		dst.message = src.message.data;
+		dst.messageSize = src.message.size;
+	}
+	return true;
+}
+
 } // namespace stackimport

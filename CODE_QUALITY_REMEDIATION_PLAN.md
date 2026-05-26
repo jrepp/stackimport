@@ -227,13 +227,13 @@ when parser behavior changes, updates to the relevant format documentation under
   `vendor/`.
 - `StackImportSoundConverter.h` no longer exposes `rsrcd::Bytes`; sound
   conversion callers pass plain byte pointers and sizes.
-- ICON, CURS, and PAT# image decoding now goes through
+- ICON, CURS, PAT#, and PLTE parsing now goes through
   `StackImportRsrcdAdapter`; the resource exporter no longer calls rsrcd image
-  decoder helpers directly.
+  decoder or PLTE parser helpers directly.
 - Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
   configurations build and pass tests after the adapter split.
-- Remaining work: resource-fork parser and PLTE parser adapter boundaries, the
-  internal SAX header's rsrcd type surface, and broader license/provenance audit.
+- Remaining work: resource-fork parser adapter boundary, the internal SAX
+  header's rsrcd type surface, and broader license/provenance audit.
 
 ### Tasks
 

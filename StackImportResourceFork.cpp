@@ -378,9 +378,8 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
 		{
-			rsrcd::plte::Palette<64> pal;
-			auto plteResult = rsrcd::plte::parse(res.data, pal);
-			if(plteResult)
+			stackimport::PltePalette pal;
+			if(stackimport::ParsePlteWithRsrcd(res.data.data, res.data.size, pal))
 			{
 				StackImportRapidJsonAllocator baseAlloc;
 				JsonPoolAllocator pool(1024, &baseAlloc);
@@ -388,15 +387,15 @@ bool stackimport_load_resource_fork(
 				doc.SetObject();
 				JsonPoolAllocator& a = doc.GetAllocator();
 				doc.AddMember("wdef", pal.wdef, a);
-				doc.AddMember("showName", pal.show_name, a);
+				doc.AddMember("showName", pal.showName, a);
 				doc.AddMember("selection", pal.selection, a);
 				doc.AddMember("frame", pal.frame, a);
-				doc.AddMember("pictRef", pal.pict_ref, a);
+				doc.AddMember("pictRef", pal.pictRef, a);
 				doc.AddMember("top", pal.top, a);
 				doc.AddMember("left", pal.left, a);
 
 				JsonValue buttons(rapidjson::kArrayType);
-				for(size_t bi = 0; bi < pal.button_count; bi++)
+				for(size_t bi = 0; bi < pal.buttonCount; bi++)
 				{
 					JsonValue btn(rapidjson::kObjectType);
 					const auto& b = pal.buttons[bi];
@@ -404,9 +403,9 @@ bool stackimport_load_resource_fork(
 					btn.AddMember("left", b.left, a);
 					btn.AddMember("bottom", b.bottom, a);
 					btn.AddMember("right", b.right, a);
-					if(!b.message.empty())
+					if(b.message && b.messageSize > 0)
 					{
-						std::string msg = mac_roman_from_bytes(b.message.data, b.message.size);
+						std::string msg = mac_roman_from_bytes(b.message, b.messageSize);
 						btn.AddMember("message", json_string(msg, a), a);
 					}
 					buttons.PushBack(btn, a);
@@ -429,7 +428,7 @@ bool stackimport_load_resource_fork(
 				{
 					summary.status = "exported";
 					summary.outputFile = fname;
-					stackimport_emit_infof("Status: Parsed PLTE #%d (%zu buttons).\n", res.id, pal.button_count);
+					stackimport_emit_infof("Status: Parsed PLTE #%d (%zu buttons).\n", res.id, pal.buttonCount);
 				}
 				else
 					summary.status = "export_failed";
