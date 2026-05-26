@@ -73,6 +73,7 @@ struct CountingPlatformState {
 	int writes = 0;
 	size_t allocations = 0;
 	size_t fail_after_allocations = SIZE_MAX;
+	bool fail_writes = false;
 };
 
 void* STACKIMPORT_CALL counting_allocate(size_t size, size_t alignment, void* user_data)
@@ -107,6 +108,8 @@ size_t STACKIMPORT_CALL counting_write_file(stackimport_file_handle file, const 
 {
 	auto* state = static_cast<CountingPlatformState*>(user_data);
 	state->writes++;
+	if(state->fail_writes)
+		return 0;
 	return std::fwrite(data, 1, size, static_cast<FILE*>(file));
 }
 
@@ -511,6 +514,21 @@ void	RunTests()
 	assert(platformState.opens > 0);
 	assert(platformState.reads > 0);
 	assert(platformState.writes > 0);
+
+	const std::string failingWritePackage = platformStackPath + ".write-failed.xstk";
+	CountingPlatformState failingWriteState;
+	failingWriteState.fail_writes = true;
+	stackimport_platform failingWritePlatform = platform;
+	failingWritePlatform.user_data = &failingWriteState;
+	stackimport_context* failingWriteContext = nullptr;
+	assert(stackimport_context_create_with_platform(&failingWritePlatform, &failingWriteContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options failingWriteOptions = {};
+	stackimport_import_options_init(&failingWriteOptions);
+	failingWriteOptions.input_path = platformStackPath.c_str();
+	failingWriteOptions.output_package_path = failingWritePackage.c_str();
+	assert(stackimport_import(failingWriteContext, &failingWriteOptions) == STACKIMPORT_STATUS_IMPORT_FAILED);
+	stackimport_context_destroy(failingWriteContext);
+	assert(failingWriteState.writes > 0);
 
 	const std::string failingStackPackage = platformStackPath + ".allocation-failed.xstk";
 	CountingPlatformState failingPlatformState;
