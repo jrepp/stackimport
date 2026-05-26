@@ -587,6 +587,16 @@ void	RunTests()
 		assert(stackimport_internal_had_allocation_failure());
 		assert(sharedView[0] == 'A');
 		assert(copiedView[0] == 'A');
+		stackimport_internal_reset_allocation_failure();
+		sharedBuffer.resize(8);
+		assert(stackimport_internal_had_allocation_failure());
+		assert(sharedView.size() == 4);
+		assert(sharedView[0] == 'A');
+		stackimport_internal_reset_allocation_failure();
+		copiedBuffer.resize(8);
+		assert(stackimport_internal_had_allocation_failure());
+		assert(copiedView.size() == 4);
+		assert(copiedView[0] == 'A');
 	}
 
 }

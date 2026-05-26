@@ -137,25 +137,30 @@ void	CBuf::resize( size_t inSize )
 {
 	if( mShared->mRefCount == 1 )
 	{
-		if( mShared->mBuffer )
-			stackimport_internal_deallocate( mShared->mBuffer, mShared->mDeallocate, mShared->mAllocatorUserData );
-		mShared->mBuffer = nullptr;
+		char* newBuffer = nullptr;
 		if( inSize > 0 )
 		{
-			mShared->mBuffer = static_cast<char*>( stackimport_internal_allocate( inSize, alignof(char) ) );
-			if( !mShared->mBuffer )
+			newBuffer = static_cast<char*>( stackimport_internal_allocate( inSize, alignof(char) ) );
+			if( !newBuffer )
 			{
 				stackimport_internal_note_allocation_failure();
-				mShared->mSize = 0;
 				return;
 			}
 		}
+		if( mShared->mBuffer )
+			stackimport_internal_deallocate( mShared->mBuffer, mShared->mDeallocate, mShared->mAllocatorUserData );
+		mShared->mBuffer = newBuffer;
 		mShared->mSize = inSize;
 	}
 	else
 	{
 		shared_buffer*	oldBuffer = mShared;
 		alloc_buffer( inSize );
+		if( mShared->mDeallocate == nullptr || (inSize > 0 && !mShared->mBuffer) )
+		{
+			mShared = oldBuffer;
+			return;
+		}
 		oldBuffer->mRefCount--;
 	}
 }
