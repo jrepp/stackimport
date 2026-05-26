@@ -867,6 +867,66 @@ auto parse(Bytes data, Palette<Cap>& pal) -> Result {
 } // namespace plte
 
 // ============================================================================
+// Classic Mac text resource parsers
+// ============================================================================
+
+namespace text {
+
+struct StringRef {
+    Bytes bytes;
+};
+
+template<size_t InlineCapacity = 64>
+class StringList {
+public:
+    auto add(StringRef value) -> Result {
+        if (count_ < InlineCapacity) {
+            strings_[count_++] = value;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many strings");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const StringRef& { return strings_[i]; }
+    auto begin() const -> const StringRef* { return strings_; }
+    auto end() const -> const StringRef* { return strings_ + count_; }
+
+private:
+    StringRef strings_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+inline auto parse_str(Bytes data, StringRef& out) -> Result {
+    if (data.size < 1) return Error::unexpected_end();
+    uint8_t len = data.data[0];
+    if (1u + static_cast<size_t>(len) > data.size) return Error::unexpected_end();
+    out.bytes = data.slice(1, len);
+    return Result::ok();
+}
+
+template<size_t Cap = 64>
+auto parse_str_list(Bytes data, StringList<Cap>& out) -> Result {
+    if (data.size < 2) return Error::unexpected_end();
+    uint16_t count = read_u16be(data.data);
+    size_t offset = 2;
+    for (uint16_t i = 0; i < count; ++i) {
+        if (offset >= data.size) return Error::unexpected_end();
+        uint8_t len = data.data[offset];
+        if (offset + 1u + static_cast<size_t>(len) > data.size) return Error::unexpected_end();
+        if (auto r = out.add(StringRef{data.slice(offset + 1, len)}); !r) return r;
+        offset += 1u + static_cast<size_t>(len);
+    }
+    return Result::ok();
+}
+
+inline auto parse_text(Bytes data, StringRef& out) -> Result {
+    out.bytes = data;
+    return Result::ok();
+}
+
+} // namespace text
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

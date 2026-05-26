@@ -168,6 +168,8 @@ public:
 		(void)msg;
 		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd"))
 			summary_.status = "parse_failed";
+		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
+			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "snd "))
 		{
 			summary_.status = "convert_failed";
@@ -287,6 +289,8 @@ private:
 			snprintf(fname, sizeof(fname), "HCbg_%d.json", res_.id);
 		else if(resource_type_is(res_, "HCcd"))
 			snprintf(fname, sizeof(fname), "HCcd_%d.json", res_.id);
+		else if(resource_type_is(res_, "STR#"))
+			snprintf(fname, sizeof(fname), "STR#_%d.json", res_.id);
 		else
 			return;
 
@@ -305,22 +309,46 @@ private:
 	{
 		if(payload.data.data == nullptr)
 			return;
-		if(!resource_type_is(res_, "XCMD") && !resource_type_is(res_, "XFCN") &&
-			!resource_type_is(res_, "xcmd") && !resource_type_is(res_, "xfcn"))
-			return;
-
-		const std::string typeAndArchitecture = summary_.type + "_" + summary_.architecture;
-		const std::string relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName_, typeAndArchitecture, summary_.id, summary_.name, ".s");
 		const std::string text(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
-		if(write_text_file(output_path(basePath_, relativePath.c_str()), text))
+		std::string relativePath;
+		const bool isDisassembly = resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
+			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn");
+		if(isDisassembly)
 		{
-			summary_.status = "disassembled";
-			summary_.disassemblyFile = relativePath;
-			exportedCount_++;
-			stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary_.architecture.c_str(), summary_.type.c_str(), summary_.id);
+			const std::string typeAndArchitecture = summary_.type + "_" + summary_.architecture;
+			relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName_, typeAndArchitecture, summary_.id, summary_.name, ".s");
+		}
+		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "TEXT"))
+		{
+			const std::string textDir = output_path(basePath_, "resource-text");
+			if(stackimport_internal_make_directory(textDir.c_str()) != 0 && errno != EEXIST)
+			{
+				summary_.status = "output_directory_failed";
+				return;
+			}
+			relativePath = std::string("resource-text/") + sanitized_resource_file_name(stackFileName_, summary_.type, summary_.id, summary_.name, ".txt");
 		}
 		else
-			summary_.status = "disassembly_write_failed";
+			return;
+
+		if(write_text_file(output_path(basePath_, relativePath.c_str()), text))
+		{
+			if(isDisassembly)
+			{
+				summary_.status = "disassembled";
+				summary_.disassemblyFile = relativePath;
+				stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary_.architecture.c_str(), summary_.type.c_str(), summary_.id);
+			}
+			else
+			{
+				summary_.status = "exported";
+				summary_.outputFile = relativePath;
+				stackimport_emit_infof("Status: Wrote %s #%d as UTF-8 text.\n", summary_.type.c_str(), summary_.id);
+			}
+			exportedCount_++;
+		}
+		else
+			summary_.status = isDisassembly ? "disassembly_write_failed" : "export_failed";
 	}
 
 	const rsrcd::ResRef& res_;
@@ -477,6 +505,14 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "HCbg", 4) == 0 || std::memcmp(res.type.data, "HCcd", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "STR ", 4) == 0 || std::memcmp(res.type.data, "STR#", 4) == 0 ||
+			std::memcmp(res.type.data, "TEXT", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

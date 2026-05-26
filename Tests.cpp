@@ -221,7 +221,8 @@ public:
 		wants_count++;
 		return payload.format == stackimport::ResourcePayloadFormat::Native ||
 			payload.format == stackimport::ResourcePayloadFormat::Rgba32 ||
-			payload.format == stackimport::ResourcePayloadFormat::JsonUtf8;
+			payload.format == stackimport::ResourcePayloadFormat::JsonUtf8 ||
+			payload.format == stackimport::ResourcePayloadFormat::TextUtf8;
 	}
 
 	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
@@ -240,6 +241,11 @@ public:
 			json_count++;
 			last_json.assign(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
 		}
+		if(payload.format == stackimport::ResourcePayloadFormat::TextUtf8)
+		{
+			text_count++;
+			last_text.assign(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
+		}
 		return true;
 	}
 
@@ -247,10 +253,12 @@ public:
 	int native_count = 0;
 	int rgba_count = 0;
 	int json_count = 0;
+	int text_count = 0;
 	uint32_t last_width = 0;
 	uint32_t last_height = 0;
 	size_t last_payload_size = 0;
 	std::string last_json;
+	std::string last_text;
 };
 
 void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t map_off, uint32_t data_len, uint32_t map_len)
@@ -648,6 +656,56 @@ void	RunTests()
 	assert(addColorSummaries[0].outputFile == "HCbg_77.json");
 	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
 	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
+
+	const std::vector<uint8_t> strPayload = {5, 'H', 0x8E, 'l', 'l', 'o'};
+	const std::vector<uint8_t> strFork = make_single_resource_fork("STR ", 12, strPayload);
+	CountingResourceOutput textOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{strFork.data(), strFork.size()}, textOutput));
+	assert(textOutput.native_count == 1);
+	assert(textOutput.text_count == 1);
+	assert(textOutput.last_text == "H\xC3\xA9llo");
+
+	std::vector<uint8_t> stringListPayload;
+	append_u16be(stringListPayload, 2);
+	stringListPayload.insert(stringListPayload.end(), {3, 'O', 'n', 'e'});
+	stringListPayload.insert(stringListPayload.end(), {3, 'T', 'w', 'o'});
+	const std::vector<uint8_t> stringListFork = make_single_resource_fork("STR#", 44, stringListPayload);
+	CountingResourceOutput stringListOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{stringListFork.data(), stringListFork.size()}, stringListOutput));
+	assert(stringListOutput.native_count == 1);
+	assert(stringListOutput.json_count == 1);
+	assert(stringListOutput.last_json.find("\"One\"") != std::string::npos);
+	assert(stringListOutput.last_json.find("\"Two\"") != std::string::npos);
+
+	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState textPlatformState;
+	textPlatformState.resource_fork_data = strFork.data();
+	textPlatformState.resource_fork_size = strFork.size();
+	stackimport_platform textPlatform = resourceForkPlatform;
+	textPlatform.user_data = &textPlatformState;
+	const stackimport_internal_platform textInternalPlatform = stackimport_internal_platform_from_api(&textPlatform);
+	std::vector<CResourceSummary> textSummaries;
+	std::string textStatus;
+	uint64_t textBytes = 0;
+	{
+		stackimport_platform_scope textScope(textInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			textOutputPath,
+			"Stack",
+			&textOutput,
+			textSummaries,
+			textStatus,
+			textBytes));
+	}
+	assert(textStatus == "ok");
+	assert(textSummaries.size() == 1);
+	assert(textSummaries[0].type == "STR ");
+	assert(textSummaries[0].status == "exported");
+	assert(textSummaries[0].outputFile == "resource-text/Stack_STR%20_12.txt");
+	const std::string convertedText = read_text_file(textOutputPath + "/resource-text/Stack_STR%20_12.txt");
+	assert(convertedText == "H\xC3\xA9llo");
 
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;

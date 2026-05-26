@@ -189,6 +189,10 @@ when parser behavior changes, updates to the relevant format documentation under
   fallback decoders.
 - AddColor `HCbg`/`HCcd` now uses the existing rsrcd typed parser in the
   transform pipeline and emits JSON package artifacts.
+- Classic text resources `STR `, `STR#`, and `TEXT` now use rsrcd typed text
+  views plus shared MacRoman-to-UTF-8 transforms; package output writes `STR `
+  and `TEXT` as UTF-8 text artifacts and `STR#` as JSON to preserve string
+  boundaries.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
   preserves native bytes when conversion fails.
@@ -213,6 +217,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for code resources: move 68K and PowerPC disassembly into
   `StackImportResourceTransforms.cpp`, and route package `.s` artifact writing
   through that transform payload.
+- Done for core text resources: parse `STR `, `STR#`, and `TEXT` through rsrcd
+  text helpers and route package text/JSON artifact writing through those
+  transform payloads.
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.

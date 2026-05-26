@@ -18,6 +18,9 @@ where new support should live. The target architecture is:
 | `PLTE` | Typed parse to JSON transform and package artifact | `rsrcd::plte`, `StackImportResourceTransforms.cpp` | Palette window metadata and buttons. |
 | `HCbg` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Background overlay metadata. |
 | `HCcd` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Card overlay metadata. |
+| `STR ` | Typed MacRoman decode to UTF-8 text transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Pascal string resource. |
+| `STR#` | Typed MacRoman string-list decode to JSON transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Preserves string boundaries. |
+| `TEXT` | MacRoman decode to UTF-8 text transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Raw text resource bytes. |
 | `PICT` | PNG transform and package artifact | `StackImportResourceDasmPictAdapter` | Adapter-backed through resource_dasm; native bytes are still preserved when rendering fails. |
 | `snd ` | WAV transform and package artifact | `StackImportSoundConverter.cpp` | MACE uses the resource_dasm-backed MACE adapter when enabled. |
 | `XCMD` / `XFCN` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | 68K code resources. |
@@ -35,7 +38,7 @@ interface is clear.
 | PICT | `PICT` | `decode_PICT` and exporter support | Adapter first; current StackImport support uses `StackImportResourceDasmPictAdapter` and does not expose resource_dasm internals to core code. |
 | Icon families | `ICN#`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`, `SICN`, `cicn`, `icns` | typed decoders and exporters | Fold small bitmap/icon decoders into rsrcd; keep `icns` container handling adapter-backed until bounded. |
 | Color tables and patterns | `PAT `, `ppat`, `ppt#`, `clut`, `CTBL`, `pltt`, `actb`, `cctb`, `dctb`, `fctb`, `wctb` | typed decoders and exporters | Fold bounded parsers into rsrcd. |
-| Text | `STR `, `STR#`, `TEXT`, `styl`, `TwCS`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. |
+| Text | `styl`, `TwCS`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, and `TEXT` now live in StackImport core. |
 | Metadata/templates | `TMPL`, `vers`, `SIZE`, `cfrg`, `ROv#`, `RSSC` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. |
 | UI/layout | `CNTL`, `DLOG`, `WIND`, `DITL`, `MENU` | typed decoders and exporters; system templates also cover `ALRT`, `BNDL`, `FREF`, `MBAR` | Fold fixed-record parsers into rsrcd after corpus validation. |
 | Fonts | `FONT`, `NFNT`, `finf`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. |

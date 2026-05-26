@@ -231,6 +231,73 @@ auto emit_addcolor_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_text_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	bool pascal_string)
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/plain; charset=utf-8",
+		pascal_string ? "decoded STR text" : "decoded TEXT resource");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::text::StringRef text;
+	auto text_result = pascal_string
+		? rsrcd::text::parse_str(resource.data, text)
+		: rsrcd::text::parse_text(resource.data, text);
+	if(!text_result)
+		return output.on_resource_error(ref, text_result.message());
+
+	std::string utf8 = mac_roman_from_bytes(text.bytes.data, text.bytes.size);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(utf8.data()), utf8.size()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_string_list_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"decoded STR# string list");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::text::StringList<256> strings;
+	auto text_result = rsrcd::text::parse_str_list(resource.data, strings);
+	if(!text_result)
+		return output.on_resource_error(ref, text_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+
+	JsonValue array(rapidjson::kArrayType);
+	for(const rsrcd::text::StringRef& string_ref : strings)
+	{
+		std::string value = mac_roman_from_bytes(string_ref.bytes.data, string_ref.bytes.size);
+		array.PushBack(json_string(value, allocator), allocator);
+	}
+	doc.AddMember("strings", array, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -413,6 +480,15 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "HCcd"))
 		return emit_addcolor_transform(resource, ref, output, "card");
+
+	if(resource_type_is(resource, "STR "))
+		return emit_text_transform(resource, ref, output, true);
+
+	if(resource_type_is(resource, "TEXT"))
+		return emit_text_transform(resource, ref, output, false);
+
+	if(resource_type_is(resource, "STR#"))
+		return emit_string_list_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

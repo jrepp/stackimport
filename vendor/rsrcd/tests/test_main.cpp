@@ -887,6 +887,52 @@ static void test_plte_too_small() {
 }
 
 // ============================================================================
+// Text helpers
+// ============================================================================
+
+static void test_text_str() {
+    uint8_t data[] = {3, 'O', 'n', 'e'};
+    rsrcd::text::StringRef text;
+    auto r = rsrcd::text::parse_str({data, sizeof(data)}, text);
+    CHECK_RESULT(r, "parse STR");
+    CHECK(text.bytes.size == 3, "STR size");
+    CHECK(std::memcmp(text.bytes.data, "One", 3) == 0, "STR bytes");
+}
+
+static void test_text_str_too_small() {
+    uint8_t data[] = {4, 'O', 'n', 'e'};
+    rsrcd::text::StringRef text;
+    auto r = rsrcd::text::parse_str({data, sizeof(data)}, text);
+    CHECK(!r, "truncated STR should fail");
+}
+
+static void test_text_str_list() {
+    uint8_t data[] = {0, 2, 3, 'O', 'n', 'e', 3, 'T', 'w', 'o'};
+    rsrcd::text::StringList<4> strings;
+    auto r = rsrcd::text::parse_str_list({data, sizeof(data)}, strings);
+    CHECK_RESULT(r, "parse STR#");
+    CHECK(strings.count() == 2, "STR# count");
+    CHECK(std::memcmp(strings[0].bytes.data, "One", 3) == 0, "STR# first");
+    CHECK(std::memcmp(strings[1].bytes.data, "Two", 3) == 0, "STR# second");
+}
+
+static void test_text_str_list_capacity() {
+    uint8_t data[] = {0, 2, 1, 'A', 1, 'B'};
+    rsrcd::text::StringList<1> strings;
+    auto r = rsrcd::text::parse_str_list({data, sizeof(data)}, strings);
+    CHECK(!r, "STR# capacity overflow should fail");
+}
+
+static void test_text_text() {
+    uint8_t data[] = {'T', 'E', 'X', 'T'};
+    rsrcd::text::StringRef text;
+    auto r = rsrcd::text::parse_text({data, sizeof(data)}, text);
+    CHECK_RESULT(r, "parse TEXT");
+    CHECK(text.bytes.size == sizeof(data), "TEXT size");
+    CHECK(text.bytes.data == data, "TEXT view");
+}
+
+// ============================================================================
 // PAT# helpers
 // ============================================================================
 
@@ -991,6 +1037,11 @@ int main() {
     test_plte_show_name();
     test_plte_with_buttons();
     test_plte_too_small();
+    test_text_str();
+    test_text_str_too_small();
+    test_text_str_list();
+    test_text_str_list_capacity();
+    test_text_text();
     test_patlist_count();
     test_palette_lookup();
 
