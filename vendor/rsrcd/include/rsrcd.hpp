@@ -1090,6 +1090,120 @@ inline auto parse(Bytes data, Size& size) -> Result {
 } // namespace size_resource
 
 // ============================================================================
+// Classic UI metadata resources (CNTL / DLOG / WIND)
+// ============================================================================
+
+namespace ui {
+
+struct Rect {
+    int16_t top;
+    int16_t left;
+    int16_t bottom;
+    int16_t right;
+};
+
+struct Control {
+    Rect bounds;
+    uint16_t value;
+    bool visible;
+    int16_t maximum;
+    int16_t minimum;
+    int16_t proc_id;
+    int32_t ref_con;
+    Bytes title;
+};
+
+struct Dialog {
+    Rect bounds;
+    int16_t proc_id;
+    bool visible;
+    bool go_away;
+    int32_t ref_con;
+    int16_t items_id;
+    Bytes title;
+    uint16_t auto_position;
+    bool has_auto_position;
+};
+
+struct Window {
+    Rect bounds;
+    int16_t proc_id;
+    bool visible;
+    bool go_away;
+    int32_t ref_con;
+    Bytes title;
+    uint16_t auto_position;
+    bool has_auto_position;
+};
+
+inline auto parse_rect(Bytes data, size_t offset, Rect& rect) -> Result {
+    if (!range_in_bounds(offset, 8, data.size)) return Error::unexpected_end();
+    rect.top = read_i16be(data.data + offset);
+    rect.left = read_i16be(data.data + offset + 2);
+    rect.bottom = read_i16be(data.data + offset + 4);
+    rect.right = read_i16be(data.data + offset + 6);
+    return Result::ok();
+}
+
+inline auto parse_cntl(Bytes data, Control& control) -> Result {
+    if (data.size < 23) return Error::unexpected_end();
+    if (auto r = parse_rect(data, 0, control.bounds); !r) return r;
+    control.value = read_u16be(data.data + 8);
+    control.visible = read_u16be(data.data + 10) != 0;
+    control.maximum = read_i16be(data.data + 12);
+    control.minimum = read_i16be(data.data + 14);
+    control.proc_id = read_i16be(data.data + 16);
+    control.ref_con = read_i32be(data.data + 18);
+    uint8_t title_len = data.data[22];
+    if (23u + static_cast<size_t>(title_len) > data.size) return Error::unexpected_end();
+    control.title = data.slice(23, title_len);
+    return Result::ok();
+}
+
+inline auto parse_dlog(Bytes data, Dialog& dialog) -> Result {
+    if (data.size < 21) return Error::unexpected_end();
+    if (auto r = parse_rect(data, 0, dialog.bounds); !r) return r;
+    dialog.proc_id = read_i16be(data.data + 8);
+    dialog.visible = read_u16be(data.data + 10) != 0;
+    dialog.go_away = read_u16be(data.data + 12) != 0;
+    dialog.ref_con = read_i32be(data.data + 14);
+    dialog.items_id = read_i16be(data.data + 18);
+    uint8_t title_len = data.data[20];
+    size_t after_title = 21u + static_cast<size_t>(title_len);
+    if (after_title > data.size) return Error::unexpected_end();
+    dialog.title = data.slice(21, title_len);
+    dialog.has_auto_position = false;
+    dialog.auto_position = 0;
+    if (range_in_bounds(after_title, 2, data.size)) {
+        dialog.has_auto_position = true;
+        dialog.auto_position = read_u16be(data.data + after_title);
+    }
+    return Result::ok();
+}
+
+inline auto parse_wind(Bytes data, Window& window) -> Result {
+    if (data.size < 19) return Error::unexpected_end();
+    if (auto r = parse_rect(data, 0, window.bounds); !r) return r;
+    window.proc_id = read_i16be(data.data + 8);
+    window.visible = read_u16be(data.data + 10) != 0;
+    window.go_away = read_u16be(data.data + 12) != 0;
+    window.ref_con = read_i32be(data.data + 14);
+    uint8_t title_len = data.data[18];
+    size_t after_title = 19u + static_cast<size_t>(title_len);
+    if (after_title > data.size) return Error::unexpected_end();
+    window.title = data.slice(19, title_len);
+    window.has_auto_position = false;
+    window.auto_position = 0;
+    if (range_in_bounds(after_title, 2, data.size)) {
+        window.has_auto_position = true;
+        window.auto_position = read_u16be(data.data + after_title);
+    }
+    return Result::ok();
+}
+
+} // namespace ui
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

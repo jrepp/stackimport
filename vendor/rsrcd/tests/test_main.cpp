@@ -1041,6 +1041,85 @@ static void test_size_resource_truncated() {
 }
 
 // ============================================================================
+// UI metadata
+// ============================================================================
+
+static void write_test_rect(uint8_t* data) {
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u16be(data + 2, 2);
+    rsrcd::write_u16be(data + 4, 30);
+    rsrcd::write_u16be(data + 6, 40);
+}
+
+static void test_ui_cntl() {
+    uint8_t data[25] = {};
+    write_test_rect(data);
+    rsrcd::write_u16be(data + 8, 5);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 12, 100);
+    rsrcd::write_u16be(data + 14, 0);
+    rsrcd::write_u16be(data + 16, 8);
+    rsrcd::write_u32be(data + 18, 0x12345678);
+    data[22] = 2;
+    data[23] = 'O';
+    data[24] = 'K';
+
+    rsrcd::ui::Control control;
+    auto r = rsrcd::ui::parse_cntl({data, sizeof(data)}, control);
+    CHECK_RESULT(r, "parse CNTL");
+    CHECK(control.bounds.bottom == 30, "CNTL bounds");
+    CHECK(control.value == 5, "CNTL value");
+    CHECK(control.visible, "CNTL visible");
+    CHECK(control.title.size == 2, "CNTL title size");
+}
+
+static void test_ui_dlog() {
+    uint8_t data[30] = {};
+    write_test_rect(data);
+    rsrcd::write_u16be(data + 8, 4);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 12, 1);
+    rsrcd::write_u32be(data + 14, 0x12345678);
+    rsrcd::write_u16be(data + 18, 128);
+    data[20] = 5;
+    std::memcpy(data + 21, "Hello", 5);
+    rsrcd::write_u16be(data + 26, 0xABCD);
+
+    rsrcd::ui::Dialog dialog;
+    auto r = rsrcd::ui::parse_dlog({data, 28}, dialog);
+    CHECK_RESULT(r, "parse DLOG");
+    CHECK(dialog.items_id == 128, "DLOG items");
+    CHECK(dialog.go_away, "DLOG go away");
+    CHECK(dialog.has_auto_position, "DLOG auto position");
+    CHECK(dialog.auto_position == 0xABCD, "DLOG auto position value");
+}
+
+static void test_ui_wind() {
+    uint8_t data[26] = {};
+    write_test_rect(data);
+    rsrcd::write_u16be(data + 8, 16);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 12, 0);
+    rsrcd::write_u32be(data + 14, 0x12345678);
+    data[18] = 3;
+    std::memcpy(data + 19, "Win", 3);
+
+    rsrcd::ui::Window window;
+    auto r = rsrcd::ui::parse_wind({data, 22}, window);
+    CHECK_RESULT(r, "parse WIND");
+    CHECK(window.proc_id == 16, "WIND proc");
+    CHECK(window.visible, "WIND visible");
+    CHECK(!window.has_auto_position, "WIND no auto position");
+}
+
+static void test_ui_truncated() {
+    uint8_t data[8] = {};
+    rsrcd::ui::Control control;
+    auto r = rsrcd::ui::parse_cntl({data, sizeof(data)}, control);
+    CHECK(!r, "truncated CNTL should fail");
+}
+
+// ============================================================================
 // PAT# helpers
 // ============================================================================
 
@@ -1157,6 +1236,10 @@ int main() {
     test_color_table_truncated();
     test_size_resource();
     test_size_resource_truncated();
+    test_ui_cntl();
+    test_ui_dlog();
+    test_ui_wind();
+    test_ui_truncated();
     test_patlist_count();
     test_palette_lookup();
 

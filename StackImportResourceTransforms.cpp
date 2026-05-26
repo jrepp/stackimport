@@ -162,6 +162,17 @@ void add_json_color(JsonValue& object, const rsrcd::ac::RGBColor& color, JsonPoo
 	object.AddMember("color", value, allocator);
 }
 
+template<typename JsonObject>
+void add_json_ui_rect(JsonObject& object, const rsrcd::ui::Rect& rect, JsonPoolAllocator& allocator)
+{
+	JsonValue value(rapidjson::kObjectType);
+	value.AddMember("top", rect.top, allocator);
+	value.AddMember("left", rect.left, allocator);
+	value.AddMember("bottom", rect.bottom, allocator);
+	value.AddMember("right", rect.right, allocator);
+	object.AddMember("bounds", value, allocator);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -231,6 +242,19 @@ auto emit_addcolor_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto finish_json_resource_payload(
+	ResourcePayload& descriptor,
+	JsonDocument& doc,
+	StackImportRapidJsonAllocator& base_alloc,
+	IResourceOutput& output) -> bool
+{
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_text_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -256,6 +280,115 @@ auto emit_text_transform(
 	std::string utf8 = mac_roman_from_bytes(text.bytes.data, text.bytes.size);
 	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(utf8.data()), utf8.size()};
 	return output.on_resource_payload(descriptor);
+}
+
+auto emit_cntl_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed CNTL control metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::Control control;
+	auto control_result = rsrcd::ui::parse_cntl(resource.data, control);
+	if(!control_result)
+		return output.on_resource_error(ref, control_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_ui_rect(doc, control.bounds, allocator);
+	doc.AddMember("value", control.value, allocator);
+	doc.AddMember("visible", control.visible, allocator);
+	doc.AddMember("maximum", control.maximum, allocator);
+	doc.AddMember("minimum", control.minimum, allocator);
+	doc.AddMember("procId", control.proc_id, allocator);
+	doc.AddMember("refCon", control.ref_con, allocator);
+	std::string title = mac_roman_from_bytes(control.title.data, control.title.size);
+	doc.AddMember("title", json_string(title, allocator), allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
+auto emit_dlog_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed DLOG dialog metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::Dialog dialog;
+	auto dialog_result = rsrcd::ui::parse_dlog(resource.data, dialog);
+	if(!dialog_result)
+		return output.on_resource_error(ref, dialog_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_ui_rect(doc, dialog.bounds, allocator);
+	doc.AddMember("procId", dialog.proc_id, allocator);
+	doc.AddMember("visible", dialog.visible, allocator);
+	doc.AddMember("goAway", dialog.go_away, allocator);
+	doc.AddMember("refCon", dialog.ref_con, allocator);
+	doc.AddMember("itemsId", dialog.items_id, allocator);
+	std::string title = mac_roman_from_bytes(dialog.title.data, dialog.title.size);
+	doc.AddMember("title", json_string(title, allocator), allocator);
+	if(dialog.has_auto_position)
+		doc.AddMember("autoPosition", dialog.auto_position, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
+auto emit_wind_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed WIND window metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::Window window;
+	auto window_result = rsrcd::ui::parse_wind(resource.data, window);
+	if(!window_result)
+		return output.on_resource_error(ref, window_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_ui_rect(doc, window.bounds, allocator);
+	doc.AddMember("procId", window.proc_id, allocator);
+	doc.AddMember("visible", window.visible, allocator);
+	doc.AddMember("goAway", window.go_away, allocator);
+	doc.AddMember("refCon", window.ref_con, allocator);
+	std::string title = mac_roman_from_bytes(window.title.data, window.title.size);
+	doc.AddMember("title", json_string(title, allocator), allocator);
+	if(window.has_auto_position)
+		doc.AddMember("autoPosition", window.auto_position, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
 auto emit_string_list_transform(
@@ -687,6 +820,15 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "CNTL"))
+		return emit_cntl_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "DLOG"))
+		return emit_dlog_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "WIND"))
+		return emit_wind_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

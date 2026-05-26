@@ -741,6 +741,27 @@ void	RunTests()
 	assert(sizeOutput.last_json.find("\"minimumSize\": 524288") != std::string::npos);
 	assert(sizeOutput.last_json.find("\"saveScreen\": true") != std::string::npos);
 
+	std::vector<uint8_t> dlogPayload;
+	append_u16be(dlogPayload, 1);
+	append_u16be(dlogPayload, 2);
+	append_u16be(dlogPayload, 30);
+	append_u16be(dlogPayload, 40);
+	append_u16be(dlogPayload, 4);
+	append_u16be(dlogPayload, 1);
+	append_u16be(dlogPayload, 1);
+	append_u32be(dlogPayload, 0x12345678);
+	append_u16be(dlogPayload, 128);
+	dlogPayload.insert(dlogPayload.end(), {5, 'H', 'e', 'l', 'l', 'o'});
+	append_u16be(dlogPayload, 0xABCD);
+	const std::vector<uint8_t> dlogFork = make_single_resource_fork("DLOG", 128, dlogPayload);
+	CountingResourceOutput dlogOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{dlogFork.data(), dlogFork.size()}, dlogOutput));
+	assert(dlogOutput.native_count == 1);
+	assert(dlogOutput.json_count == 1);
+	assert(dlogOutput.last_json.find("\"itemsId\": 128") != std::string::npos);
+	assert(dlogOutput.last_json.find("\"title\": \"Hello\"") != std::string::npos);
+	assert(dlogOutput.last_json.find("\"autoPosition\": 43981") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;
