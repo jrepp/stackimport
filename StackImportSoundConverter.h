@@ -6,8 +6,8 @@
 #include <string>
 #include <utility>
 
-#include "include/stackimport_sax.hpp"
 #include "stackimport_platform_internal.h"
+#include "vendor/rsrcd/include/rsrcd.hpp"
 
 namespace stackimport {
 
