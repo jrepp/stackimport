@@ -737,6 +737,44 @@ auto emit_size_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_finf_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed finf font info metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::finf::FontInfoList<128> font_info;
+	auto finf_result = rsrcd::finf::parse(resource.data, font_info);
+	if(!finf_result)
+		return output.on_resource_error(ref, finf_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+
+	JsonValue entries(rapidjson::kArrayType);
+	for(const rsrcd::finf::Entry& entry : font_info)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("fontId", entry.font_id, allocator);
+		item.AddMember("styleFlags", entry.style_flags, allocator);
+		item.AddMember("size", entry.size, allocator);
+		entries.PushBack(item, allocator);
+	}
+	doc.AddMember("entries", entries, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -989,6 +1027,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "finf"))
+		return emit_finf_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "CNTL"))
 		return emit_cntl_transform(resource, ref, output);

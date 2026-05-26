@@ -204,6 +204,8 @@ when parser behavior changes, updates to the relevant format documentation under
   16-bit RGB entries.
 - `SIZE` metadata now has an rsrcd typed parser and shared JSON transform for
   application flags plus preferred/minimum memory sizes.
+- `finf` font metadata now has an rsrcd typed parser and shared JSON transform
+  for font id, style flags, and size triples.
 - `CNTL`, `DLOG`, and `WIND` UI metadata now have rsrcd typed parsers and
   shared JSON transforms for bounds, state flags, proc ids, refcons, titles, and
   auto-position fields where present.
@@ -250,6 +252,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `finf` font metadata: parse through rsrcd and route package JSON
+  artifact writing through the shared transform payload.
 - Done for fixed-record UI metadata: parse `CNTL`, `DLOG`, and `WIND` through
   rsrcd and route package JSON artifact writing through the shared transform
   payload.
@@ -298,9 +302,9 @@ all consumers listed in the lateral audit above have been updated and tested.
 
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
-  `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`, `TEXT`,
-  `vers`, `SIZE`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `PICT`, `snd `,
-  `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`,
+  `TEXT`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`,
+  `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

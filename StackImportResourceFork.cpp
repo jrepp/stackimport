@@ -170,7 +170,8 @@ public:
 			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
 			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
 			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") || resource_type_is(res_, "pltt") ||
-			resource_type_is(res_, "SIZE") || resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
+			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
+			resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
 			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") || resource_type_is(res_, "DITL"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
@@ -346,6 +347,8 @@ private:
 			snprintf(fname, sizeof(fname), "pltt_%d.json", res_.id);
 		else if(resource_type_is(res_, "SIZE"))
 			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
+		else if(resource_type_is(res_, "finf"))
+			snprintf(fname, sizeof(fname), "finf_%d.json", res_.id);
 		else if(resource_type_is(res_, "CNTL"))
 			snprintf(fname, sizeof(fname), "CNTL_%d.json", res_.id);
 		else if(resource_type_is(res_, "DLOG"))
@@ -615,7 +618,7 @@ bool stackimport_load_resource_fork(
 			resourceSummaries.push_back(summary);
 			continue;
 		}
-		else if(std::memcmp(res.type.data, "SIZE", 4) == 0)
+		else if(std::memcmp(res.type.data, "SIZE", 4) == 0 || std::memcmp(res.type.data, "finf", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

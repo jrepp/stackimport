@@ -1062,6 +1062,32 @@ static void test_size_resource_truncated() {
     CHECK(!r, "truncated SIZE should fail");
 }
 
+static void test_finf() {
+    uint8_t data[14] = {};
+    rsrcd::write_u16be(data, 2);
+    rsrcd::write_u16be(data + 2, 128);
+    rsrcd::write_u16be(data + 4, 1);
+    rsrcd::write_u16be(data + 6, 12);
+    rsrcd::write_u16be(data + 8, 129);
+    rsrcd::write_u16be(data + 10, 2);
+    rsrcd::write_u16be(data + 12, 18);
+
+    rsrcd::finf::FontInfoList<4> font_info;
+    auto r = rsrcd::finf::parse({data, sizeof(data)}, font_info);
+    CHECK_RESULT(r, "parse finf");
+    CHECK(font_info.count() == 2, "finf count");
+    CHECK(font_info[1].font_id == 129, "finf font id");
+    CHECK(font_info[1].size == 18, "finf size");
+}
+
+static void test_finf_truncated() {
+    uint8_t data[7] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::finf::FontInfoList<4> font_info;
+    auto r = rsrcd::finf::parse({data, sizeof(data)}, font_info);
+    CHECK(!r, "truncated finf should fail");
+}
+
 // ============================================================================
 // UI metadata
 // ============================================================================
@@ -1364,6 +1390,8 @@ int main() {
     test_pltt_truncated();
     test_size_resource();
     test_size_resource_truncated();
+    test_finf();
+    test_finf_truncated();
     test_ui_cntl();
     test_ui_dlog();
     test_ui_wind();

@@ -760,6 +760,19 @@ void	RunTests()
 	assert(sizeOutput.last_json.find("\"minimumSize\": 524288") != std::string::npos);
 	assert(sizeOutput.last_json.find("\"saveScreen\": true") != std::string::npos);
 
+	std::vector<uint8_t> finfPayload;
+	append_u16be(finfPayload, 1);
+	append_u16be(finfPayload, 128);
+	append_u16be(finfPayload, 1);
+	append_u16be(finfPayload, 12);
+	const std::vector<uint8_t> finfFork = make_single_resource_fork("finf", 1, finfPayload);
+	CountingResourceOutput finfOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{finfFork.data(), finfFork.size()}, finfOutput));
+	assert(finfOutput.native_count == 1);
+	assert(finfOutput.json_count == 1);
+	assert(finfOutput.last_json.find("\"fontId\": 128") != std::string::npos);
+	assert(finfOutput.last_json.find("\"size\": 12") != std::string::npos);
+
 	std::vector<uint8_t> dlogPayload;
 	append_u16be(dlogPayload, 1);
 	append_u16be(dlogPayload, 2);

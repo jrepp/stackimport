@@ -1143,6 +1143,60 @@ inline auto parse(Bytes data, Size& size) -> Result {
 } // namespace size_resource
 
 // ============================================================================
+// finf font info metadata parser
+// ============================================================================
+
+namespace finf {
+
+struct Entry {
+    uint16_t font_id;
+    uint16_t style_flags;
+    uint16_t size;
+};
+
+template<size_t InlineCapacity = 128>
+class FontInfoList {
+public:
+    auto add(Entry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many font info entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Entry& { return entries_[i]; }
+    auto begin() const -> const Entry* { return entries_; }
+    auto end() const -> const Entry* { return entries_ + count_; }
+
+private:
+    Entry entries_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 128>
+auto parse(Bytes data, FontInfoList<Cap>& list) -> Result {
+    if (data.empty()) return Result::ok();
+    if (data.size < 2) return Error::unexpected_end();
+    uint16_t count = read_u16be(data.data);
+    if (count > Cap) return Error::invalid_data("too many font info entries");
+    if (!range_in_bounds(2, static_cast<size_t>(count) * 6u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 2;
+    for (uint16_t i = 0; i < count; ++i) {
+        Entry entry{};
+        entry.font_id = read_u16be(data.data + offset);
+        entry.style_flags = read_u16be(data.data + offset + 2);
+        entry.size = read_u16be(data.data + offset + 4);
+        if (auto r = list.add(entry); !r) return r;
+        offset += 6;
+    }
+    return Result::ok();
+}
+
+} // namespace finf
+
+// ============================================================================
 // Classic UI metadata resources (CNTL / DLOG / WIND)
 // ============================================================================
 
