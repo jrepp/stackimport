@@ -213,6 +213,21 @@ private:
 			return;
 		}
 
+		if(resource_type_is(res_, "ICN#"))
+		{
+			snprintf(fname, sizeof(fname), "ICN#_%d.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = fname;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote ICN# #%d as PNG.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
 		if(resource_type_is(res_, "CURS"))
 		{
 			snprintf(fname, sizeof(fname), "CURS_%d.png", res_.id);
@@ -233,6 +248,21 @@ private:
 			snprintf(fname, sizeof(fname), "PAT#_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 				exportedCount_++;
+			return;
+		}
+
+		if(resource_type_is(res_, "PAT "))
+		{
+			snprintf(fname, sizeof(fname), "PAT_%d.png", res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = fname;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote PAT #%d as PNG.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
 		}
 	}
 
@@ -462,6 +492,13 @@ bool stackimport_load_resource_fork(
 			resourceSummaries.push_back(summary);
 			continue;
 		}
+		else if(std::memcmp(res.type.data, "ICN#", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
 		else if(std::memcmp(res.type.data, "CURS", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
@@ -480,6 +517,13 @@ bool stackimport_load_resource_fork(
 				summary.status = "exported";
 				stackimport_emit_infof("Status: Wrote %d/%zu patterns from PAT# #%d as PNG.\n", exported, patCount, res.id);
 			}
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "PAT ", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}

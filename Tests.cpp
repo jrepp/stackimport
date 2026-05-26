@@ -566,6 +566,28 @@ void	RunTests()
 	assert(countingOutput.last_height == 32);
 	assert(countingOutput.last_payload_size == 32u * 32u * 4u);
 
+	std::vector<uint8_t> icnPayload(256);
+	icnPayload[0] = 0x80;
+	icnPayload[128] = 0x80;
+	const std::vector<uint8_t> icnFork = make_single_resource_fork("ICN#", 130, icnPayload);
+	CountingResourceOutput icnOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{icnFork.data(), icnFork.size()}, icnOutput));
+	assert(icnOutput.native_count == 1);
+	assert(icnOutput.rgba_count == 1);
+	assert(icnOutput.last_width == 32);
+	assert(icnOutput.last_height == 32);
+	assert(icnOutput.last_payload_size == 32u * 32u * 4u);
+
+	const std::vector<uint8_t> patPayload = {0x80, 0, 0, 0, 0, 0, 0, 0};
+	const std::vector<uint8_t> patFork = make_single_resource_fork("PAT ", 9, patPayload);
+	CountingResourceOutput patOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{patFork.data(), patFork.size()}, patOutput));
+	assert(patOutput.native_count == 1);
+	assert(patOutput.rgba_count == 1);
+	assert(patOutput.last_width == 8);
+	assert(patOutput.last_height == 8);
+	assert(patOutput.last_payload_size == 8u * 8u * 4u);
+
 	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
 	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);

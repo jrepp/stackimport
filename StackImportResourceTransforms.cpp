@@ -412,6 +412,29 @@ auto emit_builtin_resource_transforms(
 		return output.on_resource_payload(descriptor);
 	}
 
+	if(resource_type_is(resource, "ICN#") && resource.data.size >= 256)
+	{
+		ResourcePayload descriptor = make_converted_resource_payload(
+			ref,
+			ResourcePayloadFormat::Rgba32,
+			rsrcd::Bytes{nullptr, 32u * 32u * 4u},
+			"image/x-rgba32",
+			"decoded 32x32 ICN# pixels");
+		descriptor.width = 32;
+		descriptor.height = 32;
+		descriptor.row_bytes = 32 * 4;
+		if(!output.wants_resource_payload(descriptor))
+			return true;
+
+		uint8_t rgba[32 * 32 * 4];
+		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+		if(!rsrcd::img::decode_icn_bw(resource.data, dst))
+			return true;
+		swap_bgra_to_rgba(rgba, 32u * 32u);
+		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+		return output.on_resource_payload(descriptor);
+	}
+
 	if(resource_type_is(resource, "CURS") && resource.data.size >= 68)
 	{
 		ResourcePayload descriptor = make_converted_resource_payload(
@@ -470,6 +493,29 @@ auto emit_builtin_resource_transforms(
 			if(!output.on_resource_payload(descriptor))
 				return false;
 		}
+	}
+
+	if(resource_type_is(resource, "PAT ") && resource.data.size >= 8)
+	{
+		ResourcePayload descriptor = make_converted_resource_payload(
+			ref,
+			ResourcePayloadFormat::Rgba32,
+			rsrcd::Bytes{nullptr, 8u * 8u * 4u},
+			"image/x-rgba32",
+			"decoded 8x8 PAT pattern pixels");
+		descriptor.width = 8;
+		descriptor.height = 8;
+		descriptor.row_bytes = 8 * 4;
+		if(!output.wants_resource_payload(descriptor))
+			return true;
+
+		uint8_t rgba[8 * 8 * 4];
+		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+		if(!rsrcd::img::decode_pat(resource.data, dst))
+			return true;
+		swap_bgra_to_rgba(rgba, 8u * 8u);
+		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+		return output.on_resource_payload(descriptor);
 	}
 
 	if(resource_type_is(resource, "PLTE"))

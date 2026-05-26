@@ -642,6 +642,21 @@ inline auto decode_icon_bw(Bytes data, MutableBytes out) -> Result {
     return Result::ok();
 }
 
+// Decode ICN# resource (128 bitmap bytes + 128 mask bytes, 32x32 1-bit).
+// out must be 32*32*4 = 4096 bytes.
+inline auto decode_icn_bw(Bytes data, MutableBytes out) -> Result {
+    constexpr int w = 32, h = 32;
+    constexpr size_t expected = 256;
+    constexpr size_t bgra_size = static_cast<size_t>(w * h * 4);
+    if (data.size < expected) return Error::unexpected_end();
+    if (out.size < bgra_size) return Error::bounds();
+
+    Bytes bitmap{data.data, 128};
+    Bytes mask{data.data + 128, 128};
+    decode_1bit(bitmap, mask, w, h, out);
+    return Result::ok();
+}
+
 // Decode CURS resource (68 bytes: 32 bitmap + 32 mask + 2 hotspot_y + 2 hotspot_x).
 // out must be 16*16*4 = 1024 bytes.
 inline auto decode_curs(Bytes data, MutableBytes out,

@@ -585,6 +585,21 @@ static void test_decode_icon_bw_top_left_pixel() {
           "next pixel is white");
 }
 
+static void test_decode_icn_bw_mask() {
+    uint8_t icn[256] = {};
+    icn[0] = 0x80;
+    icn[128] = 0x80;
+    uint8_t bgra[32 * 32 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icn_bw({icn, sizeof(icn)}, out);
+    CHECK_RESULT(r, "decode ICN#");
+
+    CHECK(bgra[0] == 0x00 && bgra[1] == 0x00 && bgra[2] == 0x00 && bgra[3] == 0xFF,
+          "ICN# top-left black opaque");
+    CHECK(bgra[7] == 0x00, "ICN# next pixel transparent");
+}
+
 // ============================================================================
 // Image decode: CURS
 // ============================================================================
@@ -1019,6 +1034,7 @@ int main() {
     test_decode_icon_bw_all_black();
     test_decode_icon_bw_too_small();
     test_decode_icon_bw_top_left_pixel();
+    test_decode_icn_bw_mask();
     test_decode_curs();
     test_decode_curs_transparent();
     test_decode_curs_too_small();
