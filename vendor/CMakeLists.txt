@@ -1,9 +1,6 @@
 include(ExternalProject)
 
-if(DEFINED STACKIMPORT_BUILD_VENDOR_TOOLS AND NOT STACKIMPORT_BUILD_VENDOR_TOOLS)
-    message(FATAL_ERROR "STACKIMPORT_BUILD_VENDOR_TOOLS=OFF is unsupported; remove unused vendored dependencies instead")
-endif()
-set(STACKIMPORT_BUILD_VENDOR_TOOLS ON CACHE BOOL "Build vendored conversion tools required by StackImport resource coverage" FORCE)
+option(STACKIMPORT_BUILD_VENDOR_TOOLS "Build vendored conversion tools required by StackImport resource coverage" ON)
 option(STACKIMPORT_VENDOR_STRICT_WARNINGS "Build vendored tools with stricter compiler warnings where supported" ON)
 option(STACKIMPORT_VENDOR_WARNINGS_AS_ERRORS "Treat local vendored library warnings as errors" ${STACKIMPORT_WARNINGS_AS_ERRORS})
 
@@ -290,7 +287,10 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
     )
 
     add_custom_target(vendor_deark
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${VENDOR_BUILD_DIR}/deark"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${VENDOR_BUILD_DIR}/deark"
+            "${VENDOR_BUILD_DIR}/deark/src"
+            "${VENDOR_BUILD_DIR}/deark/modules"
         COMMAND "${VENDOR_MAKE_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}/deark" "DEARK_OBJDIR=${VENDOR_BUILD_DIR}/deark" "CFLAGS=${DEARK_CFLAGS}" "LDFLAGS=${DEARK_LDFLAGS}" dep
         COMMAND "${VENDOR_MAKE_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}/deark" "DEARK_OBJDIR=${VENDOR_BUILD_DIR}/deark" "CFLAGS=${DEARK_CFLAGS}" "LDFLAGS=${DEARK_LDFLAGS}"
         BYPRODUCTS "${VENDOR_BUILD_DIR}/deark/deark"

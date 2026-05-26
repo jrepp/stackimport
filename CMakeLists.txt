@@ -39,10 +39,14 @@ if(NOT STACKIMPORT_ENABLE_VENDOR)
 endif()
 set(STACKIMPORT_ENABLE_VENDOR ON CACHE BOOL "Expose vendored conversion support targets" FORCE)
 
-if(DEFINED STACKIMPORT_BUILD_VENDOR_TOOLS AND NOT STACKIMPORT_BUILD_VENDOR_TOOLS)
-    message(FATAL_ERROR "STACKIMPORT_BUILD_VENDOR_TOOLS=OFF is unsupported; vendor tools are part of StackImport resource coverage")
+set(STACKIMPORT_BUILD_VENDOR_TOOLS_DEFAULT ON)
+if(WIN32)
+    set(STACKIMPORT_BUILD_VENDOR_TOOLS_DEFAULT OFF)
 endif()
-set(STACKIMPORT_BUILD_VENDOR_TOOLS ON CACHE BOOL "Build vendored conversion tools required by StackImport resource coverage" FORCE)
+option(STACKIMPORT_BUILD_VENDOR_TOOLS "Build vendored conversion tools required by StackImport resource coverage" ${STACKIMPORT_BUILD_VENDOR_TOOLS_DEFAULT})
+if(NOT STACKIMPORT_BUILD_VENDOR_TOOLS)
+    message(WARNING "Vendored conversion tools are disabled; resource coverage is reduced")
+endif()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -305,6 +309,7 @@ if(STACKIMPORT_COMBINE_STATIC_ARCHIVE)
 else()
     install(TARGETS stackimport_static
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     )
 endif()
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stackimport.pc"

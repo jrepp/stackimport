@@ -50,21 +50,27 @@ jobs:
           - target: linux-amd64
             runner: ubuntu-24.04
             artifact_suffix: linux-amd64
+            cmake_args: ""
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             artifact_suffix: linux-arm64
+            cmake_args: ""
           - target: windows-amd64
             runner: windows-2022
             artifact_suffix: windows-amd64
+            cmake_args: -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
           - target: windows-arm64
             runner: windows-11-arm
             artifact_suffix: windows-arm64
+            cmake_args: -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
           - target: macos-amd64
             runner: macos-15-intel
             artifact_suffix: macos-amd64
+            cmake_args: ""
           - target: macos-arm64
             runner: macos-14
             artifact_suffix: macos-arm64
+            cmake_args: ""
 
     steps:
       - name: Check out source
@@ -77,6 +83,7 @@ jobs:
           -B build
           -DCMAKE_BUILD_TYPE=Release
           -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
+          ${{ matrix.cmake_args }}
 
       - name: Build libraries, CLI, and tests
         run: cmake --build build --config Release --target stackimport-release stackimport-tests stackimport-rsrcd-tests --parallel

@@ -1,7 +1,9 @@
 #include "Mac68kDisassembly.h"
 #include "StackImportResourceTransforms.h"
 
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 #include "StackImportResourceDasmPictAdapter.h"
+#endif
 #include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
@@ -2359,6 +2361,12 @@ auto emit_pict_transform(
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
+#if !defined(STACKIMPORT_HAS_RESOURCE_DASM) || !STACKIMPORT_HAS_RESOURCE_DASM
+	(void)resource;
+	(void)ref;
+	(void)output;
+	return true;
+#else
 	ResourcePayload descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::Binary,
@@ -2379,6 +2387,7 @@ auto emit_pict_transform(
 	descriptor.width = width;
 	descriptor.height = height;
 	return output.on_resource_payload(descriptor);
+#endif
 }
 
 auto emit_curs_transform(
