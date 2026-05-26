@@ -300,6 +300,42 @@ auto emit_cfrg_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_mbar_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed menu bar metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::mbar::MenuIdList<128> menu_ids;
+	auto parse_result = rsrcd::mbar::parse(resource.data, menu_ids);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	JsonValue ids(rapidjson::kArrayType);
+	for(uint16_t id : menu_ids)
+		ids.PushBack(id, allocator);
+	doc.AddMember("menuIds", ids, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 const char* addcolor_object_type_name(rsrcd::ac::ObjType type)
 {
 	switch(type)
@@ -1298,6 +1334,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "cfrg"))
 		return emit_cfrg_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "MBAR"))
+		return emit_mbar_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

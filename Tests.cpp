@@ -817,6 +817,19 @@ void	RunTests()
 	assert(cfrgOutput.last_json.find("\"whereName\": \"resourceFork\"") != std::string::npos);
 	assert(cfrgOutput.last_json.find("\"name\": \"Main\"") != std::string::npos);
 
+	std::vector<uint8_t> mbarPayload;
+	append_u16be(mbarPayload, 2);
+	append_u16be(mbarPayload, 128);
+	append_u16be(mbarPayload, 129);
+	const std::vector<uint8_t> mbarFork = make_single_resource_fork("MBAR", 1, mbarPayload);
+	CountingResourceOutput mbarOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{mbarFork.data(), mbarFork.size()}, mbarOutput));
+	assert(mbarOutput.native_count == 1);
+	assert(mbarOutput.json_count == 1);
+	assert(mbarOutput.last_json.find("\"menuIds\"") != std::string::npos);
+	assert(mbarOutput.last_json.find("128") != std::string::npos);
+	assert(mbarOutput.last_json.find("129") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

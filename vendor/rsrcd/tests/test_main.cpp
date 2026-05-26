@@ -831,6 +831,29 @@ static void test_parse_cfrg_bad_version() {
     CHECK(!r, "cfrg bad version should fail");
 }
 
+static void test_parse_mbar() {
+    uint8_t data[6] = {};
+    rsrcd::write_u16be(data, 2);
+    rsrcd::write_u16be(data + 2, 128);
+    rsrcd::write_u16be(data + 4, 129);
+
+    rsrcd::mbar::MenuIdList<4> menus;
+    auto r = rsrcd::mbar::parse({data, sizeof(data)}, menus);
+    CHECK_RESULT(r, "parse MBAR");
+    CHECK(menus.count() == 2, "MBAR menu count");
+    CHECK(menus[0] == 128, "MBAR first menu ID");
+    CHECK(menus[1] == 129, "MBAR second menu ID");
+}
+
+static void test_parse_mbar_truncated() {
+    uint8_t data[5] = {};
+    rsrcd::write_u16be(data, 2);
+
+    rsrcd::mbar::MenuIdList<4> menus;
+    auto r = rsrcd::mbar::parse({data, sizeof(data)}, menus);
+    CHECK(!r, "truncated MBAR should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1547,6 +1570,8 @@ int main() {
     test_decode_icon_1bit_list_bad_size();
     test_parse_cfrg_single_entry();
     test_parse_cfrg_bad_version();
+    test_parse_mbar();
+    test_parse_mbar_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

@@ -1417,6 +1417,49 @@ auto parse(Bytes data, FragmentList<Cap>& list) -> Result {
 } // namespace cfrg
 
 // ============================================================================
+// Menu bar list resources (MBAR)
+// ============================================================================
+
+namespace mbar {
+
+template<size_t InlineCapacity = 64>
+class MenuIdList {
+public:
+    auto add(uint16_t id) -> Result {
+        if (count_ < InlineCapacity) {
+            ids_[count_++] = id;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many menu bar IDs");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> uint16_t { return ids_[i]; }
+    auto begin() const -> const uint16_t* { return ids_; }
+    auto end() const -> const uint16_t* { return ids_ + count_; }
+
+private:
+    uint16_t ids_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 64>
+auto parse(Bytes data, MenuIdList<Cap>& list) -> Result {
+    if (data.size < 2) return Error::unexpected_end();
+    uint16_t count = read_u16be(data.data);
+    if (count > Cap) return Error::invalid_data("too many menu bar IDs");
+    if (!range_in_bounds(2, static_cast<size_t>(count) * 2u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 2;
+    for (uint16_t i = 0; i < count; ++i) {
+        if (auto r = list.add(read_u16be(data.data + offset)); !r) return r;
+        offset += 2;
+    }
+    return Result::ok();
+}
+
+} // namespace mbar
+
+// ============================================================================
 // Classic UI metadata resources (CNTL / DLOG / WIND)
 // ============================================================================
 

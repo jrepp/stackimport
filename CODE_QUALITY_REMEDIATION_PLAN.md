@@ -208,6 +208,8 @@ when parser behavior changes, updates to the relevant format documentation under
   images are present.
 - `cfrg` Code Fragment Manager metadata now has an rsrcd typed parser and shared
   JSON transform for fragment records, names, locations, and extension bytes.
+- `MBAR` menu bar resources now have an rsrcd typed parser and shared JSON
+  transform for menu resource ID lists.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -268,6 +270,8 @@ when parser behavior changes, updates to the relevant format documentation under
   helpers and route package PNG artifact writing through the shared transform
   payload.
 - Done for `cfrg` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
+- Done for `MBAR` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
@@ -331,7 +335,7 @@ all consumers listed in the lateral audit above have been updated and tested.
   `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`,
   `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `,
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
-  `MENU`, `DITL`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `MENU`, `DITL`, `MBAR`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
