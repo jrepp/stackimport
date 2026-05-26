@@ -1777,6 +1777,136 @@ auto parse_menu(Bytes data, MenuItemList<Cap>& menu) -> Result {
 } // namespace ui
 
 // ============================================================================
+// Finder/UI metadata resources (ALRT / FREF / BNDL)
+// ============================================================================
+
+namespace finder {
+
+struct Alert {
+    ui::Rect bounds;
+    uint16_t item_list_id;
+    uint8_t stage_4_flags;
+    uint8_t stage_2_flags;
+    bool has_auto_position;
+    uint16_t auto_position;
+};
+
+struct FileReference {
+    uint32_t file_type;
+    uint16_t local_id;
+    Bytes file_name;
+};
+
+struct BundleIdMap {
+    uint16_t local_id;
+    uint16_t resource_id;
+};
+
+template<size_t IdCapacity = 128>
+class BundleIdList {
+public:
+    uint32_t resource_type = 0;
+
+    auto add(BundleIdMap map) -> Result {
+        if (count_ < IdCapacity) {
+            ids_[count_++] = map;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many bundle ID mappings");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const BundleIdMap& { return ids_[i]; }
+    auto begin() const -> const BundleIdMap* { return ids_; }
+    auto end() const -> const BundleIdMap* { return ids_ + count_; }
+
+private:
+    BundleIdMap ids_[IdCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t TypeCapacity = 32, size_t IdCapacity = 128>
+class Bundle {
+public:
+    uint32_t owner_name = 0;
+    uint16_t owner_id = 0;
+
+    auto add_type(uint32_t resource_type) -> Result {
+        if (type_count_ < TypeCapacity) {
+            types_[type_count_].resource_type = resource_type;
+            type_count_++;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many bundle resource types");
+    }
+    auto add_id(size_t type_index, BundleIdMap map) -> Result {
+        if (type_index >= type_count_) return Error::bounds();
+        return types_[type_index].add(map);
+    }
+    auto type_count() const -> size_t { return type_count_; }
+    auto type_at(size_t i) const -> const BundleIdList<IdCapacity>& { return types_[i]; }
+    auto begin() const -> const BundleIdList<IdCapacity>* { return types_; }
+    auto end() const -> const BundleIdList<IdCapacity>* { return types_ + type_count_; }
+
+private:
+    BundleIdList<IdCapacity> types_[TypeCapacity];
+    size_t type_count_ = 0;
+};
+
+inline auto parse_alrt(Bytes data, Alert& alert) -> Result {
+    if (data.size < 12) return Error::unexpected_end();
+    alert.bounds.top = read_i16be(data.data);
+    alert.bounds.left = read_i16be(data.data + 2);
+    alert.bounds.bottom = read_i16be(data.data + 4);
+    alert.bounds.right = read_i16be(data.data + 6);
+    alert.item_list_id = read_u16be(data.data + 8);
+    alert.stage_4_flags = data.data[10];
+    alert.stage_2_flags = data.data[11];
+    alert.has_auto_position = data.size >= 14;
+    alert.auto_position = alert.has_auto_position ? read_u16be(data.data + 12) : 0;
+    return Result::ok();
+}
+
+inline auto parse_fref(Bytes data, FileReference& fref) -> Result {
+    if (data.size < 7) return Error::unexpected_end();
+    fref.file_type = read_u32be(data.data);
+    fref.local_id = read_u16be(data.data + 4);
+    const uint8_t name_len = data.data[6];
+    if (!range_in_bounds(7, name_len, data.size)) return Error::unexpected_end();
+    fref.file_name = Bytes{data.data + 7, name_len};
+    return Result::ok();
+}
+
+template<size_t TypeCapacity = 32, size_t IdCapacity = 128>
+auto parse_bndl(Bytes data, Bundle<TypeCapacity, IdCapacity>& bundle) -> Result {
+    if (data.size < 8) return Error::unexpected_end();
+    bundle.owner_name = read_u32be(data.data);
+    bundle.owner_id = read_u16be(data.data + 4);
+    const uint16_t raw_type_count = read_u16be(data.data + 6);
+    const size_t type_count = static_cast<size_t>(raw_type_count) + 1u;
+
+    size_t offset = 8;
+    for (size_t ti = 0; ti < type_count; ++ti) {
+        if (!range_in_bounds(offset, 6, data.size)) return Error::unexpected_end();
+        const uint32_t resource_type = read_u32be(data.data + offset);
+        const uint16_t raw_id_count = read_u16be(data.data + offset + 4);
+        const size_t id_count = static_cast<size_t>(raw_id_count) + 1u;
+        offset += 6;
+        if (auto r = bundle.add_type(resource_type); !r) return r;
+        for (size_t ii = 0; ii < id_count; ++ii) {
+            if (!range_in_bounds(offset, 4, data.size)) return Error::unexpected_end();
+            BundleIdMap map{};
+            map.local_id = read_u16be(data.data + offset);
+            map.resource_id = read_u16be(data.data + offset + 2);
+            if (auto r = bundle.add_id(ti, map); !r) return r;
+            offset += 4;
+        }
+    }
+    return Result::ok();
+}
+
+} // namespace finder
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

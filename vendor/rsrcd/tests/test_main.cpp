@@ -854,6 +854,79 @@ static void test_parse_mbar_truncated() {
     CHECK(!r, "truncated MBAR should fail");
 }
 
+static void test_parse_alrt() {
+    uint8_t data[14] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u16be(data + 2, 2);
+    rsrcd::write_u16be(data + 4, 101);
+    rsrcd::write_u16be(data + 6, 202);
+    rsrcd::write_u16be(data + 8, 300);
+    data[10] = 0x12;
+    data[11] = 0x34;
+    rsrcd::write_u16be(data + 12, 0x0A00);
+
+    rsrcd::finder::Alert alert{};
+    auto r = rsrcd::finder::parse_alrt({data, sizeof(data)}, alert);
+    CHECK_RESULT(r, "parse ALRT");
+    CHECK(alert.bounds.bottom == 101, "ALRT bottom");
+    CHECK(alert.item_list_id == 300, "ALRT item list ID");
+    CHECK(alert.stage_4_flags == 0x12, "ALRT stage 4 flags");
+    CHECK(alert.has_auto_position, "ALRT auto position present");
+    CHECK(alert.auto_position == 0x0A00, "ALRT auto position");
+}
+
+static void test_parse_fref() {
+    uint8_t data[11] = {};
+    rsrcd::write_u32be(data, 0x4150504C);
+    rsrcd::write_u16be(data + 4, 42);
+    data[6] = 4;
+    data[7] = 'A';
+    data[8] = 'p';
+    data[9] = 'p';
+    data[10] = 's';
+
+    rsrcd::finder::FileReference fref{};
+    auto r = rsrcd::finder::parse_fref({data, sizeof(data)}, fref);
+    CHECK_RESULT(r, "parse FREF");
+    CHECK(fref.file_type == 0x4150504C, "FREF file type");
+    CHECK(fref.local_id == 42, "FREF local ID");
+    CHECK(fref.file_name.size == 4, "FREF name size");
+}
+
+static void test_parse_bndl() {
+    uint8_t data[22] = {};
+    rsrcd::write_u32be(data, 0x4F574E52);
+    rsrcd::write_u16be(data + 4, 128);
+    rsrcd::write_u16be(data + 6, 0);
+    rsrcd::write_u32be(data + 8, 0x49434F4E);
+    rsrcd::write_u16be(data + 12, 1);
+    rsrcd::write_u16be(data + 14, 0);
+    rsrcd::write_u16be(data + 16, 1000);
+    rsrcd::write_u16be(data + 18, 1);
+    rsrcd::write_u16be(data + 20, 1001);
+
+    rsrcd::finder::Bundle<4, 8> bundle;
+    auto r = rsrcd::finder::parse_bndl({data, sizeof(data)}, bundle);
+    CHECK_RESULT(r, "parse BNDL");
+    CHECK(bundle.owner_name == 0x4F574E52, "BNDL owner");
+    CHECK(bundle.type_count() == 1, "BNDL type count");
+    CHECK(bundle.type_at(0).resource_type == 0x49434F4E, "BNDL type");
+    CHECK(bundle.type_at(0).count() == 2, "BNDL ID count");
+    CHECK(bundle.type_at(0)[1].resource_id == 1001, "BNDL second resource ID");
+}
+
+static void test_parse_bndl_truncated() {
+    uint8_t data[21] = {};
+    rsrcd::write_u32be(data, 0x4F574E52);
+    rsrcd::write_u16be(data + 6, 0);
+    rsrcd::write_u32be(data + 8, 0x49434F4E);
+    rsrcd::write_u16be(data + 12, 1);
+
+    rsrcd::finder::Bundle<4, 8> bundle;
+    auto r = rsrcd::finder::parse_bndl({data, sizeof(data)}, bundle);
+    CHECK(!r, "truncated BNDL should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1572,6 +1645,10 @@ int main() {
     test_parse_cfrg_bad_version();
     test_parse_mbar();
     test_parse_mbar_truncated();
+    test_parse_alrt();
+    test_parse_fref();
+    test_parse_bndl();
+    test_parse_bndl_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

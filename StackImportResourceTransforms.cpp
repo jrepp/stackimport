@@ -384,6 +384,136 @@ void add_json_ui_rect(JsonObject& object, const rsrcd::ui::Rect& rect, JsonPoolA
 	object.AddMember("bounds", value, allocator);
 }
 
+auto emit_alrt_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed alert metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::finder::Alert alert{};
+	auto parse_result = rsrcd::finder::parse_alrt(resource.data, alert);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_ui_rect(doc, alert.bounds, allocator);
+	doc.AddMember("itemListId", alert.item_list_id, allocator);
+	doc.AddMember("stage4Flags", alert.stage_4_flags, allocator);
+	doc.AddMember("stage2Flags", alert.stage_2_flags, allocator);
+	doc.AddMember("hasAutoPosition", alert.has_auto_position, allocator);
+	if(alert.has_auto_position)
+		doc.AddMember("autoPosition", alert.auto_position, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_fref_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed file reference metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::finder::FileReference fref{};
+	auto parse_result = rsrcd::finder::parse_fref(resource.data, fref);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("fileType", fref.file_type, allocator);
+	doc.AddMember("fileTypeString", json_string(resource_type_string(fref.file_type), allocator), allocator);
+	doc.AddMember("localId", fref.local_id, allocator);
+	std::string name = mac_roman_from_bytes(fref.file_name.data, fref.file_name.size);
+	doc.AddMember("fileName", json_string(name, allocator), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_bndl_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed bundle metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::finder::Bundle<64, 256> bundle;
+	auto parse_result = rsrcd::finder::parse_bndl(resource.data, bundle);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(4096, &base_alloc);
+	JsonDocument doc(&pool, 4096, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("ownerName", bundle.owner_name, allocator);
+	doc.AddMember("ownerNameString", json_string(resource_type_string(bundle.owner_name), allocator), allocator);
+	doc.AddMember("ownerId", bundle.owner_id, allocator);
+
+	JsonValue types(rapidjson::kArrayType);
+	for(const auto& type : bundle)
+	{
+		JsonValue type_value(rapidjson::kObjectType);
+		type_value.AddMember("type", type.resource_type, allocator);
+		type_value.AddMember("typeString", json_string(resource_type_string(type.resource_type), allocator), allocator);
+		JsonValue ids(rapidjson::kArrayType);
+		for(const auto& id : type)
+		{
+			JsonValue id_value(rapidjson::kObjectType);
+			id_value.AddMember("localId", id.local_id, allocator);
+			id_value.AddMember("resourceId", id.resource_id, allocator);
+			ids.PushBack(id_value, allocator);
+		}
+		type_value.AddMember("ids", ids, allocator);
+		types.PushBack(type_value, allocator);
+	}
+	doc.AddMember("types", types, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1337,6 +1467,15 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "MBAR"))
 		return emit_mbar_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "ALRT"))
+		return emit_alrt_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "FREF"))
+		return emit_fref_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "BNDL"))
+		return emit_bndl_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

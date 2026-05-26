@@ -830,6 +830,54 @@ void	RunTests()
 	assert(mbarOutput.last_json.find("128") != std::string::npos);
 	assert(mbarOutput.last_json.find("129") != std::string::npos);
 
+	std::vector<uint8_t> alrtPayload;
+	append_u16be(alrtPayload, 1);
+	append_u16be(alrtPayload, 2);
+	append_u16be(alrtPayload, 101);
+	append_u16be(alrtPayload, 202);
+	append_u16be(alrtPayload, 300);
+	alrtPayload.push_back(0x12);
+	alrtPayload.push_back(0x34);
+	append_u16be(alrtPayload, 0x0A00);
+	const std::vector<uint8_t> alrtFork = make_single_resource_fork("ALRT", 1, alrtPayload);
+	CountingResourceOutput alrtOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{alrtFork.data(), alrtFork.size()}, alrtOutput));
+	assert(alrtOutput.native_count == 1);
+	assert(alrtOutput.json_count == 1);
+	assert(alrtOutput.last_json.find("\"itemListId\": 300") != std::string::npos);
+	assert(alrtOutput.last_json.find("\"autoPosition\": 2560") != std::string::npos);
+
+	std::vector<uint8_t> frefPayload;
+	append_u32be(frefPayload, 0x4150504C);
+	append_u16be(frefPayload, 42);
+	frefPayload.insert(frefPayload.end(), {4, 'A', 'p', 'p', 's'});
+	const std::vector<uint8_t> frefFork = make_single_resource_fork("FREF", 1, frefPayload);
+	CountingResourceOutput frefOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{frefFork.data(), frefFork.size()}, frefOutput));
+	assert(frefOutput.native_count == 1);
+	assert(frefOutput.json_count == 1);
+	assert(frefOutput.last_json.find("\"fileTypeString\": \"APPL\"") != std::string::npos);
+	assert(frefOutput.last_json.find("\"fileName\": \"Apps\"") != std::string::npos);
+
+	std::vector<uint8_t> bndlPayload;
+	append_u32be(bndlPayload, 0x4F574E52);
+	append_u16be(bndlPayload, 128);
+	append_u16be(bndlPayload, 0);
+	append_u32be(bndlPayload, 0x49434F4E);
+	append_u16be(bndlPayload, 1);
+	append_u16be(bndlPayload, 0);
+	append_u16be(bndlPayload, 1000);
+	append_u16be(bndlPayload, 1);
+	append_u16be(bndlPayload, 1001);
+	const std::vector<uint8_t> bndlFork = make_single_resource_fork("BNDL", 1, bndlPayload);
+	CountingResourceOutput bndlOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{bndlFork.data(), bndlFork.size()}, bndlOutput));
+	assert(bndlOutput.native_count == 1);
+	assert(bndlOutput.json_count == 1);
+	assert(bndlOutput.last_json.find("\"ownerNameString\": \"OWNR\"") != std::string::npos);
+	assert(bndlOutput.last_json.find("\"typeString\": \"ICON\"") != std::string::npos);
+	assert(bndlOutput.last_json.find("\"resourceId\": 1001") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

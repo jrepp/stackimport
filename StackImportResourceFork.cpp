@@ -185,7 +185,9 @@ public:
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
 			resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
 			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") ||
-			resource_type_is(res_, "DITL") || resource_type_is(res_, "MBAR"))
+			resource_type_is(res_, "DITL") || resource_type_is(res_, "MBAR") ||
+			resource_type_is(res_, "ALRT") || resource_type_is(res_, "FREF") ||
+			resource_type_is(res_, "BNDL"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
 			summary_.status = "parse_failed";
@@ -418,6 +420,12 @@ private:
 			snprintf(fname, sizeof(fname), "cfrg_%d.json", res_.id);
 		else if(resource_type_is(res_, "MBAR"))
 			snprintf(fname, sizeof(fname), "MBAR_%d.json", res_.id);
+		else if(resource_type_is(res_, "ALRT"))
+			snprintf(fname, sizeof(fname), "ALRT_%d.json", res_.id);
+		else if(resource_type_is(res_, "FREF"))
+			snprintf(fname, sizeof(fname), "FREF_%d.json", res_.id);
+		else if(resource_type_is(res_, "BNDL"))
+			snprintf(fname, sizeof(fname), "BNDL_%d.json", res_.id);
 		else
 			return;
 
@@ -724,7 +732,9 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "CNTL", 4) == 0 || std::memcmp(res.type.data, "DLOG", 4) == 0 ||
 			std::memcmp(res.type.data, "WIND", 4) == 0 || std::memcmp(res.type.data, "MENU", 4) == 0 ||
-			std::memcmp(res.type.data, "DITL", 4) == 0 || std::memcmp(res.type.data, "MBAR", 4) == 0)
+			std::memcmp(res.type.data, "DITL", 4) == 0 || std::memcmp(res.type.data, "MBAR", 4) == 0 ||
+			std::memcmp(res.type.data, "ALRT", 4) == 0 || std::memcmp(res.type.data, "FREF", 4) == 0 ||
+			std::memcmp(res.type.data, "BNDL", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
