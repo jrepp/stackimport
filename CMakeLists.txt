@@ -246,6 +246,18 @@ endif()
 
 if(STACKIMPORT_BUILD_TESTS)
     add_test(NAME stackimport-tests COMMAND stackimport-tests)
+    find_program(STACKIMPORT_PKG_CONFIG_EXE NAMES pkg-config)
+    if(STACKIMPORT_PKG_CONFIG_EXE)
+        add_test(
+            NAME stackimport-install-pkg-config-smoke
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSTACKIMPORT_BUILD_DIR=${CMAKE_BINARY_DIR}"
+                "-DSTACKIMPORT_C_COMPILER=${CMAKE_C_COMPILER}"
+                "-DSTACKIMPORT_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+                "-DPKG_CONFIG_EXECUTABLE=${STACKIMPORT_PKG_CONFIG_EXE}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/InstallPkgConfigSmokeTest.cmake"
+        )
+    endif()
 endif()
 
 add_custom_target(import-stacks
