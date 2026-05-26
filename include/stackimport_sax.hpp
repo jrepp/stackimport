@@ -252,6 +252,31 @@ inline void swap_resource_bgra_to_rgba(uint8_t* data, size_t pixel_count) {
     }
 }
 
+inline auto make_native_resource_payload(const ResourceRef& ref, rsrcd::Bytes data) -> ResourcePayload {
+    ResourcePayload payload{};
+    payload.resource = ref;
+    payload.format = ResourcePayloadFormat::Native;
+    payload.data = data;
+    payload.media_type = "application/octet-stream";
+    payload.description = "native resource data";
+    return payload;
+}
+
+inline auto make_converted_resource_payload(
+        const ResourceRef& ref,
+        ResourcePayloadFormat format,
+        rsrcd::Bytes data,
+        const char* media_type,
+        const char* description) -> ResourcePayload {
+    ResourcePayload payload{};
+    payload.resource = ref;
+    payload.format = format;
+    payload.data = data;
+    payload.media_type = media_type;
+    payload.description = description;
+    return payload;
+}
+
 inline auto emit_resource_payload(IResourceOutput& output, ResourcePayload payload) -> bool {
     ResourcePayload descriptor = payload;
     descriptor.data.data = nullptr;
@@ -259,6 +284,13 @@ inline auto emit_resource_payload(IResourceOutput& output, ResourcePayload paylo
         return true;
     }
     return output.on_resource_payload(payload);
+}
+
+inline auto emit_resource_payload(IResourceOutput* output, ResourcePayload payload) -> bool {
+    if (output == nullptr) {
+        return true;
+    }
+    return emit_resource_payload(*output, payload);
 }
 
 class ResourceForkParser {
@@ -290,12 +322,7 @@ public:
 
             const ResourceRef ref = resource_ref_from_resref(res);
             if (options.emit_native) {
-                ResourcePayload native{};
-                native.resource = ref;
-                native.format = ResourcePayloadFormat::Native;
-                native.data = res.data;
-                native.media_type = "application/octet-stream";
-                native.description = "native resource data";
+                ResourcePayload native = make_native_resource_payload(ref, res.data);
                 if (!emit_resource_payload(output, native)) {
                     break;
                 }
@@ -306,15 +333,15 @@ public:
             }
 
             if (res.type.size == 4 && std::memcmp(res.type.data, "ICON", 4) == 0 && res.data.size == 128) {
-                ResourcePayload descriptor{};
-                descriptor.resource = ref;
-                descriptor.format = ResourcePayloadFormat::Rgba32;
-                descriptor.data = rsrcd::Bytes{nullptr, 32u * 32u * 4u};
+                ResourcePayload descriptor = make_converted_resource_payload(
+                    ref,
+                    ResourcePayloadFormat::Rgba32,
+                    rsrcd::Bytes{nullptr, 32u * 32u * 4u},
+                    "image/x-rgba32",
+                    "decoded 32x32 ICON pixels");
                 descriptor.width = 32;
                 descriptor.height = 32;
                 descriptor.row_bytes = 32 * 4;
-                descriptor.media_type = "image/x-rgba32";
-                descriptor.description = "decoded 32x32 ICON pixels";
                 if (output.wants_resource_payload(descriptor)) {
                     uint8_t rgba[32 * 32 * 4];
                     rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
@@ -327,15 +354,15 @@ public:
                     }
                 }
             } else if (res.type.size == 4 && std::memcmp(res.type.data, "CURS", 4) == 0 && res.data.size >= 68) {
-                ResourcePayload descriptor{};
-                descriptor.resource = ref;
-                descriptor.format = ResourcePayloadFormat::Rgba32;
-                descriptor.data = rsrcd::Bytes{nullptr, 16u * 16u * 4u};
+                ResourcePayload descriptor = make_converted_resource_payload(
+                    ref,
+                    ResourcePayloadFormat::Rgba32,
+                    rsrcd::Bytes{nullptr, 16u * 16u * 4u},
+                    "image/x-rgba32",
+                    "decoded 16x16 CURS pixels");
                 descriptor.width = 16;
                 descriptor.height = 16;
                 descriptor.row_bytes = 16 * 4;
-                descriptor.media_type = "image/x-rgba32";
-                descriptor.description = "decoded 16x16 CURS pixels";
                 if (output.wants_resource_payload(descriptor)) {
                     uint8_t rgba[16 * 16 * 4];
                     rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
@@ -358,16 +385,16 @@ public:
                     if (pat.size != 8) {
                         continue;
                     }
-                    ResourcePayload descriptor{};
-                    descriptor.resource = ref;
-                    descriptor.format = ResourcePayloadFormat::Rgba32;
-                    descriptor.data = rsrcd::Bytes{nullptr, 8u * 8u * 4u};
+                    ResourcePayload descriptor = make_converted_resource_payload(
+                        ref,
+                        ResourcePayloadFormat::Rgba32,
+                        rsrcd::Bytes{nullptr, 8u * 8u * 4u},
+                        "image/x-rgba32",
+                        "decoded 8x8 PAT# pattern pixels");
                     descriptor.variant_index = static_cast<uint32_t>(pi);
                     descriptor.width = 8;
                     descriptor.height = 8;
                     descriptor.row_bytes = 8 * 4;
-                    descriptor.media_type = "image/x-rgba32";
-                    descriptor.description = "decoded 8x8 PAT# pattern pixels";
                     if (!output.wants_resource_payload(descriptor)) {
                         continue;
                     }

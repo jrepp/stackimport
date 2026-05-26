@@ -167,6 +167,9 @@ when parser behavior changes, updates to the relevant format documentation under
   and converted payload metadata, and package output now emits converted ICON,
   CURS, PAT#, `snd `, PLTE, 68K, and PowerPC artifacts from
   `StackImportResourceFork.cpp`.
+- Resource reference conversion, native/converted payload construction, and
+  callback filtering/delivery now share helpers between the SAX walker and
+  package exporter.
 - Still open: conversion logic is duplicated between
   `include/stackimport_sax.hpp` and `StackImportResourceFork.cpp`; the SAX path
   only covers a subset of converted resource families.

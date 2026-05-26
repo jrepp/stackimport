@@ -187,56 +187,6 @@ std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
 	return result;
 }
 
-stackimport::ResourceRef resource_ref_from_rsrcd(const rsrcd::ResRef& res)
-{
-	stackimport::ResourceRef ref{};
-	ref.type = rsrcd::FourCC::from_bytes(res.type.data);
-	ref.id = res.id;
-	ref.name = res.name;
-	ref.flags = res.flags;
-	ref.order = res.order;
-	ref.native_size = res.data.size;
-	return ref;
-}
-
-bool emit_resource_payload(stackimport::IResourceOutput* output, const stackimport::ResourcePayload& payload)
-{
-	if(!output)
-		return true;
-	stackimport::ResourcePayload descriptor = payload;
-	descriptor.data.data = nullptr;
-	if(!output->wants_resource_payload(descriptor))
-		return true;
-	return output->on_resource_payload(payload);
-}
-
-stackimport::ResourcePayload native_resource_payload(const stackimport::ResourceRef& ref, rsrcd::Bytes data)
-{
-	stackimport::ResourcePayload payload{};
-	payload.resource = ref;
-	payload.format = stackimport::ResourcePayloadFormat::Native;
-	payload.data = data;
-	payload.media_type = "application/octet-stream";
-	payload.description = "native resource data";
-	return payload;
-}
-
-stackimport::ResourcePayload converted_resource_payload(
-	const stackimport::ResourceRef& ref,
-	stackimport::ResourcePayloadFormat format,
-	rsrcd::Bytes data,
-	const char* mediaType,
-	const char* description)
-{
-	stackimport::ResourcePayload payload{};
-	payload.resource = ref;
-	payload.format = format;
-	payload.data = data;
-	payload.media_type = mediaType;
-	payload.description = description;
-	return payload;
-}
-
 } // namespace
 
 bool stackimport_load_resource_fork(
@@ -309,8 +259,8 @@ bool stackimport_load_resource_fork(
 		if(!res.name.empty() && res.name.data != nullptr)
 			summary.name.assign(reinterpret_cast<const char*>(res.name.data), res.name.size);
 
-		const stackimport::ResourceRef resourceRef = resource_ref_from_rsrcd(res);
-		if(!resourceStreamingStopped && !emit_resource_payload(resourceOutput, native_resource_payload(resourceRef, res.data)))
+		const stackimport::ResourceRef resourceRef = stackimport::resource_ref_from_resref(res);
+		if(!resourceStreamingStopped && !stackimport::emit_resource_payload(resourceOutput, stackimport::make_native_resource_payload(resourceRef, res.data)))
 			resourceStreamingStopped = true;
 
 		const bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
@@ -338,11 +288,11 @@ bool stackimport_load_resource_fork(
 					swap_bgra_to_rgba(bgra, 32 * 32);
 					if(!resourceStreamingStopped)
 					{
-						auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 32x32 ICON pixels");
+						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 32x32 ICON pixels");
 						payload.width = 32;
 						payload.height = 32;
 						payload.row_bytes = 32 * 4;
-						if(!emit_resource_payload(resourceOutput, payload))
+						if(!stackimport::emit_resource_payload(resourceOutput, payload))
 							resourceStreamingStopped = true;
 					}
 					char fname[64];
@@ -372,13 +322,13 @@ bool stackimport_load_resource_fork(
 					swap_bgra_to_rgba(bgra, 16 * 16);
 					if(!resourceStreamingStopped)
 					{
-						auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 16x16 CURS pixels");
+						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 16x16 CURS pixels");
 						payload.width = 16;
 						payload.height = 16;
 						payload.row_bytes = 16 * 4;
 						payload.hotspot_x = hot_x;
 						payload.hotspot_y = hot_y;
-						if(!emit_resource_payload(resourceOutput, payload))
+						if(!stackimport::emit_resource_payload(resourceOutput, payload))
 							resourceStreamingStopped = true;
 					}
 					char fname[64];
@@ -411,12 +361,12 @@ bool stackimport_load_resource_fork(
 					swap_bgra_to_rgba(bgra, 8 * 8);
 					if(!resourceStreamingStopped)
 					{
-						auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 8x8 PAT# pattern pixels");
+						auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Rgba32, rsrcd::Bytes{bgra, sizeof(bgra)}, "image/x-rgba32", "decoded 8x8 PAT# pattern pixels");
 						payload.variant_index = static_cast<uint32_t>(pi);
 						payload.width = 8;
 						payload.height = 8;
 						payload.row_bytes = 8 * 4;
-						if(!emit_resource_payload(resourceOutput, payload))
+						if(!stackimport::emit_resource_payload(resourceOutput, payload))
 							resourceStreamingStopped = true;
 					}
 					char fname[64];
@@ -441,8 +391,8 @@ bool stackimport_load_resource_fork(
 			{
 				if(!resourceStreamingStopped)
 				{
-					auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Binary, rsrcd::Bytes{wavData.data(), wavData.size()}, "audio/wav", "converted 'snd ' resource audio");
-					if(!emit_resource_payload(resourceOutput, payload))
+					auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::Binary, rsrcd::Bytes{wavData.data(), wavData.size()}, "audio/wav", "converted 'snd ' resource audio");
+					if(!stackimport::emit_resource_payload(resourceOutput, payload))
 						resourceStreamingStopped = true;
 				}
 				const std::string soundsDir = output_path(basePath, "sounds");
@@ -511,8 +461,8 @@ bool stackimport_load_resource_fork(
 				doc.Accept(writer);
 				if(!resourceStreamingStopped)
 				{
-					auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::JsonUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(jsonBuffer.GetString()), jsonBuffer.GetSize()}, "application/json", "parsed PLTE palette metadata");
-					if(!emit_resource_payload(resourceOutput, payload))
+					auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::JsonUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(jsonBuffer.GetString()), jsonBuffer.GetSize()}, "application/json", "parsed PLTE palette metadata");
+					if(!stackimport::emit_resource_payload(resourceOutput, payload))
 						resourceStreamingStopped = true;
 				}
 
@@ -542,8 +492,8 @@ bool stackimport_load_resource_fork(
 		{
 			if(!resourceStreamingStopped)
 			{
-				auto payload = converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::TextUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()}, "text/x-asm; charset=utf-8", is68K ? "Mac 68K disassembly" : "PowerPC disassembly");
-				if(!emit_resource_payload(resourceOutput, payload))
+				auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::TextUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()}, "text/x-asm; charset=utf-8", is68K ? "Mac 68K disassembly" : "PowerPC disassembly");
+				if(!stackimport::emit_resource_payload(resourceOutput, payload))
 					resourceStreamingStopped = true;
 			}
 			const std::string typeAndArchitecture = summary.type + "_" + summary.architecture;
