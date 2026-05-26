@@ -1009,6 +1009,43 @@ auto emit_drvr_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_dcmp_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed decompressor metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::dcmp::Decompressor decompressor{};
+	auto parse_result = rsrcd::dcmp::parse(resource.data, decompressor);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(512, &base_alloc);
+	JsonDocument doc(&pool, 512, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("initLabel", decompressor.init_label, allocator);
+	doc.AddMember("decompressLabel", decompressor.decompress_label, allocator);
+	doc.AddMember("exitLabel", decompressor.exit_label, allocator);
+	doc.AddMember("pcOffset", decompressor.pc_offset, allocator);
+	doc.AddMember("codeSize", static_cast<uint64_t>(decompressor.code.size), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -2004,6 +2041,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "DRVR"))
 		return emit_drvr_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "dcmp"))
+		return emit_dcmp_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

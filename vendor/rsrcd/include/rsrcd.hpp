@@ -2404,6 +2404,40 @@ inline auto parse(Bytes data, Driver& driver) -> Result {
 } // namespace drvr
 
 // ============================================================================
+// Resource decompressor metadata (dcmp)
+// ============================================================================
+
+namespace dcmp {
+
+struct Decompressor {
+    int32_t init_label;
+    int32_t decompress_label;
+    int32_t exit_label;
+    uint32_t pc_offset;
+    Bytes code;
+};
+
+inline auto parse(Bytes data, Decompressor& decompressor) -> Result {
+    if (data.size >= 8 && data.data[0] == 0x60 && read_u32be(data.data + 4) == 0x64636D70u) {
+        decompressor.init_label = -1;
+        decompressor.decompress_label = 0;
+        decompressor.exit_label = -1;
+        decompressor.pc_offset = 0;
+        decompressor.code = data;
+        return Result::ok();
+    }
+    if (data.size < 6) return Error::unexpected_end();
+    decompressor.init_label = read_u16be(data.data);
+    decompressor.decompress_label = read_u16be(data.data + 2);
+    decompressor.exit_label = read_u16be(data.data + 4);
+    decompressor.pc_offset = 6;
+    decompressor.code = data.slice(6, data.size - 6);
+    return Result::ok();
+}
+
+} // namespace dcmp
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

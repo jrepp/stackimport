@@ -1264,6 +1264,36 @@ static void test_parse_drvr_bad_label() {
     CHECK(!r, "DRVR bad label should fail");
 }
 
+static void test_parse_dcmp_labels() {
+    uint8_t data[8] = {};
+    rsrcd::write_u16be(data, 10);
+    rsrcd::write_u16be(data + 2, 12);
+    rsrcd::write_u16be(data + 4, 14);
+    data[6] = 0x4E;
+    data[7] = 0x75;
+
+    rsrcd::dcmp::Decompressor dcmp{};
+    auto r = rsrcd::dcmp::parse({data, sizeof(data)}, dcmp);
+    CHECK_RESULT(r, "parse dcmp labels");
+    CHECK(dcmp.init_label == 10, "dcmp init label");
+    CHECK(dcmp.decompress_label == 12, "dcmp decompress label");
+    CHECK(dcmp.exit_label == 14, "dcmp exit label");
+    CHECK(dcmp.pc_offset == 6, "dcmp pc offset");
+    CHECK(dcmp.code.size == 2, "dcmp code size");
+}
+
+static void test_parse_dcmp_system() {
+    uint8_t data[8] = {0x60, 0, 0, 0, 'd', 'c', 'm', 'p'};
+
+    rsrcd::dcmp::Decompressor dcmp{};
+    auto r = rsrcd::dcmp::parse({data, sizeof(data)}, dcmp);
+    CHECK_RESULT(r, "parse system dcmp");
+    CHECK(dcmp.init_label == -1, "system dcmp init label");
+    CHECK(dcmp.decompress_label == 0, "system dcmp decompress label");
+    CHECK(dcmp.pc_offset == 0, "system dcmp pc offset");
+    CHECK(dcmp.code.size == 8, "system dcmp code size");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -2009,6 +2039,8 @@ int main() {
     test_parse_code_segment_far();
     test_parse_drvr();
     test_parse_drvr_bad_label();
+    test_parse_dcmp_labels();
+    test_parse_dcmp_system();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

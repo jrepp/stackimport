@@ -37,6 +37,7 @@ where new support should live. The target architecture is:
 | `RSSC` | Typed code-resource metadata parse to JSON transform and package artifact | `rsrcd::rssc`, `StackImportResourceTransforms.cpp` | RSSC signature, export offsets, and code size. Disassembly remains adapter/code-resource work. |
 | `CODE` | Typed code-resource metadata parse to JSON transform and package artifact | `rsrcd::code_resource`, `StackImportResourceTransforms.cpp` | CODE 0 jump table and near/far segment headers. Disassembly remains adapter/code-resource work. |
 | `DRVR` | Typed driver metadata parse to JSON transform and package artifact | `rsrcd::drvr`, `StackImportResourceTransforms.cpp` | Driver flags, event mask, entry labels, name, and code size. Disassembly remains adapter/code-resource work. |
+| `dcmp` | Typed decompressor metadata parse to JSON transform and package artifact | `rsrcd::dcmp`, `StackImportResourceTransforms.cpp` | Entry labels, PC offset, and code size. Decompression/disassembly remains adapter/code-resource work. |
 | `finf` | Typed font metadata parse to JSON transform and package artifact | `rsrcd::finf`, `StackImportResourceTransforms.cpp` | Font id, style flags, and size triples. |
 | `CNTL` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Control bounds, state, proc id, refcon, and title. |
 | `DLOG` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Dialog bounds, visibility, item list id, title, and auto-position. |
@@ -67,7 +68,7 @@ interface is clear.
 | Metadata/templates | `TMPL` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. `vers`, `SIZE`, `cfrg`, `ROv#`, and `RSSC` metadata now live in StackImport core. |
 | UI/layout | None currently listed | typed decoders and exporters | Fold fixed-record parsers into rsrcd after corpus validation. `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, and `BNDL` now live in StackImport core. |
 | Fonts | `FONT`, `NFNT`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. `finf` now lives in StackImport core. |
-| Code | `dcmp`, `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. `CODE` and `DRVR` metadata now live in StackImport core. |
+| Code | `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. `CODE`, `DRVR`, and `dcmp` metadata now live in StackImport core. |
 | Audio/music | `csnd`, `esnd`, `ESnd`, `Ysnd`, `SMSD`, `SOUN`, `SONG`, `INST`, `Tune`, MIDI-like resources | audio/music decoders and exporters | Adapter first for codecs; fold metadata-only parsing into rsrcd. |
 | Template-backed metadata | Other system templates | system-template description | Fold small bounded templates into rsrcd when they appear in corpus output paths. `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, and `LAYO` now live in StackImport core. |
 

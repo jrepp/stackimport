@@ -1070,6 +1070,20 @@ void	RunTests()
 	assert(drvrOutput.last_json.find("\"codeStartOffset\": 24") != std::string::npos);
 	assert(drvrOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
 
+	std::vector<uint8_t> dcmpPayload;
+	append_u16be(dcmpPayload, 10);
+	append_u16be(dcmpPayload, 12);
+	append_u16be(dcmpPayload, 14);
+	dcmpPayload.insert(dcmpPayload.end(), {0x4E, 0x75});
+	const std::vector<uint8_t> dcmpFork = make_single_resource_fork("dcmp", 1, dcmpPayload);
+	CountingResourceOutput dcmpOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{dcmpFork.data(), dcmpFork.size()}, dcmpOutput));
+	assert(dcmpOutput.native_count == 1);
+	assert(dcmpOutput.json_count == 1);
+	assert(dcmpOutput.last_json.find("\"initLabel\": 10") != std::string::npos);
+	assert(dcmpOutput.last_json.find("\"pcOffset\": 6") != std::string::npos);
+	assert(dcmpOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);
