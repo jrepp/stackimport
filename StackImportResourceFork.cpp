@@ -125,6 +125,11 @@ bool resource_type_is_indexed_icon(const rsrcd::ResRef& res)
 		resource_type_is(res, "ics4") || resource_type_is(res, "ics8");
 }
 
+bool resource_type_is_monochrome_icon_list(const rsrcd::ResRef& res)
+{
+	return resource_type_is(res, "icm#") || resource_type_is(res, "ics#");
+}
+
 class PackageBuiltinTransformOutput final : public stackimport::IResourceOutput {
 public:
 	PackageBuiltinTransformOutput(
@@ -295,6 +300,22 @@ private:
 				static_cast<char>(res_.type.data[2]),
 				static_cast<char>(res_.type.data[3]),
 				res_.id);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+				exportedCount_++;
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
+		if(resource_type_is_monochrome_icon_list(res_))
+		{
+			snprintf(fname, sizeof(fname), "%c%c%c%c_%d_%02u.png",
+				static_cast<char>(res_.type.data[0]),
+				static_cast<char>(res_.type.data[1]),
+				static_cast<char>(res_.type.data[2]),
+				static_cast<char>(res_.type.data[3]),
+				res_.id,
+				static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 				exportedCount_++;
 			else
@@ -612,6 +633,15 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(resource_type_is_indexed_icon(res))
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			if(transformOutput.exported_count() > 0)
+				summary.status = "exported";
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(resource_type_is_monochrome_icon_list(res))
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

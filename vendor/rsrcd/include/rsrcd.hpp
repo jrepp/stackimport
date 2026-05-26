@@ -658,6 +658,48 @@ inline auto decode_icon_8bit(Bytes data, int w, int h, MutableBytes out) -> Resu
     return Result::ok();
 }
 
+inline auto count_icon_1bit_images(Bytes data, int w, int h, size_t& count) -> Result {
+    if ((w <= 0) || (h <= 0) || (w & 7)) return Error::invalid_data("invalid 1-bit icon dimensions");
+    const size_t image_bytes = static_cast<size_t>(w / 8) * static_cast<size_t>(h);
+    if (image_bytes == 0 || (data.size % image_bytes) != 0) {
+        return Error::invalid_data("incorrect 1-bit icon list data size");
+    }
+    count = data.size / image_bytes;
+    return Result::ok();
+}
+
+inline auto decode_icon_1bit_list_image(Bytes data, int w, int h, size_t image_index, MutableBytes out) -> Result {
+    size_t count = 0;
+    auto count_result = count_icon_1bit_images(data, w, h, count);
+    if (!count_result) return count_result;
+    if (image_index >= count) return Error::bounds();
+    const size_t image_bytes = static_cast<size_t>(w / 8) * static_cast<size_t>(h);
+    const size_t bgra_size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    if (out.size < bgra_size) return Error::bounds();
+
+    uint8_t opaque_mask[128];
+    for (auto& b : opaque_mask) b = 0xFF;
+    Bytes bitmap{data.data + (image_index * image_bytes), image_bytes};
+    Bytes mask{opaque_mask, image_bytes};
+    decode_1bit(bitmap, mask, w, h, out);
+    return Result::ok();
+}
+
+inline auto decode_icon_1bit_masked_pair(Bytes data, int w, int h, MutableBytes out) -> Result {
+    size_t count = 0;
+    auto count_result = count_icon_1bit_images(data, w, h, count);
+    if (!count_result) return count_result;
+    if (count != 2) return Error::invalid_data("1-bit icon list is not a bitmap/mask pair");
+    const size_t image_bytes = static_cast<size_t>(w / 8) * static_cast<size_t>(h);
+    const size_t bgra_size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    if (out.size < bgra_size) return Error::bounds();
+
+    Bytes bitmap{data.data, image_bytes};
+    Bytes mask{data.data + image_bytes, image_bytes};
+    decode_1bit(bitmap, mask, w, h, out);
+    return Result::ok();
+}
+
 // Decode plain ICON resource (128 bytes, 32x32 1-bit, no mask).
 // out must be 32*32*4 = 4096 bytes.
 inline auto decode_icon_bw(Bytes data, MutableBytes out) -> Result {

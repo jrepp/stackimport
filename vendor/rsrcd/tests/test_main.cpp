@@ -747,6 +747,48 @@ static void test_decode_icon_8bit_bad_size() {
     CHECK(!r, "8-bit icon bad size should fail");
 }
 
+static void test_decode_icon_1bit_list_image() {
+    uint8_t data[32] = {};
+    data[0] = 0x80;
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    size_t count = 0;
+    auto count_result = rsrcd::img::count_icon_1bit_images({data, sizeof(data)}, 16, 16, count);
+    CHECK_RESULT(count_result, "count 1-bit icon list");
+    CHECK(count == 1, "1-bit icon list count");
+
+    auto r = rsrcd::img::decode_icon_1bit_list_image({data, sizeof(data)}, 16, 16, 0, out);
+    CHECK_RESULT(r, "decode 1-bit icon list image");
+    CHECK(bgra[0] == 0x00, "1-bit icon list first pixel black");
+    CHECK(bgra[3] == 0xFF, "1-bit icon list first pixel opaque");
+    CHECK(bgra[4] == 0xFF, "1-bit icon list second pixel white");
+    CHECK(bgra[7] == 0xFF, "1-bit icon list second pixel opaque");
+}
+
+static void test_decode_icon_1bit_masked_pair() {
+    uint8_t data[64] = {};
+    data[0] = 0x80;
+    data[32] = 0x80;
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_icon_1bit_masked_pair({data, sizeof(data)}, 16, 16, out);
+    CHECK_RESULT(r, "decode 1-bit icon bitmap/mask pair");
+    CHECK(bgra[0] == 0x00, "masked pair first pixel black");
+    CHECK(bgra[3] == 0xFF, "masked pair first pixel opaque");
+    CHECK(bgra[4] == 0xFF, "masked pair second pixel white");
+    CHECK(bgra[7] == 0x00, "masked pair second pixel transparent");
+}
+
+static void test_decode_icon_1bit_list_bad_size() {
+    uint8_t data[31] = {};
+    size_t count = 0;
+
+    auto r = rsrcd::img::count_icon_1bit_images({data, sizeof(data)}, 16, 16, count);
+    CHECK(!r, "1-bit icon list bad size should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1458,6 +1500,9 @@ int main() {
     test_decode_icon_8bit();
     test_decode_icon_4bit_bad_size();
     test_decode_icon_8bit_bad_size();
+    test_decode_icon_1bit_list_image();
+    test_decode_icon_1bit_masked_pair();
+    test_decode_icon_1bit_list_bad_size();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

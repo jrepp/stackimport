@@ -629,6 +629,32 @@ void	RunTests()
 		assert(indexedOutput.last_payload_size == static_cast<size_t>(c.width) * c.height * 4u);
 	}
 
+	struct MonoIconCase
+	{
+		const char* type;
+		uint16_t width;
+		uint16_t height;
+	};
+	const MonoIconCase monoIconCases[] = {
+		{"icm#", 16, 12},
+		{"ics#", 16, 16},
+	};
+	for(const MonoIconCase& c : monoIconCases)
+	{
+		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height / 8u;
+		std::vector<uint8_t> monoPayload(bytesPerIcon * 2u);
+		monoPayload[0] = 0x80;
+		monoPayload[bytesPerIcon] = 0x80;
+		const std::vector<uint8_t> monoFork = make_single_resource_fork(c.type, 12, monoPayload);
+		CountingResourceOutput monoOutput;
+		assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{monoFork.data(), monoFork.size()}, monoOutput));
+		assert(monoOutput.native_count == 1);
+		assert(monoOutput.rgba_count == 1);
+		assert(monoOutput.last_width == c.width);
+		assert(monoOutput.last_height == c.height);
+		assert(monoOutput.last_payload_size == static_cast<size_t>(c.width) * c.height * 4u);
+	}
+
 	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
 	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);

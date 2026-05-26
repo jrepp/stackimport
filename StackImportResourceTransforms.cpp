@@ -50,6 +50,14 @@ struct IndexedIconSpec
 	const char* description;
 };
 
+struct MonochromeIconListSpec
+{
+	uint16_t width;
+	uint16_t height;
+	const char* image_description;
+	const char* composite_description;
+};
+
 auto indexed_icon_spec(const rsrcd::ResRef& resource, IndexedIconSpec& spec) -> bool
 {
 	if(resource_type_is(resource, "icl4"))
@@ -64,6 +72,27 @@ auto indexed_icon_spec(const rsrcd::ResRef& resource, IndexedIconSpec& spec) -> 
 		spec = {16, 16, 4, "decoded 16x16 4-bit small color icon pixels"};
 	else if(resource_type_is(resource, "ics8"))
 		spec = {16, 16, 8, "decoded 16x16 8-bit small color icon pixels"};
+	else
+		return false;
+	return true;
+}
+
+auto monochrome_icon_list_spec(const rsrcd::ResRef& resource, MonochromeIconListSpec& spec) -> bool
+{
+	if(resource_type_is(resource, "icm#"))
+		spec = {
+			16,
+			12,
+			"decoded 16x12 1-bit mini icon pixels",
+			"decoded 16x12 1-bit mini icon bitmap/mask pixels",
+		};
+	else if(resource_type_is(resource, "ics#"))
+		spec = {
+			16,
+			16,
+			"decoded 16x16 1-bit small icon pixels",
+			"decoded 16x16 1-bit small icon bitmap/mask pixels",
+		};
 	else
 		return false;
 	return true;
@@ -1083,6 +1112,66 @@ auto emit_builtin_resource_transforms(
 		swap_bgra_to_rgba(rgba, pixelCount);
 		descriptor.data = rsrcd::Bytes{rgba, pixelCount * 4u};
 		return output.on_resource_payload(descriptor);
+	}
+
+	MonochromeIconListSpec monoSpec{};
+	if(monochrome_icon_list_spec(resource, monoSpec))
+	{
+		size_t iconCount = 0;
+		rsrcd::Result countResult = rsrcd::img::count_icon_1bit_images(resource.data, monoSpec.width, monoSpec.height, iconCount);
+		if(!countResult)
+			return output.on_resource_error(ref, countResult.message());
+
+		const size_t pixelCount = static_cast<size_t>(monoSpec.width) * monoSpec.height;
+		if(iconCount == 2)
+		{
+			ResourcePayload descriptor = make_converted_resource_payload(
+				ref,
+				ResourcePayloadFormat::Rgba32,
+				rsrcd::Bytes{nullptr, pixelCount * 4u},
+				"image/x-rgba32",
+				monoSpec.composite_description);
+			descriptor.width = monoSpec.width;
+			descriptor.height = monoSpec.height;
+			descriptor.row_bytes = monoSpec.width * 4;
+			if(!output.wants_resource_payload(descriptor))
+				return true;
+
+			uint8_t rgba[16 * 16 * 4];
+			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+			rsrcd::Result decodeResult = rsrcd::img::decode_icon_1bit_masked_pair(resource.data, monoSpec.width, monoSpec.height, dst);
+			if(!decodeResult)
+				return output.on_resource_error(ref, decodeResult.message());
+			swap_bgra_to_rgba(rgba, pixelCount);
+			descriptor.data = rsrcd::Bytes{rgba, pixelCount * 4u};
+			return output.on_resource_payload(descriptor);
+		}
+
+		for(size_t ii = 0; ii < iconCount; ++ii)
+		{
+			ResourcePayload descriptor = make_converted_resource_payload(
+				ref,
+				ResourcePayloadFormat::Rgba32,
+				rsrcd::Bytes{nullptr, pixelCount * 4u},
+				"image/x-rgba32",
+				monoSpec.image_description);
+			descriptor.variant_index = static_cast<uint32_t>(ii);
+			descriptor.width = monoSpec.width;
+			descriptor.height = monoSpec.height;
+			descriptor.row_bytes = monoSpec.width * 4;
+			if(!output.wants_resource_payload(descriptor))
+				continue;
+
+			uint8_t rgba[16 * 16 * 4];
+			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+			rsrcd::Result decodeResult = rsrcd::img::decode_icon_1bit_list_image(resource.data, monoSpec.width, monoSpec.height, ii, dst);
+			if(!decodeResult)
+				return output.on_resource_error(ref, decodeResult.message());
+			swap_bgra_to_rgba(rgba, pixelCount);
+			descriptor.data = rsrcd::Bytes{rgba, pixelCount * 4u};
+			if(!output.on_resource_payload(descriptor))
+				return false;
+		}
 	}
 
 	if(resource_type_is(resource, "PLTE"))

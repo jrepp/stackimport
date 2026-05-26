@@ -203,6 +203,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - Indexed icon bitmaps `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, and `ics8` now
   use rsrcd bounded image decoding and shared RGBA transforms, with PNG package
   artifacts. Parallel mask composition remains future event-stream work.
+- Monochrome icon lists `icm#` and `ics#` now use rsrcd bounded decoding and
+  shared RGBA transforms, including bitmap/mask composition when exactly two
+  images are present.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -259,6 +262,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for indexed icon bitmaps: decode `icl4`, `icl8`, `icm4`, `icm8`, `ics4`,
   and `ics8` through rsrcd image helpers and route package PNG artifact writing
   through the shared transform payload.
+- Done for monochrome icon lists: decode `icm#` and `ics#` through rsrcd image
+  helpers and route package PNG artifact writing through the shared transform
+  payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -318,10 +324,10 @@ all consumers listed in the lateral audit above have been updated and tested.
 
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
-  `SICN`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`, `cctb`, `dctb`,
-  `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`, `TEXT`, `TwCS`,
-  `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `PICT`,
-  `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`,
+  `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`,
+  `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`, `MENU`,
+  `DITL`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
