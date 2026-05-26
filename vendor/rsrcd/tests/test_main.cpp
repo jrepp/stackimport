@@ -1169,6 +1169,60 @@ static void test_ui_menu_capacity() {
     CHECK(!r, "MENU capacity overflow should fail");
 }
 
+static void test_ui_ditl() {
+    uint8_t data[64] = {};
+    rsrcd::write_u16be(data, 1);
+    size_t offset = 2;
+    offset += 4;
+    write_test_rect(data + offset);
+    offset += 8;
+    data[offset++] = 0x04;
+    data[offset++] = 2;
+    data[offset++] = 'O';
+    data[offset++] = 'K';
+    if (offset & 1u) {
+        data[offset++] = 0;
+    }
+    offset += 4;
+    write_test_rect(data + offset);
+    offset += 8;
+    data[offset++] = 0x20;
+    data[offset++] = 2;
+    rsrcd::write_u16be(data + offset, 128);
+    offset += 2;
+    if (offset & 1u) {
+        data[offset++] = 0;
+    }
+
+    rsrcd::ui::DialogItemList<4> items;
+    auto r = rsrcd::ui::parse_ditl({data, offset}, items);
+    CHECK_RESULT(r, "parse DITL");
+    CHECK(items.count() == 2, "DITL item count");
+    CHECK(items[0].kind == rsrcd::ui::DialogItemKind::Button, "DITL button kind");
+    CHECK(items[0].info.size == 2, "DITL button info");
+    CHECK(items[1].kind == rsrcd::ui::DialogItemKind::Icon, "DITL icon kind");
+    CHECK(items[1].has_resource_id, "DITL icon resource id");
+    CHECK(items[1].resource_id == 128, "DITL resource id value");
+}
+
+static void test_ui_ditl_bad_resource_id() {
+    uint8_t data[32] = {};
+    rsrcd::write_u16be(data, 0);
+    size_t offset = 2 + 4;
+    write_test_rect(data + offset);
+    offset += 8;
+    data[offset++] = 0x20;
+    data[offset++] = 1;
+    data[offset++] = 0;
+    if (offset & 1u) {
+        data[offset++] = 0;
+    }
+
+    rsrcd::ui::DialogItemList<4> items;
+    auto r = rsrcd::ui::parse_ditl({data, offset}, items);
+    CHECK(!r, "DITL bad resource id length should fail");
+}
+
 // ============================================================================
 // PAT# helpers
 // ============================================================================
@@ -1292,6 +1346,8 @@ int main() {
     test_ui_truncated();
     test_ui_menu();
     test_ui_menu_capacity();
+    test_ui_ditl();
+    test_ui_ditl_bad_resource_id();
     test_patlist_count();
     test_palette_lookup();
 

@@ -1145,6 +1145,50 @@ struct MenuItem {
     bool enabled;
 };
 
+enum class DialogItemKind : uint8_t {
+    Button,
+    Checkbox,
+    RadioButton,
+    ResourceControl,
+    HelpBalloon,
+    Text,
+    EditText,
+    Icon,
+    Picture,
+    Custom,
+    Unknown,
+};
+
+struct DialogItem {
+    Rect bounds;
+    bool enabled;
+    DialogItemKind kind;
+    uint8_t raw_type;
+    int16_t resource_id;
+    bool has_resource_id;
+    Bytes info;
+};
+
+template<size_t InlineCapacity = 64>
+class DialogItemList {
+public:
+    auto add(DialogItem item) -> Result {
+        if (count_ < InlineCapacity) {
+            items_[count_++] = item;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many dialog items");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const DialogItem& { return items_[i]; }
+    auto begin() const -> const DialogItem* { return items_; }
+    auto end() const -> const DialogItem* { return items_ + count_; }
+
+private:
+    DialogItem items_[InlineCapacity];
+    size_t count_ = 0;
+};
+
 template<size_t InlineCapacity = 64>
 class MenuItemList {
 public:
@@ -1232,6 +1276,90 @@ inline auto parse_wind(Bytes data, Window& window) -> Result {
     if (range_in_bounds(after_title, 2, data.size)) {
         window.has_auto_position = true;
         window.auto_position = read_u16be(data.data + after_title);
+    }
+    return Result::ok();
+}
+
+template<size_t Cap = 64>
+auto parse_ditl(Bytes data, DialogItemList<Cap>& items) -> Result {
+    if (data.size < 2) return Error::unexpected_end();
+    uint16_t raw_count = read_u16be(data.data);
+    size_t count = raw_count == 0xFFFFu ? 0 : static_cast<size_t>(raw_count) + 1u;
+    size_t offset = 2;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (!range_in_bounds(offset, 13, data.size)) return Error::unexpected_end();
+        offset += 4;
+
+        DialogItem item{};
+        if (auto r = parse_rect(data, offset, item.bounds); !r) return r;
+        offset += 8;
+
+        item.raw_type = data.data[offset++];
+        item.enabled = (item.raw_type & 0x80u) == 0;
+        item.has_resource_id = false;
+        item.resource_id = 0;
+
+        uint8_t kind = item.raw_type & 0x7Fu;
+        bool info_is_res_id = false;
+        switch (kind) {
+        case 0x00:
+            item.kind = DialogItemKind::Custom;
+            break;
+        case 0x01:
+            item.kind = DialogItemKind::HelpBalloon;
+            break;
+        case 0x04:
+            item.kind = DialogItemKind::Button;
+            break;
+        case 0x05:
+            item.kind = DialogItemKind::Checkbox;
+            break;
+        case 0x06:
+            item.kind = DialogItemKind::RadioButton;
+            break;
+        case 0x07:
+            item.kind = DialogItemKind::ResourceControl;
+            info_is_res_id = true;
+            break;
+        case 0x08:
+            item.kind = DialogItemKind::Text;
+            break;
+        case 0x10:
+            item.kind = DialogItemKind::EditText;
+            break;
+        case 0x20:
+            item.kind = DialogItemKind::Icon;
+            info_is_res_id = true;
+            break;
+        case 0x40:
+            item.kind = DialogItemKind::Picture;
+            info_is_res_id = true;
+            break;
+        default:
+            item.kind = DialogItemKind::Unknown;
+            break;
+        }
+
+        if (offset >= data.size) return Error::unexpected_end();
+        uint8_t info_len = data.data[offset++];
+        if (offset + static_cast<size_t>(info_len) > data.size) return Error::unexpected_end();
+        item.info = data.slice(offset, info_len);
+        offset += static_cast<size_t>(info_len);
+
+        if (info_is_res_id) {
+            if (item.info.size != 2) return Error::invalid_data("dialog item resource id length");
+            item.resource_id = read_i16be(item.info.data);
+            item.has_resource_id = true;
+            item.info = Bytes{};
+        }
+
+        if ((offset & 1u) != 0) {
+            if (offset >= data.size) return Error::unexpected_end();
+            ++offset;
+        }
+
+        if (auto r = items.add(item); !r) return r;
     }
     return Result::ok();
 }

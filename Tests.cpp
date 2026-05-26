@@ -781,6 +781,32 @@ void	RunTests()
 	assert(menuOutput.last_json.find("\"name\": \"Open\"") != std::string::npos);
 	assert(menuOutput.last_json.find("\"keyEquivalent\": 79") != std::string::npos);
 
+	std::vector<uint8_t> ditlPayload;
+	append_u16be(ditlPayload, 1);
+	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
+	append_u16be(ditlPayload, 1);
+	append_u16be(ditlPayload, 2);
+	append_u16be(ditlPayload, 30);
+	append_u16be(ditlPayload, 40);
+	ditlPayload.insert(ditlPayload.end(), {0x04, 2, 'O', 'K'});
+	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
+	append_u16be(ditlPayload, 1);
+	append_u16be(ditlPayload, 2);
+	append_u16be(ditlPayload, 30);
+	append_u16be(ditlPayload, 40);
+	ditlPayload.insert(ditlPayload.end(), {0x20, 2});
+	append_u16be(ditlPayload, 128);
+	if((ditlPayload.size() & 1u) != 0)
+		ditlPayload.push_back(0);
+	const std::vector<uint8_t> ditlFork = make_single_resource_fork("DITL", 128, ditlPayload);
+	CountingResourceOutput ditlOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{ditlFork.data(), ditlFork.size()}, ditlOutput));
+	assert(ditlOutput.native_count == 1);
+	assert(ditlOutput.json_count == 1);
+	assert(ditlOutput.last_json.find("\"kind\": \"button\"") != std::string::npos);
+	assert(ditlOutput.last_json.find("\"info\": \"OK\"") != std::string::npos);
+	assert(ditlOutput.last_json.find("\"resourceId\": 128") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;

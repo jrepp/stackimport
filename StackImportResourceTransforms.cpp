@@ -439,6 +439,82 @@ auto emit_menu_transform(
 	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
+const char* dialog_item_kind_name(rsrcd::ui::DialogItemKind kind)
+{
+	switch(kind)
+	{
+		case rsrcd::ui::DialogItemKind::Button:
+			return "button";
+		case rsrcd::ui::DialogItemKind::Checkbox:
+			return "checkbox";
+		case rsrcd::ui::DialogItemKind::RadioButton:
+			return "radioButton";
+		case rsrcd::ui::DialogItemKind::ResourceControl:
+			return "resourceControl";
+		case rsrcd::ui::DialogItemKind::HelpBalloon:
+			return "helpBalloon";
+		case rsrcd::ui::DialogItemKind::Text:
+			return "text";
+		case rsrcd::ui::DialogItemKind::EditText:
+			return "editText";
+		case rsrcd::ui::DialogItemKind::Icon:
+			return "icon";
+		case rsrcd::ui::DialogItemKind::Picture:
+			return "picture";
+		case rsrcd::ui::DialogItemKind::Custom:
+			return "custom";
+		case rsrcd::ui::DialogItemKind::Unknown:
+			return "unknown";
+	}
+	return "unknown";
+}
+
+auto emit_ditl_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed DITL dialog item metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::DialogItemList<128> dialog_items;
+	auto ditl_result = rsrcd::ui::parse_ditl(resource.data, dialog_items);
+	if(!ditl_result)
+		return output.on_resource_error(ref, ditl_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+
+	JsonValue items(rapidjson::kArrayType);
+	for(const rsrcd::ui::DialogItem& dialog_item : dialog_items)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		add_json_ui_rect(item, dialog_item.bounds, allocator);
+		item.AddMember("enabled", dialog_item.enabled, allocator);
+		item.AddMember("kind", JsonValue().SetString(dialog_item_kind_name(dialog_item.kind), allocator), allocator);
+		item.AddMember("rawType", dialog_item.raw_type, allocator);
+		if(dialog_item.has_resource_id)
+			item.AddMember("resourceId", dialog_item.resource_id, allocator);
+		else if(!dialog_item.info.empty())
+		{
+			std::string info = mac_roman_from_bytes(dialog_item.info.data, dialog_item.info.size);
+			item.AddMember("info", json_string(info, allocator), allocator);
+		}
+		items.PushBack(item, allocator);
+	}
+	doc.AddMember("items", items, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 auto emit_string_list_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -880,6 +956,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "MENU"))
 		return emit_menu_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "DITL"))
+		return emit_ditl_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

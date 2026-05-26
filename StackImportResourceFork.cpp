@@ -169,7 +169,7 @@ public:
 		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd") ||
 			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
 			resource_type_is(res_, "SIZE") || resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
-			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU"))
+			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") || resource_type_is(res_, "DITL"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
 			summary_.status = "parse_failed";
@@ -340,6 +340,8 @@ private:
 			snprintf(fname, sizeof(fname), "WIND_%d.json", res_.id);
 		else if(resource_type_is(res_, "MENU"))
 			snprintf(fname, sizeof(fname), "MENU_%d.json", res_.id);
+		else if(resource_type_is(res_, "DITL"))
+			snprintf(fname, sizeof(fname), "DITL_%d.json", res_.id);
 		else
 			return;
 
@@ -604,7 +606,8 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "CNTL", 4) == 0 || std::memcmp(res.type.data, "DLOG", 4) == 0 ||
-			std::memcmp(res.type.data, "WIND", 4) == 0 || std::memcmp(res.type.data, "MENU", 4) == 0)
+			std::memcmp(res.type.data, "WIND", 4) == 0 || std::memcmp(res.type.data, "MENU", 4) == 0 ||
+			std::memcmp(res.type.data, "DITL", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
