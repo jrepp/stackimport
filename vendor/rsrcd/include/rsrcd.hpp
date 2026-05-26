@@ -1042,6 +1042,59 @@ auto parse(Bytes data, Table<Cap>& table) -> Result {
 } // namespace color_table
 
 // ============================================================================
+// pltt palette resource parser
+// ============================================================================
+
+namespace pltt {
+
+struct Entry {
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+};
+
+template<size_t InlineCapacity = 256>
+class Palette {
+public:
+    auto add(Entry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many pltt entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Entry& { return entries_[i]; }
+    auto begin() const -> const Entry* { return entries_; }
+    auto end() const -> const Entry* { return entries_ + count_; }
+
+private:
+    Entry entries_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 256>
+auto parse(Bytes data, Palette<Cap>& palette) -> Result {
+    if (data.size < 16) return Error::unexpected_end();
+    uint16_t count = read_u16be(data.data);
+    if (count > Cap) return Error::invalid_data("too many pltt entries");
+    if (!range_in_bounds(16, static_cast<size_t>(count) * 16u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 16;
+    for (uint16_t i = 0; i < count; ++i) {
+        Entry entry{};
+        entry.red = read_u16be(data.data + offset + 2);
+        entry.green = read_u16be(data.data + offset + 4);
+        entry.blue = read_u16be(data.data + offset + 6);
+        if (auto r = palette.add(entry); !r) return r;
+        offset += 16;
+    }
+    return Result::ok();
+}
+
+} // namespace pltt
+
+// ============================================================================
 // SIZE metadata resource parser
 // ============================================================================
 

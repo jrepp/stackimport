@@ -1010,6 +1010,28 @@ static void test_color_table_truncated() {
     CHECK(!r, "truncated color table should fail");
 }
 
+static void test_pltt() {
+    uint8_t data[32] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u16be(data + 18, 0x1111);
+    rsrcd::write_u16be(data + 20, 0x2222);
+    rsrcd::write_u16be(data + 22, 0x3333);
+
+    rsrcd::pltt::Palette<4> palette;
+    auto r = rsrcd::pltt::parse({data, sizeof(data)}, palette);
+    CHECK_RESULT(r, "parse pltt");
+    CHECK(palette.count() == 1, "pltt count");
+    CHECK(palette[0].green == 0x2222, "pltt green");
+}
+
+static void test_pltt_truncated() {
+    uint8_t data[31] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::pltt::Palette<4> palette;
+    auto r = rsrcd::pltt::parse({data, sizeof(data)}, palette);
+    CHECK(!r, "truncated pltt should fail");
+}
+
 // ============================================================================
 // SIZE metadata
 // ============================================================================
@@ -1338,6 +1360,8 @@ int main() {
     test_vers_truncated();
     test_color_table();
     test_color_table_truncated();
+    test_pltt();
+    test_pltt_truncated();
     test_size_resource();
     test_size_resource_truncated();
     test_ui_cntl();

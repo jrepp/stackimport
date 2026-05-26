@@ -200,6 +200,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
   have an rsrcd typed parser and shared JSON transform for seed, flags, and
   16-bit RGB entries.
+- `pltt` palettes now have an rsrcd typed parser and shared JSON transform for
+  16-bit RGB entries.
 - `SIZE` metadata now has an rsrcd typed parser and shared JSON transform for
   application flags plus preferred/minimum memory sizes.
 - `CNTL`, `DLOG`, and `WIND` UI metadata now have rsrcd typed parsers and
@@ -244,6 +246,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
   `fctb`, and `wctb` through rsrcd and route package JSON artifact writing
   through the shared transform payload.
+- Done for `pltt` palettes: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for fixed-record UI metadata: parse `CNTL`, `DLOG`, and `WIND` through
@@ -294,7 +298,7 @@ all consumers listed in the lateral audit above have been updated and tested.
 
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `actb`,
-  `cctb`, `dctb`, `fctb`, `wctb`, `HCbg`, `HCcd`, `STR `, `STR#`, `TEXT`,
+  `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `, `STR#`, `TEXT`,
   `vers`, `SIZE`, `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `PICT`, `snd `,
   `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:

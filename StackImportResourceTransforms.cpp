@@ -642,6 +642,45 @@ auto emit_color_table_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_pltt_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed pltt palette metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::pltt::Palette<256> palette;
+	auto palette_result = rsrcd::pltt::parse(resource.data, palette);
+	if(!palette_result)
+		return output.on_resource_error(ref, palette_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+
+	JsonValue entries(rapidjson::kArrayType);
+	for(const rsrcd::pltt::Entry& entry : palette)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("red", entry.red, allocator);
+		item.AddMember("green", entry.green, allocator);
+		item.AddMember("blue", entry.blue, allocator);
+		entries.PushBack(item, allocator);
+	}
+	doc.AddMember("entries", entries, allocator);
+
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 void add_json_size_flag(JsonValue& flags, JsonPoolAllocator& allocator, const char* name, bool value)
 {
 	flags.AddMember(JsonValue().SetString(name, allocator), value, allocator);
@@ -944,6 +983,9 @@ auto emit_builtin_resource_transforms(
 		resource_type_is(resource, "dctb") || resource_type_is(resource, "fctb") ||
 		resource_type_is(resource, "wctb"))
 		return emit_color_table_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "pltt"))
+		return emit_pltt_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);

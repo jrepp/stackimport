@@ -735,6 +735,18 @@ void	RunTests()
 	assert(windowColorTableOutput.json_count == 1);
 	assert(windowColorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
 
+	std::vector<uint8_t> plttPayload(32);
+	rsrcd::write_u16be(plttPayload.data(), 1);
+	rsrcd::write_u16be(plttPayload.data() + 18, 0x1111);
+	rsrcd::write_u16be(plttPayload.data() + 20, 0x2222);
+	rsrcd::write_u16be(plttPayload.data() + 22, 0x3333);
+	const std::vector<uint8_t> plttFork = make_single_resource_fork("pltt", 3, plttPayload);
+	CountingResourceOutput plttOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{plttFork.data(), plttFork.size()}, plttOutput));
+	assert(plttOutput.native_count == 1);
+	assert(plttOutput.json_count == 1);
+	assert(plttOutput.last_json.find("\"green\": 8738") != std::string::npos);
+
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
 	append_u32be(sizePayload, 0x00100000);
