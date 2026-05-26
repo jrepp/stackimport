@@ -206,11 +206,16 @@ when parser behavior changes, updates to the relevant format documentation under
 - Check output filename sanitization for collisions after percent encoding.
 - Check payload lifetime documentation against actual callback storage.
 
-## Phase 5: Vendor Adapter Cleanup
+## Phase 5: Dependency Integration Cleanup
 
 ### Status
 
 - In progress.
+- Architecture correction: `rsrcd` is StackImport-owned support code that should
+  become more central to typed, memory-safe resource parsing. Do not wrap it in
+  pointer/size shims as if it were an opaque third-party vendor. Prefer improving
+  and reusing its typed views, parsers, and bounded byte utilities across the
+  importer.
 - MACE decoding now goes through `StackImportMaceResourceDasmAdapter`; the
   private `resource_dasm/src/AudioCodecs.hh` include is isolated to the narrow
   adapter source under `vendor/`.
@@ -227,7 +232,8 @@ when parser behavior changes, updates to the relevant format documentation under
   `vendor/`.
 - Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
   configurations build and pass tests after the adapter split.
-- Remaining work: resource-fork parser/decoder adapter boundaries and broader
+- Remaining work: fold `resource_dasm` concepts into typed, memory-safe,
+  streaming StackImport/rsrcd interfaces where useful; broader
   license/provenance audit.
 
 ### Tasks
@@ -235,7 +241,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done: stop including private vendor paths such as
   `vendor/resource_dasm/src/AudioCodecs.hh` from StackImport-owned sources.
 - Create narrow adapter targets for:
-  - resource fork parsing and small resource decoders from `rsrcd`;
+  - Not applicable: resource fork parsing and small resource decoders from
+    `rsrcd` should remain typed core support, not an opaque adapter boundary;
   - Done: MACE decoding from `resource_dasm` or an owned codec extraction;
   - Done: disassembly support from `resource_dasm`;
   - Done: PNG encoding through stb;
