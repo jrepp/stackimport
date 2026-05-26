@@ -1011,6 +1011,36 @@ static void test_color_table_truncated() {
 }
 
 // ============================================================================
+// SIZE metadata
+// ============================================================================
+
+static void test_size_resource() {
+    uint8_t data[10] = {};
+    rsrcd::write_u16be(data, 0xD048);
+    rsrcd::write_u32be(data + 2, 0x00100000);
+    rsrcd::write_u32be(data + 6, 0x00080000);
+
+    rsrcd::size_resource::Size size;
+    auto r = rsrcd::size_resource::parse({data, sizeof(data)}, size);
+    CHECK_RESULT(r, "parse SIZE");
+    CHECK(size.flags == 0xD048, "SIZE flags");
+    CHECK(size.save_screen, "SIZE save screen");
+    CHECK(size.accept_suspend_events, "SIZE accept suspend");
+    CHECK(size.can_background, "SIZE can background");
+    CHECK(size.high_level_event_aware, "SIZE high-level aware");
+    CHECK(size.use_text_edit_services, "SIZE text edit services");
+    CHECK(size.preferred_size == 0x00100000, "SIZE preferred");
+    CHECK(size.minimum_size == 0x00080000, "SIZE minimum");
+}
+
+static void test_size_resource_truncated() {
+    uint8_t data[9] = {};
+    rsrcd::size_resource::Size size;
+    auto r = rsrcd::size_resource::parse({data, sizeof(data)}, size);
+    CHECK(!r, "truncated SIZE should fail");
+}
+
+// ============================================================================
 // PAT# helpers
 // ============================================================================
 
@@ -1125,6 +1155,8 @@ int main() {
     test_vers_truncated();
     test_color_table();
     test_color_table_truncated();
+    test_size_resource();
+    test_size_resource_truncated();
     test_patlist_count();
     test_palette_lookup();
 

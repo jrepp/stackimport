@@ -385,6 +385,62 @@ auto emit_color_table_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+void add_json_size_flag(JsonValue& flags, JsonPoolAllocator& allocator, const char* name, bool value)
+{
+	flags.AddMember(JsonValue().SetString(name, allocator), value, allocator);
+}
+
+auto emit_size_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed SIZE metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::size_resource::Size size;
+	auto size_result = rsrcd::size_resource::parse(resource.data, size);
+	if(!size_result)
+		return output.on_resource_error(ref, size_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("flags", size.flags, allocator);
+	doc.AddMember("preferredSize", size.preferred_size, allocator);
+	doc.AddMember("minimumSize", size.minimum_size, allocator);
+
+	JsonValue flag_object(rapidjson::kObjectType);
+	add_json_size_flag(flag_object, allocator, "saveScreen", size.save_screen);
+	add_json_size_flag(flag_object, allocator, "acceptSuspendEvents", size.accept_suspend_events);
+	add_json_size_flag(flag_object, allocator, "disableOption", size.disable_option);
+	add_json_size_flag(flag_object, allocator, "canBackground", size.can_background);
+	add_json_size_flag(flag_object, allocator, "activateOnForegroundSwitch", size.activate_on_fg_switch);
+	add_json_size_flag(flag_object, allocator, "onlyBackground", size.only_background);
+	add_json_size_flag(flag_object, allocator, "getFrontClicks", size.get_front_clicks);
+	add_json_size_flag(flag_object, allocator, "acceptDiedEvents", size.accept_died_events);
+	add_json_size_flag(flag_object, allocator, "cleanAddressing", size.clean_addressing);
+	add_json_size_flag(flag_object, allocator, "highLevelEventAware", size.high_level_event_aware);
+	add_json_size_flag(flag_object, allocator, "localAndRemoteHighLevelEvents", size.local_and_remote_high_level_events);
+	add_json_size_flag(flag_object, allocator, "stationeryAware", size.stationery_aware);
+	add_json_size_flag(flag_object, allocator, "useTextEditServices", size.use_text_edit_services);
+	doc.AddMember("decodedFlags", flag_object, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -628,6 +684,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "clut") || resource_type_is(resource, "CTBL"))
 		return emit_color_table_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "SIZE"))
+		return emit_size_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

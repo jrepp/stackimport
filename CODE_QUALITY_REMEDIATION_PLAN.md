@@ -199,6 +199,8 @@ when parser behavior changes, updates to the relevant format documentation under
   preserves raw numeric version fields while decoding version strings.
 - `clut` and `CTBL` color tables now have an rsrcd typed parser and shared JSON
   transform for seed, flags, and 16-bit RGB entries.
+- `SIZE` metadata now has an rsrcd typed parser and shared JSON transform for
+  application flags plus preferred/minimum memory sizes.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
   preserves native bytes when conversion fails.
@@ -233,6 +235,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `clut`/`CTBL` color tables: parse through rsrcd and route package
   JSON artifact writing through the shared transform payload.
+- Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.
@@ -274,8 +278,8 @@ all consumers listed in the lateral audit above have been updated and tested.
 
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `HCbg`,
-  `HCcd`, `STR `, `STR#`, `TEXT`, `vers`, `PICT`, `snd `, `XCMD`, `XFCN`,
-  `xcmd`, `xfcn`.
+  `HCcd`, `STR `, `STR#`, `TEXT`, `vers`, `SIZE`, `PICT`, `snd `, `XCMD`,
+  `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

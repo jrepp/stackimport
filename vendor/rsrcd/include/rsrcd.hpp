@@ -1042,6 +1042,54 @@ auto parse(Bytes data, Table<Cap>& table) -> Result {
 } // namespace color_table
 
 // ============================================================================
+// SIZE metadata resource parser
+// ============================================================================
+
+namespace size_resource {
+
+struct Size {
+    uint16_t flags;
+    bool save_screen;
+    bool accept_suspend_events;
+    bool disable_option;
+    bool can_background;
+    bool activate_on_fg_switch;
+    bool only_background;
+    bool get_front_clicks;
+    bool accept_died_events;
+    bool clean_addressing;
+    bool high_level_event_aware;
+    bool local_and_remote_high_level_events;
+    bool stationery_aware;
+    bool use_text_edit_services;
+    uint32_t preferred_size;
+    uint32_t minimum_size;
+};
+
+inline auto parse(Bytes data, Size& size) -> Result {
+    if (data.size < 10) return Error::unexpected_end();
+    size.flags = read_u16be(data.data);
+    size.save_screen = (size.flags & 0x8000u) != 0;
+    size.accept_suspend_events = (size.flags & 0x4000u) != 0;
+    size.disable_option = (size.flags & 0x2000u) != 0;
+    size.can_background = (size.flags & 0x1000u) != 0;
+    size.activate_on_fg_switch = (size.flags & 0x0800u) != 0;
+    size.only_background = (size.flags & 0x0400u) != 0;
+    size.get_front_clicks = (size.flags & 0x0200u) != 0;
+    size.accept_died_events = (size.flags & 0x0100u) != 0;
+    size.clean_addressing = (size.flags & 0x0080u) != 0;
+    size.high_level_event_aware = (size.flags & 0x0040u) != 0;
+    size.local_and_remote_high_level_events = (size.flags & 0x0020u) != 0;
+    size.stationery_aware = (size.flags & 0x0010u) != 0;
+    size.use_text_edit_services = (size.flags & 0x0008u) != 0;
+    size.preferred_size = read_u32be(data.data + 2);
+    size.minimum_size = read_u32be(data.data + 6);
+    return Result::ok();
+}
+
+} // namespace size_resource
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

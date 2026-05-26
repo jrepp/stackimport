@@ -728,6 +728,19 @@ void	RunTests()
 	assert(colorTableOutput.last_json.find("\"flags\": 32768") != std::string::npos);
 	assert(colorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
 
+	std::vector<uint8_t> sizePayload;
+	append_u16be(sizePayload, 0xD048);
+	append_u32be(sizePayload, 0x00100000);
+	append_u32be(sizePayload, 0x00080000);
+	const std::vector<uint8_t> sizeFork = make_single_resource_fork("SIZE", -1, sizePayload);
+	CountingResourceOutput sizeOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{sizeFork.data(), sizeFork.size()}, sizeOutput));
+	assert(sizeOutput.native_count == 1);
+	assert(sizeOutput.json_count == 1);
+	assert(sizeOutput.last_json.find("\"preferredSize\": 1048576") != std::string::npos);
+	assert(sizeOutput.last_json.find("\"minimumSize\": 524288") != std::string::npos);
+	assert(sizeOutput.last_json.find("\"saveScreen\": true") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;

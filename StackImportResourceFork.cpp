@@ -167,7 +167,8 @@ public:
 		(void)resource;
 		(void)msg;
 		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd") ||
-			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL"))
+			resource_type_is(res_, "vers") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
+			resource_type_is(res_, "SIZE"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
 			summary_.status = "parse_failed";
@@ -328,6 +329,8 @@ private:
 			snprintf(fname, sizeof(fname), "clut_%d.json", res_.id);
 		else if(resource_type_is(res_, "CTBL"))
 			snprintf(fname, sizeof(fname), "CTBL_%d.json", res_.id);
+		else if(resource_type_is(res_, "SIZE"))
+			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
 		else
 			return;
 
@@ -578,6 +581,13 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "clut", 4) == 0 || std::memcmp(res.type.data, "CTBL", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "SIZE", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
