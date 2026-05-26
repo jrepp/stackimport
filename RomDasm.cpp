@@ -7,6 +7,10 @@
 
 #include "RomDasm.h"
 
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+#include "StackImportResourceDasmDisassemblyAdapter.h"
+#endif
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -17,9 +21,6 @@
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 #include <phosg/Hash.hh>
-#include <resource_file/Emulators/M68KEmulator.hh>
-#include <resource_file/Emulators/PPC32Emulator.hh>
-#include <resource_file/TrapInfo.hh>
 #endif
 
 namespace stackimport {
@@ -215,8 +216,8 @@ static std::string annotate_68k_line(const std::string& line, bool /* is_mac_env
     }
     const char* trapSpace = trapNumber >= 0x0800u ? "Toolbox" : "OS";
     std::string trapName = operands;
-    if(const ResourceDASM::TrapInfo* info = ResourceDASM::info_for_68k_trap(trapNumber, 0))
-      trapName = info->name;
+    if(const char* name = ResourceDasmTrapName(trapNumber, 0))
+      trapName = name;
     char suffix[160] = {};
     snprintf(suffix, sizeof(suffix), " ; %s trap %s ($A%03X%s)",
              trapSpace, trapName.c_str(), trapNumber, autoPop ? ", auto-pop" : "");
@@ -359,16 +360,8 @@ RomAnalysis disassemble_rom(
   (void)page_size;
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-  std::multimap<uint32_t, std::string> labels;
-  labels.emplace(start_address, "start");
-  for(size_t offset = 0; offset < data.size(); offset += page_size) {
-    uint32_t addr = start_address + static_cast<uint32_t>(offset);
-    char label[32];
-    snprintf(label, sizeof(label), "page_%08X", static_cast<unsigned>(addr));
-    labels.emplace(addr, label);
-  }
-  std::string raw_dasm = ResourceDASM::M68KEmulator::disassemble(
-      data.data(), data.size(), start_address, &labels);
+  std::string raw_dasm;
+  DisassembleMac68kRomWithResourceDasm(data.data(), data.size(), start_address, page_size, raw_dasm);
   std::string annotated;
   size_t start = 0;
   while(start < raw_dasm.size()) {

@@ -101,6 +101,7 @@ set(STACKIMPORT_SOURCES
 if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
     add_library(stackimport_mace_resource_dasm_adapter OBJECT
         vendor/resource_dasm_stackimport_mace_adapter.cpp
+        vendor/resource_dasm_stackimport_disassembly_adapter.cpp
         vendor/resource_dasm/src/AudioCodecs.cc
     )
     target_include_directories(stackimport_mace_resource_dasm_adapter PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

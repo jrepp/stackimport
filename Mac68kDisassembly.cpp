@@ -1,17 +1,14 @@
 #include "Mac68kDisassembly.h"
 
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+#include "StackImportResourceDasmDisassemblyAdapter.h"
+#endif
+
 #include <cinttypes>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
-#include <map>
-
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-#include <resource_file/Emulators/M68KEmulator.hh>
-#include <resource_file/Emulators/PPC32Emulator.hh>
-#include <resource_file/TrapInfo.hh>
-#endif
 
 namespace stackimport {
 
@@ -150,8 +147,8 @@ std::string annotate_mac68k_line(const std::string& line)
 		const char* trapSpace = trapNumber >= 0x0800u ? "Toolbox" : "OS";
 		std::string trapName = operands;
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-		if(const ResourceDASM::TrapInfo* info = ResourceDASM::info_for_68k_trap(trapNumber, flags))
-			trapName = info->name;
+		if(const char* name = ResourceDasmTrapName(trapNumber, flags))
+			trapName = name;
 #endif
 		char suffix[160] = {};
 		snprintf(
@@ -238,9 +235,10 @@ Mac68kDisassemblyResult DisassembleMac68kCodeResource(
 	result.ok = true;
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-	std::multimap<uint32_t, std::string> labels;
-	labels.emplace(displayAddress, "start");
-	result.text = annotate_disassembly_text(ResourceDASM::M68KEmulator::disassemble(code.data(), code.size(), displayAddress, &labels), false);
+	std::string disassemblyText;
+	if(!DisassembleMac68kWithResourceDasm(code.data(), code.size(), displayAddress, disassemblyText))
+		return disassembly_error("68K disassembly failed");
+	result.text = annotate_disassembly_text(disassemblyText, false);
 #else
 	for(size_t offset = 0; offset < code.size();)
 	{
@@ -282,9 +280,10 @@ Mac68kDisassemblyResult DisassemblePowerPCCodeResource(
 	result.ok = true;
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-	std::multimap<uint32_t, std::string> labels;
-	labels.emplace(displayAddress, "start");
-	result.text = annotate_disassembly_text(ResourceDASM::PPC32Emulator::disassemble(code.data(), instructionBytes, displayAddress, &labels), true);
+	std::string disassemblyText;
+	if(!DisassemblePowerPCWithResourceDasm(code.data(), instructionBytes, displayAddress, disassemblyText))
+		return disassembly_error("PowerPC disassembly failed");
+	result.text = annotate_disassembly_text(disassemblyText, true);
 #else
 	for(size_t offset = 0; offset < instructionBytes; offset += 4)
 	{
