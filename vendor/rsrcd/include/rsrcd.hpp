@@ -1136,6 +1136,41 @@ struct Window {
     bool has_auto_position;
 };
 
+struct MenuItem {
+    Bytes name;
+    uint8_t icon_number;
+    int8_t key_equivalent;
+    int8_t mark_character;
+    uint8_t style_flags;
+    bool enabled;
+};
+
+template<size_t InlineCapacity = 64>
+class MenuItemList {
+public:
+    uint16_t menu_id = 0;
+    int16_t proc_id = 0;
+    uint32_t enabled_flags = 0;
+    bool enabled = false;
+    Bytes title;
+
+    auto add(MenuItem item) -> Result {
+        if (count_ < InlineCapacity) {
+            items_[count_++] = item;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many menu items");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const MenuItem& { return items_[i]; }
+    auto begin() const -> const MenuItem* { return items_; }
+    auto end() const -> const MenuItem* { return items_ + count_; }
+
+private:
+    MenuItem items_[InlineCapacity];
+    size_t count_ = 0;
+};
+
 inline auto parse_rect(Bytes data, size_t offset, Rect& rect) -> Result {
     if (!range_in_bounds(offset, 8, data.size)) return Error::unexpected_end();
     rect.top = read_i16be(data.data + offset);
@@ -1197,6 +1232,46 @@ inline auto parse_wind(Bytes data, Window& window) -> Result {
     if (range_in_bounds(after_title, 2, data.size)) {
         window.has_auto_position = true;
         window.auto_position = read_u16be(data.data + after_title);
+    }
+    return Result::ok();
+}
+
+template<size_t Cap = 64>
+auto parse_menu(Bytes data, MenuItemList<Cap>& menu) -> Result {
+    if (data.size < 15) return Error::unexpected_end();
+    menu.menu_id = read_u16be(data.data);
+    menu.proc_id = read_i16be(data.data + 6);
+    menu.enabled_flags = read_u32be(data.data + 10);
+
+    uint32_t remaining_flags = menu.enabled_flags;
+    auto get_enabled_flag = [&remaining_flags]() -> bool {
+        bool enabled = (remaining_flags & 1u) != 0;
+        remaining_flags = (remaining_flags >> 1u) | 0x80000000u;
+        return enabled;
+    };
+    menu.enabled = get_enabled_flag();
+
+    size_t offset = 14;
+    uint8_t title_len = data.data[offset];
+    if (offset + 1u + static_cast<size_t>(title_len) > data.size) return Error::unexpected_end();
+    menu.title = data.slice(offset + 1, title_len);
+    offset += 1u + static_cast<size_t>(title_len);
+
+    while (true) {
+        if (offset >= data.size) return Error::unexpected_end();
+        uint8_t item_len = data.data[offset++];
+        if (item_len == 0) break;
+        if (offset + static_cast<size_t>(item_len) + 4u > data.size) return Error::unexpected_end();
+
+        MenuItem item{};
+        item.name = data.slice(offset, item_len);
+        offset += static_cast<size_t>(item_len);
+        item.icon_number = data.data[offset++];
+        item.key_equivalent = static_cast<int8_t>(data.data[offset++]);
+        item.mark_character = static_cast<int8_t>(data.data[offset++]);
+        item.style_flags = data.data[offset++];
+        item.enabled = get_enabled_flag();
+        if (auto r = menu.add(item); !r) return r;
     }
     return Result::ok();
 }

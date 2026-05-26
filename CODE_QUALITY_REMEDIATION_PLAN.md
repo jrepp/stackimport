@@ -204,6 +204,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - `CNTL`, `DLOG`, and `WIND` UI metadata now have rsrcd typed parsers and
   shared JSON transforms for bounds, state flags, proc ids, refcons, titles, and
   auto-position fields where present.
+- `MENU` metadata now has an rsrcd typed parser and shared JSON transform for
+  menu title, enabled flags, and item records.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
   preserves native bytes when conversion fails.
@@ -243,6 +245,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - Done for fixed-record UI metadata: parse `CNTL`, `DLOG`, and `WIND` through
   rsrcd and route package JSON artifact writing through the shared transform
   payload.
+- Done for `MENU` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.
@@ -285,7 +289,7 @@ all consumers listed in the lateral audit above have been updated and tested.
 - Current typed StackImport/core coverage:
   `ICON`, `ICN#`, `CURS`, `PAT `, `PAT#`, `PLTE`, `clut`, `CTBL`, `HCbg`,
   `HCcd`, `STR `, `STR#`, `TEXT`, `vers`, `SIZE`, `CNTL`, `DLOG`, `WIND`,
-  `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `MENU`, `PICT`, `snd `, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

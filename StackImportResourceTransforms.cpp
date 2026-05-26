@@ -391,6 +391,54 @@ auto emit_wind_transform(
 	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
+auto emit_menu_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed MENU metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::MenuItemList<128> menu;
+	auto menu_result = rsrcd::ui::parse_menu(resource.data, menu);
+	if(!menu_result)
+		return output.on_resource_error(ref, menu_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("menuId", menu.menu_id, allocator);
+	doc.AddMember("procId", menu.proc_id, allocator);
+	doc.AddMember("enabledFlags", menu.enabled_flags, allocator);
+	doc.AddMember("enabled", menu.enabled, allocator);
+	std::string title = mac_roman_from_bytes(menu.title.data, menu.title.size);
+	doc.AddMember("title", json_string(title, allocator), allocator);
+
+	JsonValue items(rapidjson::kArrayType);
+	for(const rsrcd::ui::MenuItem& menu_item : menu)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		std::string name = mac_roman_from_bytes(menu_item.name.data, menu_item.name.size);
+		item.AddMember("name", json_string(name, allocator), allocator);
+		item.AddMember("iconNumber", menu_item.icon_number, allocator);
+		item.AddMember("keyEquivalent", menu_item.key_equivalent, allocator);
+		item.AddMember("markCharacter", menu_item.mark_character, allocator);
+		item.AddMember("styleFlags", menu_item.style_flags, allocator);
+		item.AddMember("enabled", menu_item.enabled, allocator);
+		items.PushBack(item, allocator);
+	}
+	doc.AddMember("items", items, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 auto emit_string_list_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -829,6 +877,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "WIND"))
 		return emit_wind_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "MENU"))
+		return emit_menu_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

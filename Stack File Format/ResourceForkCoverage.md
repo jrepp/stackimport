@@ -30,6 +30,7 @@ where new support should live. The target architecture is:
 | `CNTL` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Control bounds, state, proc id, refcon, and title. |
 | `DLOG` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Dialog bounds, visibility, item list id, title, and auto-position. |
 | `WIND` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Window bounds, visibility, title, and auto-position. |
+| `MENU` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Menu title, enabled flags, and menu items. |
 | `PICT` | PNG transform and package artifact | `StackImportResourceDasmPictAdapter` | Adapter-backed through resource_dasm; native bytes are still preserved when rendering fails. |
 | `snd ` | WAV transform and package artifact | `StackImportSoundConverter.cpp` | MACE uses the resource_dasm-backed MACE adapter when enabled. |
 | `XCMD` / `XFCN` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | 68K code resources. |
@@ -49,7 +50,7 @@ interface is clear.
 | Color tables and patterns | `ppat`, `ppt#`, `pltt`, `actb`, `cctb`, `dctb`, `fctb`, `wctb` | typed decoders and exporters | Fold bounded parsers into rsrcd. `PAT `, `clut`, and `CTBL` now live in StackImport core. |
 | Text | `styl`, `TwCS`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, and `TEXT` now live in StackImport core. |
 | Metadata/templates | `TMPL`, `cfrg`, `ROv#`, `RSSC` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. `vers` and `SIZE` now live in StackImport core. |
-| UI/layout | `DITL`, `MENU` | typed decoders and exporters; system templates also cover `ALRT`, `BNDL`, `FREF`, `MBAR` | Fold fixed-record parsers into rsrcd after corpus validation. `CNTL`, `DLOG`, and `WIND` now live in StackImport core. |
+| UI/layout | `DITL` | typed decoders and exporters; system templates also cover `ALRT`, `BNDL`, `FREF`, `MBAR` | Fold fixed-record parsers into rsrcd after corpus validation. `CNTL`, `DLOG`, `WIND`, and `MENU` now live in StackImport core. |
 | Fonts | `FONT`, `NFNT`, `finf`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. |
 | Code | `CODE`, `DRVR`, `dcmp`, `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. |
 | Audio/music | `csnd`, `esnd`, `ESnd`, `Ysnd`, `SMSD`, `SOUN`, `SONG`, `INST`, `Tune`, MIDI-like resources | audio/music decoders and exporters | Adapter first for codecs; fold metadata-only parsing into rsrcd. |

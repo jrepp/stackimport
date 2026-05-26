@@ -1119,6 +1119,56 @@ static void test_ui_truncated() {
     CHECK(!r, "truncated CNTL should fail");
 }
 
+static void test_ui_menu() {
+    uint8_t data[64] = {};
+    rsrcd::write_u16be(data, 128);
+    rsrcd::write_u16be(data + 6, 0);
+    rsrcd::write_u32be(data + 10, 0x00000003);
+    size_t offset = 14;
+    data[offset++] = 4;
+    std::memcpy(data + offset, "File", 4);
+    offset += 4;
+    data[offset++] = 4;
+    std::memcpy(data + offset, "Open", 4);
+    offset += 4;
+    data[offset++] = 0;
+    data[offset++] = 'O';
+    data[offset++] = 0;
+    data[offset++] = 0;
+    data[offset++] = 0;
+
+    rsrcd::ui::MenuItemList<4> menu;
+    auto r = rsrcd::ui::parse_menu({data, offset}, menu);
+    CHECK_RESULT(r, "parse MENU");
+    CHECK(menu.menu_id == 128, "MENU id");
+    CHECK(menu.enabled, "MENU enabled");
+    CHECK(menu.title.size == 4, "MENU title");
+    CHECK(menu.count() == 1, "MENU item count");
+    CHECK(menu[0].enabled, "MENU item enabled");
+    CHECK(menu[0].key_equivalent == 'O', "MENU key");
+}
+
+static void test_ui_menu_capacity() {
+    uint8_t data[64] = {};
+    rsrcd::write_u32be(data + 10, 0x00000007);
+    size_t offset = 14;
+    data[offset++] = 1;
+    data[offset++] = 'M';
+    for (int i = 0; i < 2; ++i) {
+        data[offset++] = 1;
+        data[offset++] = static_cast<uint8_t>('A' + i);
+        data[offset++] = 0;
+        data[offset++] = 0;
+        data[offset++] = 0;
+        data[offset++] = 0;
+    }
+    data[offset++] = 0;
+
+    rsrcd::ui::MenuItemList<1> menu;
+    auto r = rsrcd::ui::parse_menu({data, offset}, menu);
+    CHECK(!r, "MENU capacity overflow should fail");
+}
+
 // ============================================================================
 // PAT# helpers
 // ============================================================================
@@ -1240,6 +1290,8 @@ int main() {
     test_ui_dlog();
     test_ui_wind();
     test_ui_truncated();
+    test_ui_menu();
+    test_ui_menu_capacity();
     test_patlist_count();
     test_palette_lookup();
 

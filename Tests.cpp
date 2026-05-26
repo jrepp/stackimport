@@ -762,6 +762,25 @@ void	RunTests()
 	assert(dlogOutput.last_json.find("\"title\": \"Hello\"") != std::string::npos);
 	assert(dlogOutput.last_json.find("\"autoPosition\": 43981") != std::string::npos);
 
+	std::vector<uint8_t> menuPayload;
+	append_u16be(menuPayload, 128);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u32be(menuPayload, 0x00000003);
+	menuPayload.insert(menuPayload.end(), {4, 'F', 'i', 'l', 'e'});
+	menuPayload.insert(menuPayload.end(), {4, 'O', 'p', 'e', 'n', 0, 'O', 0, 0});
+	menuPayload.push_back(0);
+	const std::vector<uint8_t> menuFork = make_single_resource_fork("MENU", 128, menuPayload);
+	CountingResourceOutput menuOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{menuFork.data(), menuFork.size()}, menuOutput));
+	assert(menuOutput.native_count == 1);
+	assert(menuOutput.json_count == 1);
+	assert(menuOutput.last_json.find("\"title\": \"File\"") != std::string::npos);
+	assert(menuOutput.last_json.find("\"name\": \"Open\"") != std::string::npos);
+	assert(menuOutput.last_json.find("\"keyEquivalent\": 79") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;
