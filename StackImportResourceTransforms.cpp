@@ -1727,18 +1727,224 @@ void add_json_pixel_pattern(JsonValue& object, const rsrcd::pixel_pattern::Patte
 		add_json_pixel_map(object, pattern.pixel_map, allocator);
 }
 
+auto pixel_pattern_dimensions(const rsrcd::pixel_pattern::PixelMap& pixel_map, uint32_t& width, uint32_t& height) -> bool
+{
+	const int32_t w = rsrcd::color_icon::rect_width(pixel_map.bounds);
+	const int32_t h = rsrcd::color_icon::rect_height(pixel_map.bounds);
+	if(w <= 0 || h <= 0)
+		return false;
+	width = static_cast<uint32_t>(w);
+	height = static_cast<uint32_t>(h);
+	return true;
+}
+
+void decode_monochrome_pattern_rgba(uint64_t pattern, uint8_t* rgba)
+{
+	for(size_t y = 0; y < 8; ++y)
+	{
+		const uint8_t row = static_cast<uint8_t>((pattern >> ((7u - y) * 8u)) & 0xFFu);
+		for(size_t x = 0; x < 8; ++x)
+		{
+			const bool black = ((row >> (7u - x)) & 1u) != 0;
+			const size_t offset = ((y * 8u) + x) * 4u;
+			rgba[offset + 0] = black ? 0 : 0xFF;
+			rgba[offset + 1] = black ? 0 : 0xFF;
+			rgba[offset + 2] = black ? 0 : 0xFF;
+			rgba[offset + 3] = 0xFF;
+		}
+	}
+}
+
+void tile_rgba(const uint8_t* source, uint32_t width, uint32_t height, uint32_t tiles_x, uint32_t tiles_y, uint8_t* target)
+{
+	const uint32_t target_width = width * tiles_x;
+	for(uint32_t ty = 0; ty < tiles_y; ++ty)
+	{
+		for(uint32_t y = 0; y < height; ++y)
+		{
+			for(uint32_t tx = 0; tx < tiles_x; ++tx)
+			{
+				const uint8_t* row_source = source + (static_cast<size_t>(y) * width * 4u);
+				uint8_t* row_target = target + (((static_cast<size_t>(ty) * height + y) * target_width + static_cast<size_t>(tx) * width) * 4u);
+				std::memcpy(row_target, row_source, static_cast<size_t>(width) * 4u);
+			}
+		}
+	}
+}
+
+auto decode_indexed_pixel_pattern_rgba(
+	const rsrcd::Bytes& resource_data,
+	const rsrcd::pixel_pattern::Pattern& pattern,
+	uint8_t* rgba,
+	size_t rgba_size,
+	uint32_t& width,
+	uint32_t& height) -> rsrcd::Result
+{
+	if(!pattern.has_pixel_map)
+	{
+		width = 8;
+		height = 8;
+		if(rgba_size < 8u * 8u * 4u)
+			return rsrcd::Error::bounds();
+		decode_monochrome_pattern_rgba(pattern.monochrome_pattern, rgba);
+		return rsrcd::Result::ok();
+	}
+	if(!pixel_pattern_dimensions(pattern.pixel_map, width, height))
+		return rsrcd::Error::invalid_data("pixel pattern has empty bounds");
+	if(pattern.pixel_map.pixel_size != 1 && pattern.pixel_map.pixel_size != 2 &&
+		pattern.pixel_map.pixel_size != 4 && pattern.pixel_map.pixel_size != 8)
+		return rsrcd::Error::invalid_data("unsupported pixel pattern depth");
+	const size_t pixel_count = static_cast<size_t>(width) * height;
+	if(rgba_size < pixel_count * 4u)
+		return rsrcd::Error::bounds();
+	const size_t pixel_data_size = static_cast<size_t>(pattern.pixel_map.row_bytes) * height;
+	if(!rsrcd::range_in_bounds(pattern.pixel_data_offset, pixel_data_size, resource_data.size))
+		return rsrcd::Error::unexpected_end();
+
+	rsrcd::color_icon::ColorTable<256> table;
+	uint32_t next_offset = 0;
+	if(auto r = rsrcd::color_icon::parse_color_table(resource_data, pattern.pixel_map.color_table_offset, table, next_offset); !r)
+		return r;
+	const rsrcd::Bytes pixel_data{resource_data.data + pattern.pixel_data_offset, pixel_data_size};
+	for(uint32_t y = 0; y < height; ++y)
+	{
+		for(uint32_t x = 0; x < width; ++x)
+		{
+			uint16_t index = 0;
+			if(auto r = rsrcd::color_icon::lookup_index(pixel_data, pattern.pixel_map.row_bytes, pattern.pixel_map.pixel_size, static_cast<int32_t>(x), static_cast<int32_t>(y), index); !r)
+				return r;
+			const rsrcd::color_icon::ColorTableEntry* entry = table.find(index);
+			const size_t offset = (static_cast<size_t>(y) * width + x) * 4u;
+			if(entry == nullptr)
+			{
+				if(index != static_cast<uint16_t>((1u << pattern.pixel_map.pixel_size) - 1u))
+					return rsrcd::Error::invalid_data("pixel pattern color index not found");
+				rgba[offset + 0] = 0;
+				rgba[offset + 1] = 0;
+				rgba[offset + 2] = 0;
+				rgba[offset + 3] = 0xFF;
+			}
+			else
+			{
+				rgba[offset + 0] = static_cast<uint8_t>(entry->red >> 8);
+				rgba[offset + 1] = static_cast<uint8_t>(entry->green >> 8);
+				rgba[offset + 2] = static_cast<uint8_t>(entry->blue >> 8);
+				rgba[offset + 3] = 0xFF;
+			}
+		}
+	}
+	return rsrcd::Result::ok();
+}
+
+auto emit_rgba_payload(
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	uint32_t variant_index,
+	uint32_t width,
+	uint32_t height,
+	const char* description,
+	const uint8_t* rgba) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, static_cast<size_t>(width) * height * 4u},
+		"image/x-rgba32",
+		description);
+	descriptor.variant_index = variant_index;
+	descriptor.width = width;
+	descriptor.height = height;
+	descriptor.row_bytes = width * 4u;
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+	descriptor.data = rsrcd::Bytes{rgba, static_cast<size_t>(width) * height * 4u};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_pixel_pattern_images(
+	const rsrcd::Bytes& resource_data,
+	const rsrcd::pixel_pattern::Pattern& pattern,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	uint32_t variant_base) -> bool
+{
+	uint32_t width = 0;
+	uint32_t height = 0;
+	const size_t max_pixels = static_cast<size_t>(1) << 26;
+	if(pattern.has_pixel_map)
+	{
+		if(!pixel_pattern_dimensions(pattern.pixel_map, width, height))
+			return output.on_resource_error(ref, "pixel pattern has empty bounds");
+		if(static_cast<size_t>(width) * height > max_pixels)
+			return output.on_resource_error(ref, "pixel pattern image is too large");
+	}
+	else
+	{
+		width = 8;
+		height = 8;
+	}
+
+	StackImportRapidJsonAllocator image_alloc;
+	const size_t pixel_bytes = static_cast<size_t>(width) * height * 4u;
+	uint8_t* color = static_cast<uint8_t*>(image_alloc.Malloc(pixel_bytes));
+	uint8_t* color_tiled = static_cast<uint8_t*>(image_alloc.Malloc(pixel_bytes * 64u));
+	uint8_t* mono = static_cast<uint8_t*>(image_alloc.Malloc(8u * 8u * 4u));
+	uint8_t* mono_tiled = static_cast<uint8_t*>(image_alloc.Malloc(64u * 64u * 4u));
+	if(color == nullptr || color_tiled == nullptr || mono == nullptr || mono_tiled == nullptr)
+	{
+		StackImportRapidJsonAllocator::Free(color);
+		StackImportRapidJsonAllocator::Free(color_tiled);
+		StackImportRapidJsonAllocator::Free(mono);
+		StackImportRapidJsonAllocator::Free(mono_tiled);
+		return output.on_resource_error(ref, "allocation failed");
+	}
+
+	rsrcd::Result decode_result = decode_indexed_pixel_pattern_rgba(resource_data, pattern, color, pixel_bytes, width, height);
+	if(!decode_result)
+	{
+		StackImportRapidJsonAllocator::Free(color);
+		StackImportRapidJsonAllocator::Free(color_tiled);
+		StackImportRapidJsonAllocator::Free(mono);
+		StackImportRapidJsonAllocator::Free(mono_tiled);
+		return output.on_resource_error(ref, decode_result.message());
+	}
+	decode_monochrome_pattern_rgba(pattern.monochrome_pattern, mono);
+	tile_rgba(color, width, height, 8, 8, color_tiled);
+	tile_rgba(mono, 8, 8, 8, 8, mono_tiled);
+
+	const bool emitted =
+		emit_rgba_payload(ref, output, variant_base + 0u, width, height, "decoded pixel pattern", color) &&
+		emit_rgba_payload(ref, output, variant_base + 1u, width * 8u, height * 8u, "decoded tiled pixel pattern", color_tiled) &&
+		emit_rgba_payload(ref, output, variant_base + 2u, 8, 8, "decoded monochrome pixel pattern", mono) &&
+		emit_rgba_payload(ref, output, variant_base + 3u, 64, 64, "decoded tiled monochrome pixel pattern", mono_tiled);
+
+	StackImportRapidJsonAllocator::Free(color);
+	StackImportRapidJsonAllocator::Free(color_tiled);
+	StackImportRapidJsonAllocator::Free(mono);
+	StackImportRapidJsonAllocator::Free(mono_tiled);
+	return emitted;
+}
+
 auto emit_ppat_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
-	ResourcePayload descriptor = make_converted_resource_payload(
+	ResourcePayload json_descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::JsonUtf8,
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed pixel pattern metadata");
-	if(!output.wants_resource_payload(descriptor))
+	const bool wants_json = output.wants_resource_payload(json_descriptor);
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		"decoded pixel pattern");
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	if(!wants_json && !wants_image)
 		return true;
 
 	rsrcd::pixel_pattern::Pattern pattern{};
@@ -1746,13 +1952,20 @@ auto emit_ppat_transform(
 	if(!parse_result)
 		return output.on_resource_error(ref, parse_result.message());
 
-	StackImportRapidJsonAllocator base_alloc;
-	JsonPoolAllocator pool(1024, &base_alloc);
-	JsonDocument doc(&pool, 1024, &base_alloc);
-	doc.SetObject();
-	JsonPoolAllocator& allocator = doc.GetAllocator();
-	add_json_pixel_pattern(doc, pattern, allocator);
-	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+	if(wants_json)
+	{
+		StackImportRapidJsonAllocator base_alloc;
+		JsonPoolAllocator pool(1024, &base_alloc);
+		JsonDocument doc(&pool, 1024, &base_alloc);
+		doc.SetObject();
+		JsonPoolAllocator& allocator = doc.GetAllocator();
+		add_json_pixel_pattern(doc, pattern, allocator);
+		if(!finish_json_resource_payload(json_descriptor, doc, base_alloc, output))
+			return false;
+	}
+	if(!wants_image)
+		return true;
+	return emit_pixel_pattern_images(resource.data, pattern, ref, output, 0);
 }
 
 auto emit_ppt_list_transform(
@@ -1760,13 +1973,21 @@ auto emit_ppt_list_transform(
 	const ResourceRef& ref,
 	IResourceOutput& output) -> bool
 {
-	ResourcePayload descriptor = make_converted_resource_payload(
+	ResourcePayload json_descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::JsonUtf8,
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed pixel pattern list metadata");
-	if(!output.wants_resource_payload(descriptor))
+	const bool wants_json = output.wants_resource_payload(json_descriptor);
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		"decoded pixel pattern list image");
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	if(!wants_json && !wants_image)
 		return true;
 
 	rsrcd::pixel_pattern::PatternList<64> patterns;
@@ -1774,21 +1995,34 @@ auto emit_ppt_list_transform(
 	if(!parse_result)
 		return output.on_resource_error(ref, parse_result.message());
 
-	StackImportRapidJsonAllocator base_alloc;
-	JsonPoolAllocator pool(4096, &base_alloc);
-	JsonDocument doc(&pool, 4096, &base_alloc);
-	doc.SetObject();
-	JsonPoolAllocator& allocator = doc.GetAllocator();
-	JsonValue entries(rapidjson::kArrayType);
+	if(wants_json)
+	{
+		StackImportRapidJsonAllocator base_alloc;
+		JsonPoolAllocator pool(4096, &base_alloc);
+		JsonDocument doc(&pool, 4096, &base_alloc);
+		doc.SetObject();
+		JsonPoolAllocator& allocator = doc.GetAllocator();
+		JsonValue entries(rapidjson::kArrayType);
+		for(size_t i = 0; i < patterns.count(); ++i)
+		{
+			JsonValue item(rapidjson::kObjectType);
+			item.AddMember("offset", patterns.offset(i), allocator);
+			add_json_pixel_pattern(item, patterns[i], allocator);
+			entries.PushBack(item, allocator);
+		}
+		doc.AddMember("patterns", entries, allocator);
+		if(!finish_json_resource_payload(json_descriptor, doc, base_alloc, output))
+			return false;
+	}
+	if(!wants_image)
+		return true;
 	for(size_t i = 0; i < patterns.count(); ++i)
 	{
-		JsonValue item(rapidjson::kObjectType);
-		item.AddMember("offset", patterns.offset(i), allocator);
-		add_json_pixel_pattern(item, patterns[i], allocator);
-		entries.PushBack(item, allocator);
+		const uint32_t next_offset = (i + 1u == patterns.count()) ? static_cast<uint32_t>(resource.data.size) : patterns.offset(i + 1u);
+		if(!emit_pixel_pattern_images(resource.data.slice(patterns.offset(i), next_offset - patterns.offset(i)), patterns[i], ref, output, static_cast<uint32_t>(i * 4u)))
+			return false;
 	}
-	doc.AddMember("patterns", entries, allocator);
-	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+	return true;
 }
 
 auto emit_cicn_transform(

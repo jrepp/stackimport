@@ -889,6 +889,11 @@ void test_resource_color_and_ui_transforms()
 		"\"type\": 0",
 		"\"monochromePatternHex\": \"8000000000000001\"",
 	});
+	{
+		CountingResourceOutput ppatOutput = parse_single_resource("ppat", 3, ppatPayload);
+		assert(ppatOutput.json_count == 1);
+		assert(ppatOutput.rgba_count == 4);
+	}
 
 	std::vector<uint8_t> pptPayload(34);
 	rsrcd::write_u16be(pptPayload.data(), 1);
@@ -901,6 +906,11 @@ void test_resource_color_and_ui_transforms()
 		"\"offset\": 6",
 		"\"monochromePatternHex\": \"1111111122222222\"",
 	});
+	{
+		CountingResourceOutput pptOutput = parse_single_resource("ppt#", 3, pptPayload);
+		assert(pptOutput.json_count == 1);
+		assert(pptOutput.rgba_count == 4);
+	}
 
 	std::vector<uint8_t> cicnPayload = make_cicn_payload();
 	assert_json_resource_contains("cicn", 3, cicnPayload, {
@@ -1115,6 +1125,46 @@ void test_resource_package_writes()
 	assert(cicnSummaries[0].outputArtifacts[1].path == "cicn_22.png");
 	assert(cicnSummaries[0].outputArtifacts[1].format == "png");
 	assert(cicnSummaries[0].outputArtifacts[1].mediaType == "image/png");
+
+	std::vector<uint8_t> packagePpatPayload(28);
+	rsrcd::write_u16be(packagePpatPayload.data(), 0);
+	rsrcd::write_u32be(packagePpatPayload.data() + 20, 0x80000000);
+	rsrcd::write_u32be(packagePpatPayload.data() + 24, 0x00000001);
+	const std::vector<uint8_t> ppatFork = make_single_resource_fork("ppat", 44, packagePpatPayload);
+	const std::string ppatOutputPath = std::string("/tmp/stackimport-ppat-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(ppatOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState ppatPlatformState;
+	ppatPlatformState.resource_fork_data = ppatFork.data();
+	ppatPlatformState.resource_fork_size = ppatFork.size();
+	stackimport_platform ppatPlatform = resourceForkPlatform;
+	ppatPlatform.user_data = &ppatPlatformState;
+	const stackimport_internal_platform ppatInternalPlatform = stackimport_internal_platform_from_api(&ppatPlatform);
+	CountingResourceOutput ppatOutput;
+	std::vector<CResourceSummary> ppatSummaries;
+	std::string ppatStatus;
+	uint64_t ppatBytes = 0;
+	{
+		stackimport_platform_scope ppatScope(ppatInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			ppatOutputPath,
+			"Stack",
+			&ppatOutput,
+			ppatSummaries,
+			ppatStatus,
+			ppatBytes));
+	}
+	assert(ppatStatus == "ok");
+	assert(ppatSummaries.size() == 1);
+	assert(ppatSummaries[0].type == "ppat");
+	assert(ppatSummaries[0].status == "exported");
+	assert(ppatSummaries[0].outputFile == "ppat_44.json");
+	assert(ppatSummaries[0].outputArtifacts.size() == 5);
+	assert(ppatSummaries[0].outputArtifacts[0].path == "ppat_44.json");
+	assert(ppatSummaries[0].outputArtifacts[1].path == "ppat_44_color.png");
+	assert(ppatSummaries[0].outputArtifacts[2].path == "ppat_44_color_tiled.png");
+	assert(ppatSummaries[0].outputArtifacts[3].path == "ppat_44_bitmap.png");
+	assert(ppatSummaries[0].outputArtifacts[4].path == "ppat_44_bitmap_tiled.png");
 
 	std::vector<uint8_t> sicnPayload(64, 0x00);
 	for(size_t row = 0; row < 16; row++)

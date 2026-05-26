@@ -356,6 +356,26 @@ private:
 			return;
 		}
 
+		if(resource_type_is(res_, "ppat") || resource_type_is(res_, "ppt#"))
+		{
+			const char* suffixes[] = {"color", "color_tiled", "bitmap", "bitmap_tiled"};
+			const uint32_t pattern_index = payload.variant_index / 4u;
+			const uint32_t image_kind = payload.variant_index % 4u;
+			if(resource_type_is(res_, "ppat"))
+				snprintf(fname, sizeof(fname), "ppat_%d_%s.png", res_.id, suffixes[image_kind]);
+			else
+				snprintf(fname, sizeof(fname), "ppt#_%d_%02u_%s.png", res_.id, static_cast<unsigned>(pattern_index), suffixes[image_kind]);
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				record_output_artifact(fname, payload, true);
+				exportedCount_++;
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
 		if(resource_type_is(res_, "cicn"))
 		{
 			snprintf(fname, sizeof(fname), "cicn_%d.png", res_.id);

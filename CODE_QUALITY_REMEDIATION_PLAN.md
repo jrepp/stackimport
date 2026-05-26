@@ -177,6 +177,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - `cicn` color icons now exercise that combined stream: the rsrcd-owned parser
   decodes bounded indexed pixels through the embedded color table, and the
   package writer emits both `cicn_<id>.json` metadata and `cicn_<id>.png`.
+- `ppat` and `ppt#` pixel patterns now also exercise the combined stream:
+  metadata JSON is emitted with color pattern, tiled color pattern, monochrome
+  bitmap, and tiled monochrome bitmap PNG artifacts.
 - Resource domain types and callback helpers moved to
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
@@ -353,8 +356,10 @@ when parser behavior changes, updates to the relevant format documentation under
   through the shared transform payload.
 - Done for `pltt` palettes: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
-- Done for pixel pattern metadata: parse `ppat` and `ppt#` through rsrcd and
-  route package JSON artifact writing through the shared transform payload.
+- Done for pixel pattern metadata and image output: parse `ppat` and `ppt#`
+  through rsrcd, emit JSON metadata plus decoded pattern PNG payloads from one
+  transform stream, and route package JSON/PNG artifact writing through that
+  payload stream.
 - Done for `SIZE` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for `finf` font metadata: parse through rsrcd and route package JSON
