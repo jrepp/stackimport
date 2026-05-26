@@ -2235,6 +2235,122 @@ auto parse_layo(Bytes data, Layout<Cap>& layout) -> Result {
 } // namespace simple_metadata
 
 // ============================================================================
+// 68K CODE resource metadata
+// ============================================================================
+
+namespace code_resource {
+
+struct Code0JumpEntry {
+    uint16_t offset;
+    uint16_t push_opcode;
+    int16_t resource_id;
+    uint16_t trap_opcode;
+    bool load_segment_trap;
+};
+
+template<size_t InlineCapacity = 256>
+class Code0 {
+public:
+    uint32_t above_a5_size = 0;
+    uint32_t below_a5_size = 0;
+    uint32_t jump_table_size = 0;
+    uint32_t jump_table_offset = 0;
+
+    auto add(Code0JumpEntry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many CODE 0 jump table entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Code0JumpEntry& { return entries_[i]; }
+    auto begin() const -> const Code0JumpEntry* { return entries_; }
+    auto end() const -> const Code0JumpEntry* { return entries_ + count_; }
+
+private:
+    Code0JumpEntry entries_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 256>
+auto parse_code0(Bytes data, Code0<Cap>& code0) -> Result {
+    constexpr size_t header_size = 16;
+    constexpr size_t entry_size = 8;
+    if (data.size < header_size) return Error::unexpected_end();
+    code0.above_a5_size = read_u32be(data.data);
+    code0.below_a5_size = read_u32be(data.data + 4);
+    code0.jump_table_size = read_u32be(data.data + 8);
+    code0.jump_table_offset = read_u32be(data.data + 12);
+
+    const size_t available = data.size - header_size;
+    const size_t entry_count = available / entry_size;
+    if (entry_count > Cap) return Error::invalid_data("too many CODE 0 jump table entries");
+    size_t offset = header_size;
+    for (size_t i = 0; i < entry_count; ++i) {
+        Code0JumpEntry entry{};
+        entry.offset = read_u16be(data.data + offset);
+        entry.push_opcode = read_u16be(data.data + offset + 2);
+        entry.resource_id = read_i16be(data.data + offset + 4);
+        entry.trap_opcode = read_u16be(data.data + offset + 6);
+        entry.load_segment_trap = entry.push_opcode == 0x3F3Cu && entry.trap_opcode == 0xA9F0u;
+        if (auto r = code0.add(entry); !r) return r;
+        offset += entry_size;
+    }
+    return Result::ok();
+}
+
+struct Segment {
+    bool far_header = false;
+    uint16_t first_jump_table_entry = 0;
+    uint16_t jump_table_entry_count = 0;
+    uint32_t near_entry_start_a5_offset = 0;
+    uint32_t near_entry_count = 0;
+    uint32_t far_entry_start_a5_offset = 0;
+    uint32_t far_entry_count = 0;
+    uint32_t a5_relocation_data_offset = 0;
+    uint32_t a5 = 0;
+    uint32_t pc_relocation_data_offset = 0;
+    uint32_t load_address = 0;
+    uint32_t reserved = 0;
+    uint32_t code_start_offset = 0;
+    Bytes code;
+};
+
+inline auto parse_segment(Bytes data, Segment& segment) -> Result {
+    if (data.size < 4) return Error::unexpected_end();
+    const uint16_t first = read_u16be(data.data);
+    const uint16_t count = read_u16be(data.data + 2);
+    if (first == 0xFFFFu && count == 0) {
+        constexpr size_t far_header_size = 40;
+        if (data.size < far_header_size) return Error::unexpected_end();
+        segment.far_header = true;
+        segment.first_jump_table_entry = first;
+        segment.jump_table_entry_count = count;
+        segment.near_entry_start_a5_offset = read_u32be(data.data + 4);
+        segment.near_entry_count = read_u32be(data.data + 8);
+        segment.far_entry_start_a5_offset = read_u32be(data.data + 12);
+        segment.far_entry_count = read_u32be(data.data + 16);
+        segment.a5_relocation_data_offset = read_u32be(data.data + 20);
+        segment.a5 = read_u32be(data.data + 24);
+        segment.pc_relocation_data_offset = read_u32be(data.data + 28);
+        segment.load_address = read_u32be(data.data + 32);
+        segment.reserved = read_u32be(data.data + 36);
+        segment.code_start_offset = far_header_size;
+        segment.code = data.slice(far_header_size, data.size - far_header_size);
+    } else {
+        segment.far_header = false;
+        segment.first_jump_table_entry = first;
+        segment.jump_table_entry_count = count;
+        segment.code_start_offset = 4;
+        segment.code = data.slice(4, data.size - 4);
+    }
+    return Result::ok();
+}
+
+} // namespace code_resource
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

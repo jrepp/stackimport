@@ -889,6 +889,81 @@ auto emit_layo_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_code_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed CODE metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(4096, &base_alloc);
+	JsonDocument doc(&pool, 4096, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	if(resource.id == 0)
+	{
+		rsrcd::code_resource::Code0<512> code0;
+		auto parse_result = rsrcd::code_resource::parse_code0(resource.data, code0);
+		if(!parse_result)
+			return output.on_resource_error(ref, parse_result.message());
+		doc.AddMember("kind", json_string("jumpTable", allocator), allocator);
+		doc.AddMember("aboveA5Size", code0.above_a5_size, allocator);
+		doc.AddMember("belowA5Size", code0.below_a5_size, allocator);
+		doc.AddMember("jumpTableSize", code0.jump_table_size, allocator);
+		doc.AddMember("jumpTableOffset", code0.jump_table_offset, allocator);
+		JsonValue entries(rapidjson::kArrayType);
+		for(const auto& entry : code0)
+		{
+			JsonValue value(rapidjson::kObjectType);
+			value.AddMember("offset", entry.offset, allocator);
+			value.AddMember("pushOpcode", entry.push_opcode, allocator);
+			value.AddMember("resourceId", entry.resource_id, allocator);
+			value.AddMember("trapOpcode", entry.trap_opcode, allocator);
+			value.AddMember("loadSegmentTrap", entry.load_segment_trap, allocator);
+			entries.PushBack(value, allocator);
+		}
+		doc.AddMember("jumpTableEntries", entries, allocator);
+	}
+	else
+	{
+		rsrcd::code_resource::Segment segment;
+		auto parse_result = rsrcd::code_resource::parse_segment(resource.data, segment);
+		if(!parse_result)
+			return output.on_resource_error(ref, parse_result.message());
+		doc.AddMember("kind", json_string(segment.far_header ? "farSegment" : "nearSegment", allocator), allocator);
+		doc.AddMember("firstJumpTableEntry", segment.first_jump_table_entry, allocator);
+		doc.AddMember("jumpTableEntryCount", segment.jump_table_entry_count, allocator);
+		doc.AddMember("codeStartOffset", segment.code_start_offset, allocator);
+		doc.AddMember("codeSize", static_cast<uint64_t>(segment.code.size), allocator);
+		if(segment.far_header)
+		{
+			doc.AddMember("nearEntryStartA5Offset", segment.near_entry_start_a5_offset, allocator);
+			doc.AddMember("nearEntryCount", segment.near_entry_count, allocator);
+			doc.AddMember("farEntryStartA5Offset", segment.far_entry_start_a5_offset, allocator);
+			doc.AddMember("farEntryCount", segment.far_entry_count, allocator);
+			doc.AddMember("a5RelocationDataOffset", segment.a5_relocation_data_offset, allocator);
+			doc.AddMember("a5", segment.a5, allocator);
+			doc.AddMember("pcRelocationDataOffset", segment.pc_relocation_data_offset, allocator);
+			doc.AddMember("loadAddress", segment.load_address, allocator);
+			doc.AddMember("reserved", segment.reserved, allocator);
+		}
+	}
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1878,6 +1953,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "LAYO"))
 		return emit_layo_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "CODE"))
+		return emit_code_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

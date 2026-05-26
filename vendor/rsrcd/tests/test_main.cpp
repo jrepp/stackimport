@@ -1171,6 +1171,64 @@ static void test_parse_layo_truncated() {
     CHECK(!r, "truncated LAYO should fail");
 }
 
+static void test_parse_code0() {
+    uint8_t data[24] = {};
+    rsrcd::write_u32be(data, 0x1000);
+    rsrcd::write_u32be(data + 4, 0x2000);
+    rsrcd::write_u32be(data + 8, 8);
+    rsrcd::write_u32be(data + 12, 16);
+    rsrcd::write_u16be(data + 16, 0x0010);
+    rsrcd::write_u16be(data + 18, 0x3F3C);
+    rsrcd::write_u16be(data + 20, 1);
+    rsrcd::write_u16be(data + 22, 0xA9F0);
+
+    rsrcd::code_resource::Code0<4> code0;
+    auto r = rsrcd::code_resource::parse_code0({data, sizeof(data)}, code0);
+    CHECK_RESULT(r, "parse CODE 0");
+    CHECK(code0.above_a5_size == 0x1000, "CODE 0 above A5");
+    CHECK(code0.count() == 1, "CODE 0 entry count");
+    CHECK(code0[0].resource_id == 1, "CODE 0 resource ID");
+    CHECK(code0[0].load_segment_trap, "CODE 0 load segment trap");
+}
+
+static void test_parse_code_segment_near() {
+    uint8_t data[6] = {};
+    rsrcd::write_u16be(data, 2);
+    rsrcd::write_u16be(data + 2, 3);
+    data[4] = 0x4E;
+    data[5] = 0x75;
+
+    rsrcd::code_resource::Segment segment;
+    auto r = rsrcd::code_resource::parse_segment({data, sizeof(data)}, segment);
+    CHECK_RESULT(r, "parse near CODE segment");
+    CHECK(!segment.far_header, "near CODE segment kind");
+    CHECK(segment.first_jump_table_entry == 2, "near CODE first entry");
+    CHECK(segment.code.size == 2, "near CODE size");
+}
+
+static void test_parse_code_segment_far() {
+    uint8_t data[42] = {};
+    rsrcd::write_u16be(data, 0xFFFF);
+    rsrcd::write_u16be(data + 2, 0);
+    rsrcd::write_u32be(data + 4, 0x10);
+    rsrcd::write_u32be(data + 8, 1);
+    rsrcd::write_u32be(data + 12, 0x20);
+    rsrcd::write_u32be(data + 16, 2);
+    rsrcd::write_u32be(data + 20, 0x30);
+    rsrcd::write_u32be(data + 24, 0x40);
+    rsrcd::write_u32be(data + 28, 0x50);
+    rsrcd::write_u32be(data + 32, 0x60);
+    data[40] = 0x4E;
+    data[41] = 0x75;
+
+    rsrcd::code_resource::Segment segment;
+    auto r = rsrcd::code_resource::parse_segment({data, sizeof(data)}, segment);
+    CHECK_RESULT(r, "parse far CODE segment");
+    CHECK(segment.far_header, "far CODE segment kind");
+    CHECK(segment.far_entry_count == 2, "far CODE entry count");
+    CHECK(segment.code.size == 2, "far CODE size");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1911,6 +1969,9 @@ int main() {
     test_parse_papa_truncated();
     test_parse_layo();
     test_parse_layo_truncated();
+    test_parse_code0();
+    test_parse_code_segment_near();
+    test_parse_code_segment_far();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

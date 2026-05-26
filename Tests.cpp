@@ -1019,6 +1019,35 @@ void	RunTests()
 	assert(layoOutput.last_json.find("\"right\": 220") != std::string::npos);
 	assert(layoOutput.last_json.find("\"rectangles\"") != std::string::npos);
 
+	std::vector<uint8_t> code0Payload;
+	append_u32be(code0Payload, 0x1000);
+	append_u32be(code0Payload, 0x2000);
+	append_u32be(code0Payload, 8);
+	append_u32be(code0Payload, 16);
+	append_u16be(code0Payload, 0x0010);
+	append_u16be(code0Payload, 0x3F3C);
+	append_u16be(code0Payload, 1);
+	append_u16be(code0Payload, 0xA9F0);
+	const std::vector<uint8_t> code0Fork = make_single_resource_fork("CODE", 0, code0Payload);
+	CountingResourceOutput code0Output;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{code0Fork.data(), code0Fork.size()}, code0Output));
+	assert(code0Output.native_count == 1);
+	assert(code0Output.json_count == 1);
+	assert(code0Output.last_json.find("\"kind\": \"jumpTable\"") != std::string::npos);
+	assert(code0Output.last_json.find("\"loadSegmentTrap\": true") != std::string::npos);
+
+	std::vector<uint8_t> codePayload;
+	append_u16be(codePayload, 2);
+	append_u16be(codePayload, 3);
+	codePayload.insert(codePayload.end(), {0x4E, 0x75});
+	const std::vector<uint8_t> codeFork = make_single_resource_fork("CODE", 1, codePayload);
+	CountingResourceOutput codeOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{codeFork.data(), codeFork.size()}, codeOutput));
+	assert(codeOutput.native_count == 1);
+	assert(codeOutput.json_count == 1);
+	assert(codeOutput.last_json.find("\"kind\": \"nearSegment\"") != std::string::npos);
+	assert(codeOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

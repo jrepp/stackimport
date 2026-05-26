@@ -228,6 +228,9 @@ when parser behavior changes, updates to the relevant format documentation under
   transforms for keyboard names and printer parameters.
 - `LAYO` layout resources now have an rsrcd typed parser and shared JSON
   transform for font/layout metrics and rectangles.
+- `CODE` resources now have an rsrcd typed metadata parser and shared JSON
+  transform for CODE 0 jump tables and near/far segment headers; disassembly
+  remains future code-resource adapter work.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -308,6 +311,8 @@ when parser behavior changes, updates to the relevant format documentation under
   route package JSON artifact writing through the shared transform payload.
 - Done for `LAYO` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `CODE` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -372,7 +377,7 @@ all consumers listed in the lateral audit above have been updated and tested.
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
   `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
   `RSSC`, `TxSt`, `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, `XCMD`, `XFCN`,
-  `LAYO`, `xcmd`, `xfcn`.
+  `LAYO`, `CODE`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
