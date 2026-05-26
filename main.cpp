@@ -1,6 +1,7 @@
 #include "stackimport_c.h"
 #include "stackimport_logging.h"
 #include "include/stackimport_sax.hpp"
+#include "RomDasm.h"
 
 #include <climits>
 #include <cstdlib>
@@ -24,7 +25,7 @@ void	RunTests();
 
 
 // Arguments as string for syntax info
-#define SYNTAXSTR "[--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--scan] [--output <packagePath>] <originalStackPath>"
+#define SYNTAXSTR "[--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--scan] [--rom [--rom-base <address>]] [--output <packagePath>] <originalStackPath>"
 
 namespace {
 
@@ -84,6 +85,69 @@ int cli_make_directory(const char* path, void*)
 #else
 	return mkdir(path, 0777);
 #endif
+}
+
+std::string json_escape(const std::string& text)
+{
+	std::string result;
+	result.reserve(text.size() + 8);
+	for(char ch : text)
+	{
+		switch(ch)
+		{
+			case '\\': result += "\\\\"; break;
+			case '"': result += "\\\""; break;
+			case '\n': result += "\\n"; break;
+			case '\r': result += "\\r"; break;
+			case '\t': result += "\\t"; break;
+			default:
+				if(static_cast<unsigned char>(ch) < 0x20)
+				{
+					char escaped[8] = {};
+					snprintf(escaped, sizeof(escaped), "\\u%04X", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+					result += escaped;
+				}
+				else
+				{
+					result.push_back(ch);
+				}
+				break;
+		}
+	}
+	return result;
+}
+
+bool read_entire_file(const std::string& path, std::vector<uint8_t>& out)
+{
+	out.clear();
+	FILE* file = fopen(path.c_str(), "rb");
+	if(!file)
+		return false;
+	if(fseek(file, 0, SEEK_END) != 0)
+	{
+		fclose(file);
+		return false;
+	}
+	const long fileSize = ftell(file);
+	if(fileSize < 0 || fseek(file, 0, SEEK_SET) != 0)
+	{
+		fclose(file);
+		return false;
+	}
+	out.resize(static_cast<size_t>(fileSize));
+	const bool ok = fileSize == 0 || fread(out.data(), 1, out.size(), file) == out.size();
+	const int closeStatus = fclose(file);
+	return ok && closeStatus == 0;
+}
+
+bool write_text_file(const std::string& path, const std::string& text)
+{
+	FILE* file = fopen(path.c_str(), "wb");
+	if(!file)
+		return false;
+	const bool ok = text.empty() || fwrite(text.data(), 1, text.size(), file) == text.size();
+	const int closeStatus = fclose(file);
+	return ok && closeStatus == 0;
 }
 
 std::string absolute_path(const char* path)
@@ -151,6 +215,8 @@ int main( int argc, char * const argv[] )
 	uint32_t flags = STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
 	const char* outputPathArgument = nullptr;
 	bool scanMode = false;
+	bool romMode = false;
+	uint32_t romBaseAddress = 0;
 	int		x = 1;	// Skip command name in argv[0].
 	if( argc > 2 )
 	{
@@ -168,6 +234,25 @@ int main( int argc, char * const argv[] )
 				flags |= STACKIMPORT_IMPORT_RAW_GRAPHICS;
 			else if( strcmp(argv[x],"--scan") == 0 )
 				scanMode = true;
+			else if( strcmp(argv[x],"--rom") == 0 )
+				romMode = true;
+			else if( strcmp(argv[x],"--rom-base") == 0 )
+			{
+				x++;
+				if( x >= argc )
+				{
+					stackimport_quill_diagnosticf( "Error: Missing address after --rom-base, syntax is %s " SYNTAXSTR "\n", argv[0] );
+					return 3;
+				}
+				char* end = nullptr;
+				const unsigned long parsedBase = std::strtoul(argv[x], &end, 0);
+				if(!end || *end != '\0' || parsedBase > UINT32_MAX)
+				{
+					stackimport_quill_diagnosticf( "Error: Invalid --rom-base address '%s'.\n", argv[x] );
+					return 3;
+				}
+				romBaseAddress = static_cast<uint32_t>(parsedBase);
+			}
 			else if( strcmp(argv[x],"--output") == 0 )
 			{
 				x++;
@@ -202,26 +287,13 @@ int main( int argc, char * const argv[] )
 	}
 	if( scanMode )
 	{
-		FILE* f = fopen(fpath.c_str(), "rb");
-		if(!f)
-		{
-			stackimport_quill_diagnosticf("Error: Cannot open '%s'.\n", fpath.c_str());
-			stackimport_logging_shutdown();
-			return 5;
-		}
-		fseek(f, 0, SEEK_END);
-		long fsize = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		std::vector<uint8_t> buf(static_cast<size_t>(fsize));
-		if(fsize > 0 && fread(buf.data(), 1, buf.size(), f) != buf.size())
+		std::vector<uint8_t> buf;
+		if(!read_entire_file(fpath, buf))
 		{
 			stackimport_quill_diagnosticf("Error: Failed to read '%s'.\n", fpath.c_str());
-			fclose(f);
 			stackimport_logging_shutdown();
 			return 5;
 		}
-		fclose(f);
 
 		rsrcd::Bytes data{buf.data(), buf.size()};
 
@@ -259,6 +331,144 @@ int main( int argc, char * const argv[] )
 		}
 
 		stackimport_quill_diagnosticf("Total blocks: %d\n", scan_out.count);
+		stackimport_logging_shutdown();
+		return 0;
+	}
+	if( romMode )
+	{
+		std::vector<uint8_t> buf;
+		if(!read_entire_file(fpath, buf))
+		{
+			stackimport_quill_diagnosticf("Error: Failed to read '%s'.\n", fpath.c_str());
+			stackimport_logging_shutdown();
+			return 5;
+		}
+
+		const auto filename = fpath.substr(fpath.find_last_of("/\\") + 1);
+		stackimport::RomDasm::RomInfo romInfo = stackimport::RomDasm::analyze_rom_header(
+			std::span<const uint8_t>(buf.data(), buf.size()), romBaseAddress);
+		romInfo.filename = filename;
+
+		stackimport::RomDasm::ScanOptions options = {};
+		options.start_address = romBaseAddress;
+		options.disassemble_code = true;
+		options.detect_pointer_tables = true;
+		options.min_string_length = 4;
+
+		stackimport_quill_diagnosticf("Analyzing ROM: %s (%u bytes, base $%08X)\n",
+			filename.c_str(), static_cast<unsigned>(buf.size()), static_cast<unsigned>(romBaseAddress));
+
+		auto analysis = stackimport::RomDasm::scan_rom(
+			std::span<const uint8_t>(buf.data(), buf.size()), romInfo, options);
+
+		stackimport_quill_diagnosticf("Found %zu code regions, %zu strings, %zu pointer tables\n",
+			analysis.code_regions.size(), analysis.strings.size(), analysis.pointer_tables.size());
+		stackimport_quill_diagnosticf("Total instructions: %zu\n", analysis.total_instructions);
+
+		std::string outputDir = outputPathArgument ? absolute_path(outputPathArgument) : fpath + ".rom";
+		if(cli_make_directory(outputDir.c_str(), nullptr) != 0)
+		{
+			stackimport_quill_diagnosticf("Error: Failed to create output directory '%s'.\n", outputDir.c_str());
+			stackimport_logging_shutdown();
+			return 5;
+		}
+
+		std::string dasmPath = outputDir + "/disassembly.s";
+		std::string disasm = stackimport::RomDasm::export_disassembly(analysis, true);
+		if(!write_text_file(dasmPath, disasm))
+		{
+			stackimport_quill_diagnosticf("Error: Failed to write '%s'.\n", dasmPath.c_str());
+			stackimport_logging_shutdown();
+			return 5;
+		}
+		stackimport_quill_diagnosticf("Wrote: %s\n", dasmPath.c_str());
+
+		std::string jsonPath = outputDir + "/analysis.json";
+		FILE* jsonFile = fopen(jsonPath.c_str(), "w");
+		if(jsonFile) {
+			fprintf(jsonFile, "{\n");
+			fprintf(jsonFile, "  \"filename\": \"%s\",\n", json_escape(filename).c_str());
+			fprintf(jsonFile, "  \"size\": %u,\n", static_cast<unsigned>(analysis.info.size));
+			fprintf(jsonFile, "  \"crc32\": \"%08X\",\n", static_cast<unsigned>(analysis.info.crc32));
+			fprintf(jsonFile, "  \"sha256\": \"%s\",\n", json_escape(analysis.info.sha256).c_str());
+			fprintf(jsonFile, "  \"base_address\": \"0x%08X\",\n", static_cast<unsigned>(romBaseAddress));
+			fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
+			fprintf(jsonFile, "  \"code_regions\": %zu,\n", analysis.code_regions.size());
+			fprintf(jsonFile, "  \"strings\": %zu,\n", analysis.strings.size());
+			fprintf(jsonFile, "  \"pointer_tables\": %zu,\n", analysis.pointer_tables.size());
+			fprintf(jsonFile, "  \"pointer_table_regions\": %zu,\n", analysis.pointer_table_regions.size());
+			fprintf(jsonFile, "  \"function_candidates\": %zu,\n", analysis.function_candidates.size());
+			fprintf(jsonFile, "  \"data_regions\": %zu,\n", analysis.data_regions.size());
+			fprintf(jsonFile, "  \"resource_markers\": %zu,\n", analysis.resource_markers.size());
+			fprintf(jsonFile, "  \"total_instructions\": %zu,\n", analysis.total_instructions);
+			fprintf(jsonFile, "  \"function_candidates_sample\": [\n");
+			for(size_t i = 0; i < analysis.function_candidates.size() && i < 200; i++) {
+				const auto& fn = analysis.function_candidates[i];
+				fprintf(jsonFile,
+					"    {\"address\":\"%08X\",\"label\":\"%s\",\"calls\":%zu,\"jumps\":%zu,\"references\":%zu,\"confidence\":%.2f}%s\n",
+					static_cast<unsigned>(fn.address),
+					json_escape(fn.label).c_str(),
+					fn.calls,
+					fn.jumps,
+					fn.references,
+					fn.confidence,
+					(i + 1 < analysis.function_candidates.size() && i + 1 < 200) ? "," : "");
+			}
+			fprintf(jsonFile, "  ],\n");
+			fprintf(jsonFile, "  \"pointer_table_regions_sample\": [\n");
+			for(size_t i = 0; i < analysis.pointer_table_regions.size() && i < 120; i++) {
+				const auto& table = analysis.pointer_table_regions[i];
+				fprintf(jsonFile,
+					"    {\"address\":\"%08X\",\"entry_count\":%zu,\"targets\":[",
+					static_cast<unsigned>(table.address),
+					table.entry_count);
+				for(size_t j = 0; j < table.targets.size() && j < 16; j++) {
+					fprintf(jsonFile, "%s\"%08X\"", j ? "," : "", static_cast<unsigned>(table.targets[j]));
+				}
+				fprintf(jsonFile, "]}%s\n", (i + 1 < analysis.pointer_table_regions.size() && i + 1 < 120) ? "," : "");
+			}
+			fprintf(jsonFile, "  ],\n");
+			fprintf(jsonFile, "  \"data_regions_sample\": [\n");
+			for(size_t i = 0; i < analysis.data_regions.size() && i < 120; i++) {
+				const auto& region = analysis.data_regions[i];
+				fprintf(jsonFile,
+					"    {\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":%zu,\"confidence\":%.2f}%s\n",
+					static_cast<unsigned>(region.start_address),
+					static_cast<unsigned>(region.end_address),
+					json_escape(region.kind).c_str(),
+					region.item_count,
+					region.confidence,
+					(i + 1 < analysis.data_regions.size() && i + 1 < 120) ? "," : "");
+			}
+			fprintf(jsonFile, "  ],\n");
+			fprintf(jsonFile, "  \"resource_markers_sample\": [\n");
+			for(size_t i = 0; i < analysis.resource_markers.size() && i < 120; i++) {
+				const auto& marker = analysis.resource_markers[i];
+				fprintf(jsonFile,
+					"    {\"address\":\"%08X\",\"type\":\"%s\",\"context\":\"%s\"}%s\n",
+					static_cast<unsigned>(marker.address),
+					json_escape(marker.type).c_str(),
+					json_escape(marker.context).c_str(),
+					(i + 1 < analysis.resource_markers.size() && i + 1 < 120) ? "," : "");
+			}
+			fprintf(jsonFile, "  ]\n");
+			fprintf(jsonFile, "}\n");
+			if(fclose(jsonFile) != 0)
+			{
+				stackimport_quill_diagnosticf("Error: Failed to close '%s'.\n", jsonPath.c_str());
+				stackimport_logging_shutdown();
+				return 5;
+			}
+		}
+		else
+		{
+			stackimport_quill_diagnosticf("Error: Failed to write '%s'.\n", jsonPath.c_str());
+			stackimport_logging_shutdown();
+			return 5;
+		}
+		stackimport_quill_diagnosticf("Wrote: %s\n", jsonPath.c_str());
+
+		stackimport_quill_diagnosticf("ROM analysis complete. Output: %s\n", outputDir.c_str());
 		stackimport_logging_shutdown();
 		return 0;
 	}
