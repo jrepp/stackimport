@@ -214,6 +214,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - MACE decoding now goes through `StackImportMaceResourceDasmAdapter`; the
   private `resource_dasm/src/AudioCodecs.hh` include is isolated to the narrow
   adapter source under `vendor/`.
+- PNG writing now goes through `StackImportPngWriter`; `stb_image_write.h` and
+  `STB_IMAGE_WRITE_IMPLEMENTATION` are isolated to that adapter source.
 - Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
   configurations build and pass tests after the adapter split.
 - Remaining work: resource-fork, disassembly, PNG, and WAV adapter target
@@ -227,7 +229,7 @@ when parser behavior changes, updates to the relevant format documentation under
   - resource fork parsing and small resource decoders from `rsrcd`;
   - Done: MACE decoding from `resource_dasm` or an owned codec extraction;
   - disassembly support from `resource_dasm`;
-  - PNG encoding through stb;
+  - Done: PNG encoding through stb;
   - WAV writing through owned code or `dr_wav`.
 - Decide whether `vendor_snd2wav` is still needed. If not used by the core
   importer, remove it from default link targets and document it as legacy

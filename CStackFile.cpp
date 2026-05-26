@@ -27,8 +27,6 @@
 #include "stackimport_rapidjson_allocator.h"
 #include "include/stackimport_sax.hpp"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
