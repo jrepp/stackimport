@@ -394,7 +394,8 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
 	thread_local std::string error;
 	error.clear();
 	stackimport::PlatformByteVector wav;
-	if(!stackimport::ConvertSndResourceToWav(static_cast<const uint8_t*>(snd_data), snd_size, wav, error))
+	const rsrcd::Bytes snd{static_cast<const uint8_t*>(snd_data), snd_size};
+	if(!stackimport::ConvertSndResourceToWav(snd, wav, error))
 	{
 		*out_error = error.empty() ? "conversion failed" : error.c_str();
 		return 0;
