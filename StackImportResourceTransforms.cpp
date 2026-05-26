@@ -693,6 +693,77 @@ auto emit_styl_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_kchr_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed keyboard character map");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::kchr::KeyCharMap<> key_map;
+	auto parse_result = rsrcd::kchr::parse(resource.data, key_map);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(8192, &base_alloc);
+	JsonDocument doc(&pool, 8192, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	JsonValue modifier_indexes(rapidjson::kArrayType);
+	for(uint8_t table_index : key_map.table_index_for_modifiers)
+		modifier_indexes.PushBack(table_index, allocator);
+	doc.AddMember("modifierTableIndexes", modifier_indexes, allocator);
+
+	JsonValue tables(rapidjson::kArrayType);
+	for(size_t i = 0; i < key_map.table_count(); ++i)
+	{
+		JsonValue table(rapidjson::kObjectType);
+		table.AddMember("index", static_cast<uint64_t>(i), allocator);
+		std::string chars_hex = bytes_to_hex(key_map.table(i));
+		table.AddMember("charsHex", json_string(chars_hex, allocator), allocator);
+		tables.PushBack(table, allocator);
+	}
+	doc.AddMember("tables", tables, allocator);
+
+	JsonValue dead_keys(rapidjson::kArrayType);
+	for(size_t i = 0; i < key_map.dead_key_count(); ++i)
+	{
+		const rsrcd::kchr::DeadKey& dead_key = key_map.dead_key(i);
+		JsonValue value(rapidjson::kObjectType);
+		value.AddMember("tableIndex", dead_key.table_index, allocator);
+		value.AddMember("virtualKeyCode", dead_key.virtual_key_code, allocator);
+		JsonValue completions(rapidjson::kArrayType);
+		for(size_t j = 0; j < dead_key.completion_count; ++j)
+		{
+			JsonValue completion(rapidjson::kObjectType);
+			completion.AddMember("completionChar", dead_key.completions.data[j * 2u], allocator);
+			completion.AddMember("substituteChar", dead_key.completions.data[j * 2u + 1u], allocator);
+			completions.PushBack(completion, allocator);
+		}
+		value.AddMember("completions", completions, allocator);
+		JsonValue no_match(rapidjson::kObjectType);
+		no_match.AddMember("completionChar", dead_key.no_match_completion.completion_char, allocator);
+		no_match.AddMember("substituteChar", dead_key.no_match_completion.substitute_char, allocator);
+		value.AddMember("noMatchCompletion", no_match, allocator);
+		dead_keys.PushBack(value, allocator);
+	}
+	doc.AddMember("deadKeys", dead_keys, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_rect_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -2070,6 +2141,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "styl"))
 		return emit_styl_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "KCHR"))
+		return emit_kchr_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "RECT"))
 		return emit_rect_transform(resource, ref, output);

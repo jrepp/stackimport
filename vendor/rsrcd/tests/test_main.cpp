@@ -1069,6 +1069,42 @@ static void test_parse_styl_truncated() {
     CHECK(!r, "truncated styl should fail");
 }
 
+static void test_parse_kchr() {
+    uint8_t data[2 + 256 + 2 + 128 + 2 + 8] = {};
+    rsrcd::write_u16be(data, 0);
+    rsrcd::write_u16be(data + 258, 1);
+    data[260] = 'a';
+    rsrcd::write_u16be(data + 388, 1);
+    data[390] = 0;
+    data[391] = 12;
+    rsrcd::write_u16be(data + 392, 1);
+    data[394] = '`';
+    data[395] = 'a';
+    data[396] = 0;
+    data[397] = '`';
+
+    rsrcd::kchr::KeyCharMap<4, 4> key_map;
+    auto r = rsrcd::kchr::parse({data, sizeof(data)}, key_map);
+    CHECK_RESULT(r, "parse KCHR");
+    CHECK(key_map.table_count() == 1, "KCHR table count");
+    CHECK(key_map.table(0).data[0] == 'a', "KCHR first char");
+    CHECK(key_map.dead_key_count() == 1, "KCHR dead key count");
+    CHECK(key_map.dead_key(0).virtual_key_code == 12, "KCHR dead key code");
+    CHECK(key_map.dead_key(0).completion_count == 1, "KCHR completion count");
+    CHECK(key_map.dead_key(0).completions.data[1] == 'a', "KCHR substitute char");
+}
+
+static void test_parse_kchr_bad_modifier_index() {
+    uint8_t data[2 + 256 + 2 + 128 + 2] = {};
+    rsrcd::write_u16be(data, 0);
+    data[2] = 1;
+    rsrcd::write_u16be(data + 258, 1);
+
+    rsrcd::kchr::KeyCharMap<4, 4> key_map;
+    auto r = rsrcd::kchr::parse({data, sizeof(data)}, key_map);
+    CHECK(!r, "bad KCHR modifier table index should fail");
+}
+
 static void test_parse_rect_resource() {
     uint8_t data[8] = {};
     rsrcd::write_u16be(data, 1);
@@ -2067,6 +2103,8 @@ int main() {
     test_parse_txst_truncated_name();
     test_parse_styl();
     test_parse_styl_truncated();
+    test_parse_kchr();
+    test_parse_kchr_bad_modifier_index();
     test_parse_rect_resource();
     test_parse_tool();
     test_parse_tool_odd_length();

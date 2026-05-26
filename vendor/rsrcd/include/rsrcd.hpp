@@ -2088,6 +2088,105 @@ auto parse(Bytes data, StyleRunList<Cap>& runs) -> Result {
 } // namespace styl
 
 // ============================================================================
+// Keyboard character maps (KCHR)
+// ============================================================================
+
+namespace kchr {
+
+struct Completion {
+    uint8_t completion_char;
+    uint8_t substitute_char;
+};
+
+struct DeadKey {
+    uint8_t table_index;
+    uint8_t virtual_key_code;
+    Bytes completions;
+    uint16_t completion_count;
+    Completion no_match_completion;
+};
+
+template<size_t TableCapacity = 256, size_t DeadKeyCapacity = 256>
+class KeyCharMap {
+public:
+    uint8_t table_index_for_modifiers[256] = {};
+
+    auto add_table(Bytes table) -> Result {
+        if (table_count_ < TableCapacity) {
+            tables_[table_count_++] = table;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many KCHR tables");
+    }
+    auto add_dead_key(DeadKey value) -> Result {
+        if (dead_key_count_ < DeadKeyCapacity) {
+            dead_keys_[dead_key_count_++] = value;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many KCHR dead keys");
+    }
+    auto table_count() const -> size_t { return table_count_; }
+    auto dead_key_count() const -> size_t { return dead_key_count_; }
+    auto table(size_t i) const -> Bytes { return tables_[i]; }
+    auto dead_key(size_t i) const -> const DeadKey& { return dead_keys_[i]; }
+
+private:
+    Bytes tables_[TableCapacity];
+    DeadKey dead_keys_[DeadKeyCapacity];
+    size_t table_count_ = 0;
+    size_t dead_key_count_ = 0;
+};
+
+template<size_t TableCap = 256, size_t DeadKeyCap = 256>
+auto parse(Bytes data, KeyCharMap<TableCap, DeadKeyCap>& map) -> Result {
+    constexpr size_t modifier_count = 256;
+    constexpr size_t table_size = 128;
+    if (data.size < 2 + modifier_count + 2) return Error::unexpected_end();
+    const uint16_t version = read_u16be(data.data);
+    if (version != 0) return Error::invalid_data("unsupported KCHR version");
+    size_t offset = 2;
+    for (size_t i = 0; i < modifier_count; ++i) {
+        map.table_index_for_modifiers[i] = data.data[offset++];
+    }
+
+    const uint16_t table_count = read_u16be(data.data + offset);
+    offset += 2;
+    if (table_count == 0) return Error::invalid_data("KCHR has no character tables");
+    for (size_t i = 0; i < modifier_count; ++i) {
+        if (map.table_index_for_modifiers[i] >= table_count) {
+            return Error::invalid_data("KCHR modifier table index out of range");
+        }
+    }
+    if (!range_in_bounds(offset, static_cast<size_t>(table_count) * table_size, data.size)) return Error::unexpected_end();
+    for (uint16_t i = 0; i < table_count; ++i) {
+        if (auto r = map.add_table(data.slice(offset, table_size)); !r) return r;
+        offset += table_size;
+    }
+
+    if (!range_in_bounds(offset, 2, data.size)) return Error::unexpected_end();
+    const uint16_t dead_key_count = read_u16be(data.data + offset);
+    offset += 2;
+    for (uint16_t i = 0; i < dead_key_count; ++i) {
+        if (!range_in_bounds(offset, 4, data.size)) return Error::unexpected_end();
+        DeadKey dead_key{};
+        dead_key.table_index = data.data[offset++];
+        dead_key.virtual_key_code = data.data[offset++];
+        dead_key.completion_count = read_u16be(data.data + offset);
+        offset += 2;
+        const size_t completion_bytes = static_cast<size_t>(dead_key.completion_count) * 2u;
+        if (!range_in_bounds(offset, completion_bytes + 2u, data.size)) return Error::unexpected_end();
+        dead_key.completions = data.slice(offset, completion_bytes);
+        offset += completion_bytes;
+        dead_key.no_match_completion.completion_char = data.data[offset++];
+        dead_key.no_match_completion.substitute_char = data.data[offset++];
+        if (auto r = map.add_dead_key(dead_key); !r) return r;
+    }
+    return Result::ok();
+}
+
+} // namespace kchr
+
+// ============================================================================
 // Simple template-backed metadata resources (RECT / TOOL)
 // ============================================================================
 

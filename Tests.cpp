@@ -590,6 +590,25 @@ void test_resource_text_transforms()
 		"\"fontId\": 128",
 		"\"green\": 8738",
 	});
+
+	std::vector<uint8_t> kchrPayload(2 + 256 + 2 + 128 + 2 + 8);
+	rsrcd::write_u16be(kchrPayload.data(), 0);
+	rsrcd::write_u16be(kchrPayload.data() + 258, 1);
+	kchrPayload[260] = 'a';
+	rsrcd::write_u16be(kchrPayload.data() + 388, 1);
+	kchrPayload[390] = 0;
+	kchrPayload[391] = 12;
+	rsrcd::write_u16be(kchrPayload.data() + 392, 1);
+	kchrPayload[394] = '`';
+	kchrPayload[395] = 'a';
+	kchrPayload[396] = 0;
+	kchrPayload[397] = '`';
+	assert_json_resource_contains("KCHR", 1, kchrPayload, {
+		"\"modifierTableIndexes\"",
+		"\"charsHex\": \"61",
+		"\"virtualKeyCode\": 12",
+		"\"substituteChar\": 97",
+	});
 }
 
 void test_resource_metadata_transforms()

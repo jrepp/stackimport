@@ -223,6 +223,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - `styl` style-run resources now have an rsrcd typed parser and shared JSON
   transform for run offsets, font metrics, style flags, font size, and RGB
   color.
+- `KCHR` keyboard character maps now have an rsrcd typed parser and shared JSON
+  transform for modifier table indexes, character tables, and dead-key
+  completions.
 - Simple template-backed metadata resources `RECT` and `TOOL` now have rsrcd
   typed parsers and shared JSON transforms.
 - `PICK` picker resources now have an rsrcd typed parser and shared JSON
@@ -311,6 +314,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `styl` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `KCHR` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for simple template-backed metadata: parse `RECT` and `TOOL` through
   rsrcd and route package JSON artifact writing through the shared transform
   payload.
@@ -390,7 +395,7 @@ all consumers listed in the lateral audit above have been updated and tested.
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
   `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
   `RSSC`, `TxSt`, `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, `XCMD`, `XFCN`,
-  `LAYO`, `CODE`, `DRVR`, `dcmp`, `styl`, `xcmd`, `xfcn`.
+  `LAYO`, `CODE`, `DRVR`, `dcmp`, `styl`, `KCHR`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,
