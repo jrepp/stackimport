@@ -892,6 +892,20 @@ void	RunTests()
 	assert(rovOutput.last_json.find("\"typeString\": \"MENU\"") != std::string::npos);
 	assert(rovOutput.last_json.find("\"id\": 128") != std::string::npos);
 
+	std::vector<uint8_t> rsscPayload(24);
+	rsrcd::write_u32be(rsscPayload.data(), 0x52535343);
+	rsrcd::write_u16be(rsscPayload.data() + 4, 22);
+	rsscPayload[22] = 0x4E;
+	rsscPayload[23] = 0x75;
+	const std::vector<uint8_t> rsscFork = make_single_resource_fork("RSSC", 1, rsscPayload);
+	CountingResourceOutput rsscOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rsscFork.data(), rsscFork.size()}, rsscOutput));
+	assert(rsscOutput.native_count == 1);
+	assert(rsscOutput.json_count == 1);
+	assert(rsscOutput.last_json.find("\"typeSignatureString\": \"RSSC\"") != std::string::npos);
+	assert(rsscOutput.last_json.find("\"codeStartOffset\": 22") != std::string::npos);
+	assert(rsscOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

@@ -959,6 +959,39 @@ static void test_parse_rov_truncated() {
     CHECK(!r, "truncated ROv# should fail");
 }
 
+static void test_parse_rssc() {
+    uint8_t data[24] = {};
+    rsrcd::write_u32be(data, 0x52535343);
+    rsrcd::write_u16be(data + 4, 22);
+    data[22] = 0x4E;
+    data[23] = 0x75;
+
+    rsrcd::rssc::Resource rssc{};
+    auto r = rsrcd::rssc::parse({data, sizeof(data)}, rssc);
+    CHECK_RESULT(r, "parse RSSC");
+    CHECK(rssc.type_signature == 0x52535343, "RSSC signature");
+    CHECK(rssc.function_offsets[0] == 22, "RSSC first function offset");
+    CHECK(rssc.code.size == 2, "RSSC code size");
+}
+
+static void test_parse_rssc_bad_signature() {
+    uint8_t data[22] = {};
+
+    rsrcd::rssc::Resource rssc{};
+    auto r = rsrcd::rssc::parse({data, sizeof(data)}, rssc);
+    CHECK(!r, "RSSC bad signature should fail");
+}
+
+static void test_parse_rssc_bad_offset() {
+    uint8_t data[22] = {};
+    rsrcd::write_u32be(data, 0x52535343);
+    rsrcd::write_u16be(data + 4, 10);
+
+    rsrcd::rssc::Resource rssc{};
+    auto r = rsrcd::rssc::parse({data, sizeof(data)}, rssc);
+    CHECK(!r, "RSSC header offset should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1684,6 +1717,9 @@ int main() {
     test_parse_rov();
     test_parse_rov_empty();
     test_parse_rov_truncated();
+    test_parse_rssc();
+    test_parse_rssc_bad_signature();
+    test_parse_rssc_bad_offset();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

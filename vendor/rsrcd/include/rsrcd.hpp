@@ -1962,6 +1962,34 @@ auto parse(Bytes data, OverrideList<Cap>& list) -> Result {
 } // namespace rov
 
 // ============================================================================
+// RSSC resources: Resource-based 68K code with export offsets
+// ============================================================================
+
+namespace rssc {
+
+struct Resource {
+    uint32_t type_signature;
+    uint16_t function_offsets[9];
+    Bytes code;
+};
+
+inline auto parse(Bytes data, Resource& resource) -> Result {
+    constexpr size_t header_size = 22;
+    if (data.size < header_size) return Error::unexpected_end();
+    resource.type_signature = read_u32be(data.data);
+    if (resource.type_signature != 0x52535343u) return Error::invalid_data("incorrect RSSC type signature");
+    for (size_t i = 0; i < 9; ++i) {
+        const uint16_t offset = read_u16be(data.data + 4 + (i * 2u));
+        if (offset != 0 && offset < header_size) return Error::invalid_data("RSSC function offset points within header");
+        resource.function_offsets[i] = offset;
+    }
+    resource.code = Bytes{data.data + header_size, data.size - header_size};
+    return Result::ok();
+}
+
+} // namespace rssc
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

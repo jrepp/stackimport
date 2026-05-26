@@ -557,6 +557,51 @@ auto emit_rov_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_rssc_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed RSSC metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::rssc::Resource rssc{};
+	auto parse_result = rsrcd::rssc::parse(resource.data, rssc);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("typeSignature", rssc.type_signature, allocator);
+	doc.AddMember("typeSignatureString", json_string(resource_type_string(rssc.type_signature), allocator), allocator);
+	doc.AddMember("codeStartOffset", 22, allocator);
+	doc.AddMember("codeSize", static_cast<uint64_t>(rssc.code.size), allocator);
+	JsonValue offsets(rapidjson::kArrayType);
+	for(uint16_t offset : rssc.function_offsets)
+	{
+		JsonValue value(rapidjson::kObjectType);
+		value.AddMember("set", offset != 0, allocator);
+		value.AddMember("offset", offset, allocator);
+		offsets.PushBack(value, allocator);
+	}
+	doc.AddMember("functionOffsets", offsets, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1522,6 +1567,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "ROv#"))
 		return emit_rov_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "RSSC"))
+		return emit_rssc_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");
