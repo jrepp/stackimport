@@ -1235,12 +1235,6 @@ void	RunTests()
 		&cSoundError) == 0);
 	assert(std::strcmp(cSoundError, "invalid output buffer") == 0);
 	assert(stackimport_snd_to_wav(nullptr, 0, nullptr, 0, nullptr) == 0);
-	assert(stackimport_convert_snd_to_wav(
-		multiCommandSnd.data(),
-		multiCommandSnd.size(),
-		nullptr,
-		0,
-		&cSoundError) == 48);
 
 	const std::vector<uint8_t> badOffsetSnd = make_snd_format2_fixture(false, 20);
 	wavData.clear();

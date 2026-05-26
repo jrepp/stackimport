@@ -203,14 +203,6 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_snd_to_wav(
 	size_t wav_capacity,
 	const char** out_error);
 
-/* Deprecated compatibility alias. Prefer stackimport_snd_to_wav. */
-STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
-	const void* snd_data,
-	size_t snd_size,
-	void* wav_buffer,
-	size_t wav_capacity,
-	const char** out_error);
-
 #ifdef __cplusplus
 }
 #endif

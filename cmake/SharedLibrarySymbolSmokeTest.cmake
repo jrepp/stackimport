@@ -31,7 +31,6 @@ set(required_symbols
     stackimport_context_destroy
     stackimport_import
     stackimport_snd_to_wav
-    stackimport_convert_snd_to_wav
 )
 
 foreach(symbol IN LISTS required_symbols)
