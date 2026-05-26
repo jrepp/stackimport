@@ -1178,6 +1178,14 @@ void	RunTests()
 	assert(std::memcmp(wavBuffer, "RIFF", 4) == 0);
 	assert(wavBuffer[44] == 0x80);
 	assert(wavBuffer[47] == 0x83);
+	const size_t queriedWavSize = stackimport_convert_snd_to_wav(
+		multiCommandSnd.data(),
+		multiCommandSnd.size(),
+		nullptr,
+		0,
+		&cSoundError);
+	assert(queriedWavSize == 48);
+	assert(cSoundError == nullptr);
 	assert(stackimport_convert_snd_to_wav(
 		multiCommandSnd.data(),
 		multiCommandSnd.size(),
@@ -1185,6 +1193,13 @@ void	RunTests()
 		8,
 		&cSoundError) == 0);
 	assert(std::strcmp(cSoundError, "output buffer too small") == 0);
+	assert(stackimport_convert_snd_to_wav(
+		multiCommandSnd.data(),
+		multiCommandSnd.size(),
+		nullptr,
+		8,
+		&cSoundError) == 0);
+	assert(std::strcmp(cSoundError, "invalid output buffer") == 0);
 	assert(stackimport_convert_snd_to_wav(nullptr, 0, nullptr, 0, nullptr) == 0);
 
 	const std::vector<uint8_t> badOffsetSnd = make_snd_format2_fixture(false, 20);

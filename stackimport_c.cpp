@@ -384,10 +384,16 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
 {
 	if(out_error)
 		*out_error = nullptr;
-	if(!snd_data || !wav_buffer || !out_error)
+	if(!snd_data || !out_error)
 	{
 		if(out_error)
 			*out_error = "invalid argument";
+		return 0;
+	}
+	const bool queryOnly = wav_buffer == nullptr && wav_capacity == 0;
+	if(!queryOnly && !wav_buffer)
+	{
+		*out_error = "invalid output buffer";
 		return 0;
 	}
 
@@ -400,6 +406,9 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_convert_snd_to_wav(
 		*out_error = error.empty() ? "conversion failed" : error.c_str();
 		return 0;
 	}
+
+	if(queryOnly)
+		return wav.size();
 
 	if(wav.size() > wav_capacity)
 	{
