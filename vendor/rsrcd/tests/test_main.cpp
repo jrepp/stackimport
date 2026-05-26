@@ -1028,6 +1028,45 @@ static void test_parse_txst_truncated_name() {
     CHECK(!r, "truncated TxSt name should fail");
 }
 
+static void test_parse_rect_resource() {
+    uint8_t data[8] = {};
+    rsrcd::write_u16be(data, 1);
+    rsrcd::write_u16be(data + 2, 2);
+    rsrcd::write_u16be(data + 4, 101);
+    rsrcd::write_u16be(data + 6, 202);
+
+    rsrcd::ui::Rect rect{};
+    auto r = rsrcd::simple_metadata::parse_rect({data, sizeof(data)}, rect);
+    CHECK_RESULT(r, "parse RECT");
+    CHECK(rect.top == 1, "RECT top");
+    CHECK(rect.right == 202, "RECT right");
+}
+
+static void test_parse_tool() {
+    uint8_t data[10] = {};
+    rsrcd::write_u16be(data, 2);
+    rsrcd::write_u16be(data + 2, 1);
+    rsrcd::write_u16be(data + 4, 128);
+    rsrcd::write_u16be(data + 6, 129);
+    rsrcd::write_u16be(data + 8, 130);
+
+    rsrcd::simple_metadata::ToolList<4> tools;
+    auto r = rsrcd::simple_metadata::parse_tool({data, sizeof(data)}, tools);
+    CHECK_RESULT(r, "parse TOOL");
+    CHECK(tools.tools_per_row == 2, "TOOL tools per row");
+    CHECK(tools.row_count == 1, "TOOL row count");
+    CHECK(tools.count() == 3, "TOOL cursor count");
+    CHECK(tools[2] == 130, "TOOL third cursor ID");
+}
+
+static void test_parse_tool_odd_length() {
+    uint8_t data[5] = {};
+
+    rsrcd::simple_metadata::ToolList<4> tools;
+    auto r = rsrcd::simple_metadata::parse_tool({data, sizeof(data)}, tools);
+    CHECK(!r, "odd-length TOOL should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1758,6 +1797,9 @@ int main() {
     test_parse_rssc_bad_offset();
     test_parse_txst();
     test_parse_txst_truncated_name();
+    test_parse_rect_resource();
+    test_parse_tool();
+    test_parse_tool_odd_length();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

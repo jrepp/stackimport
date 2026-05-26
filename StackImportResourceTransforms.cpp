@@ -643,6 +643,77 @@ auto emit_txst_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_rect_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed rectangle metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ui::Rect rect{};
+	auto parse_result = rsrcd::simple_metadata::parse_rect(resource.data, rect);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(512, &base_alloc);
+	JsonDocument doc(&pool, 512, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	add_json_ui_rect(doc, rect, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_tool_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed tool palette metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::simple_metadata::ToolList<256> tools;
+	auto parse_result = rsrcd::simple_metadata::parse_tool(resource.data, tools);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("toolsPerRow", tools.tools_per_row, allocator);
+	doc.AddMember("rowCount", tools.row_count, allocator);
+	JsonValue cursor_ids(rapidjson::kArrayType);
+	for(uint16_t cursor_id : tools)
+		cursor_ids.PushBack(cursor_id, allocator);
+	doc.AddMember("cursorIds", cursor_ids, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1614,6 +1685,12 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "TxSt"))
 		return emit_txst_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "RECT"))
+		return emit_rect_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "TOOL"))
+		return emit_tool_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

@@ -188,7 +188,8 @@ public:
 			resource_type_is(res_, "DITL") || resource_type_is(res_, "MBAR") ||
 			resource_type_is(res_, "ALRT") || resource_type_is(res_, "FREF") ||
 			resource_type_is(res_, "BNDL") || resource_type_is(res_, "ROv#") ||
-			resource_type_is(res_, "RSSC") || resource_type_is(res_, "TxSt"))
+			resource_type_is(res_, "RSSC") || resource_type_is(res_, "TxSt") ||
+			resource_type_is(res_, "RECT") || resource_type_is(res_, "TOOL"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
 			summary_.status = "parse_failed";
@@ -433,6 +434,10 @@ private:
 			snprintf(fname, sizeof(fname), "RSSC_%d.json", res_.id);
 		else if(resource_type_is(res_, "TxSt"))
 			snprintf(fname, sizeof(fname), "TxSt_%d.json", res_.id);
+		else if(resource_type_is(res_, "RECT"))
+			snprintf(fname, sizeof(fname), "RECT_%d.json", res_.id);
+		else if(resource_type_is(res_, "TOOL"))
+			snprintf(fname, sizeof(fname), "TOOL_%d.json", res_.id);
 		else
 			return;
 
@@ -742,7 +747,8 @@ bool stackimport_load_resource_fork(
 			std::memcmp(res.type.data, "DITL", 4) == 0 || std::memcmp(res.type.data, "MBAR", 4) == 0 ||
 			std::memcmp(res.type.data, "ALRT", 4) == 0 || std::memcmp(res.type.data, "FREF", 4) == 0 ||
 			std::memcmp(res.type.data, "BNDL", 4) == 0 || std::memcmp(res.type.data, "ROv#", 4) == 0 ||
-			std::memcmp(res.type.data, "RSSC", 4) == 0 || std::memcmp(res.type.data, "TxSt", 4) == 0)
+			std::memcmp(res.type.data, "RSSC", 4) == 0 || std::memcmp(res.type.data, "TxSt", 4) == 0 ||
+			std::memcmp(res.type.data, "RECT", 4) == 0 || std::memcmp(res.type.data, "TOOL", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

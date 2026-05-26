@@ -2020,6 +2020,62 @@ inline auto parse(Bytes data, TextStyle& style) -> Result {
 } // namespace txst
 
 // ============================================================================
+// Simple template-backed metadata resources (RECT / TOOL)
+// ============================================================================
+
+namespace simple_metadata {
+
+inline auto parse_rect(Bytes data, ui::Rect& rect) -> Result {
+    if (data.size < 8) return Error::unexpected_end();
+    rect.top = read_i16be(data.data);
+    rect.left = read_i16be(data.data + 2);
+    rect.bottom = read_i16be(data.data + 4);
+    rect.right = read_i16be(data.data + 6);
+    return Result::ok();
+}
+
+template<size_t InlineCapacity = 128>
+class ToolList {
+public:
+    uint16_t tools_per_row = 0;
+    uint16_t row_count = 0;
+
+    auto add(uint16_t cursor_id) -> Result {
+        if (count_ < InlineCapacity) {
+            cursor_ids_[count_++] = cursor_id;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many tool cursor IDs");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> uint16_t { return cursor_ids_[i]; }
+    auto begin() const -> const uint16_t* { return cursor_ids_; }
+    auto end() const -> const uint16_t* { return cursor_ids_ + count_; }
+
+private:
+    uint16_t cursor_ids_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 128>
+auto parse_tool(Bytes data, ToolList<Cap>& tools) -> Result {
+    if (data.size < 4) return Error::unexpected_end();
+    if (((data.size - 4u) % 2u) != 0) return Error::invalid_data("TOOL cursor list has odd byte length");
+    tools.tools_per_row = read_u16be(data.data);
+    tools.row_count = read_u16be(data.data + 2);
+    const size_t count = (data.size - 4u) / 2u;
+    if (count > Cap) return Error::invalid_data("too many tool cursor IDs");
+    size_t offset = 4;
+    for (size_t i = 0; i < count; ++i) {
+        if (auto r = tools.add(read_u16be(data.data + offset)); !r) return r;
+        offset += 2;
+    }
+    return Result::ok();
+}
+
+} // namespace simple_metadata
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

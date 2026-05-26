@@ -923,6 +923,34 @@ void	RunTests()
 	assert(txstOutput.last_json.find("\"fontSize\": 12") != std::string::npos);
 	assert(txstOutput.last_json.find("\"fontName\": \"Helvetica\"") != std::string::npos);
 
+	std::vector<uint8_t> rectPayload;
+	append_u16be(rectPayload, 1);
+	append_u16be(rectPayload, 2);
+	append_u16be(rectPayload, 101);
+	append_u16be(rectPayload, 202);
+	const std::vector<uint8_t> rectFork = make_single_resource_fork("RECT", 1, rectPayload);
+	CountingResourceOutput rectOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rectFork.data(), rectFork.size()}, rectOutput));
+	assert(rectOutput.native_count == 1);
+	assert(rectOutput.json_count == 1);
+	assert(rectOutput.last_json.find("\"top\": 1") != std::string::npos);
+	assert(rectOutput.last_json.find("\"right\": 202") != std::string::npos);
+
+	std::vector<uint8_t> toolPayload;
+	append_u16be(toolPayload, 2);
+	append_u16be(toolPayload, 1);
+	append_u16be(toolPayload, 128);
+	append_u16be(toolPayload, 129);
+	append_u16be(toolPayload, 130);
+	const std::vector<uint8_t> toolFork = make_single_resource_fork("TOOL", 1, toolPayload);
+	CountingResourceOutput toolOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{toolFork.data(), toolFork.size()}, toolOutput));
+	assert(toolOutput.native_count == 1);
+	assert(toolOutput.json_count == 1);
+	assert(toolOutput.last_json.find("\"toolsPerRow\": 2") != std::string::npos);
+	assert(toolOutput.last_json.find("\"cursorIds\"") != std::string::npos);
+	assert(toolOutput.last_json.find("130") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);
