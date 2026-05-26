@@ -1990,6 +1990,36 @@ inline auto parse(Bytes data, Resource& resource) -> Result {
 } // namespace rssc
 
 // ============================================================================
+// Text style resources (TxSt)
+// ============================================================================
+
+namespace txst {
+
+struct TextStyle {
+    uint8_t font_style;
+    uint16_t font_size;
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+    Bytes font_name;
+};
+
+inline auto parse(Bytes data, TextStyle& style) -> Result {
+    if (data.size < 11) return Error::unexpected_end();
+    style.font_style = data.data[0];
+    style.font_size = read_u16be(data.data + 2);
+    style.red = read_u16be(data.data + 4);
+    style.green = read_u16be(data.data + 6);
+    style.blue = read_u16be(data.data + 8);
+    const uint8_t font_name_len = data.data[10];
+    if (!range_in_bounds(11, font_name_len, data.size)) return Error::unexpected_end();
+    style.font_name = Bytes{data.data + 11, font_name_len};
+    return Result::ok();
+}
+
+} // namespace txst
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

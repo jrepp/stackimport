@@ -29,6 +29,7 @@ where new support should live. The target architecture is:
 | `STR#` | Typed MacRoman string-list decode to JSON transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Preserves string boundaries. |
 | `TEXT` | MacRoman decode to UTF-8 text transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Raw text resource bytes. |
 | `TwCS` | Typed MacRoman string-list decode to JSON transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Unencrypted strings are decoded; encrypted strings are preserved raw with a parse diagnostic. |
+| `TxSt` | Typed text style metadata parse to JSON transform and package artifact | `rsrcd::txst`, `StackImportResourceTransforms.cpp` | Font style, size, RGB color, and font name. |
 | `vers` | Typed metadata parse to JSON transform and package artifact | `rsrcd::vers`, `StackImportResourceTransforms.cpp` | Preserves raw numeric version fields and decodes version strings. |
 | `SIZE` | Typed metadata parse to JSON transform and package artifact | `rsrcd::size_resource`, `StackImportResourceTransforms.cpp` | Application flags plus preferred/minimum memory sizes. |
 | `cfrg` | Typed code-fragment metadata parse to JSON transform and package artifact | `rsrcd::cfrg`, `StackImportResourceTransforms.cpp` | CFM fragment entries, usage/location, names, and extension bytes. |
@@ -59,7 +60,7 @@ interface is clear.
 | PICT | `PICT` | `decode_PICT` and exporter support | Adapter first; current StackImport support uses `StackImportResourceDasmPictAdapter` and does not expose resource_dasm internals to core code. |
 | Icon families | `cicn`, `icns` | typed decoders and exporters | Fold small bitmap/icon decoders into rsrcd; keep `icns` container handling adapter-backed until bounded. `ICN#`, `SICN`, `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, and `ics8` now live in StackImport core. |
 | Color tables and patterns | `ppat`, `ppt#` | typed decoders and exporters | Fold bounded parsers into rsrcd. `PAT `, `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, `wctb`, and `pltt` now live in StackImport core. |
-| Text | `styl`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, `TEXT`, and `TwCS` now live in StackImport core. |
+| Text | `styl`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, `TEXT`, `TwCS`, and `TxSt` now live in StackImport core. |
 | Metadata/templates | `TMPL` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. `vers`, `SIZE`, `cfrg`, `ROv#`, and `RSSC` metadata now live in StackImport core. |
 | UI/layout | None currently listed | typed decoders and exporters | Fold fixed-record parsers into rsrcd after corpus validation. `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, and `BNDL` now live in StackImport core. |
 | Fonts | `FONT`, `NFNT`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. `finf` now lives in StackImport core. |

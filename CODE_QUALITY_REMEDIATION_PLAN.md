@@ -218,6 +218,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - `RSSC` resources now have an rsrcd typed metadata parser and shared JSON
   transform for export offsets and code size; disassembly remains future
   code-resource adapter work.
+- `TxSt` text style resources now have an rsrcd typed parser and shared JSON
+  transform for font style, size, RGB color, and font name.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
 - `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, and `wctb` color tables now
@@ -287,6 +289,8 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `RSSC` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `TxSt` metadata: parse through rsrcd and route package JSON artifact
+  writing through the shared transform payload.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
 - Done for color tables: parse `clut`, `CTBL`, `actb`, `cctb`, `dctb`,
@@ -350,7 +354,7 @@ all consumers listed in the lateral audit above have been updated and tested.
   `cfrg`, `cctb`, `dctb`, `fctb`, `wctb`, `pltt`, `HCbg`, `HCcd`, `STR `,
   `STR#`, `TEXT`, `TwCS`, `vers`, `SIZE`, `finf`, `CNTL`, `DLOG`, `WIND`,
   `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, `BNDL`, `ROv#`, `PICT`, `snd `,
-  `RSSC`, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
+  `RSSC`, `TxSt`, `XCMD`, `XFCN`, `xcmd`, `xfcn`.
 - Audit inventory:
   `.mod`, `68k!`, `actb`, `acur`, `ADBS`, `adio`, `AINI`, `ALIS`, `alis`,
   `ALRT`, `APPL`, `atlk`, `audt`, `BNDL`, `boot`, `bstr`, `card`, `cctb`,

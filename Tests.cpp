@@ -906,6 +906,23 @@ void	RunTests()
 	assert(rsscOutput.last_json.find("\"codeStartOffset\": 22") != std::string::npos);
 	assert(rsscOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
 
+	std::vector<uint8_t> txstPayload;
+	txstPayload.push_back(0x03);
+	txstPayload.push_back(0x00);
+	append_u16be(txstPayload, 12);
+	append_u16be(txstPayload, 0x1111);
+	append_u16be(txstPayload, 0x2222);
+	append_u16be(txstPayload, 0x3333);
+	txstPayload.insert(txstPayload.end(), {9, 'H', 'e', 'l', 'v', 'e', 't', 'i', 'c', 'a'});
+	const std::vector<uint8_t> txstFork = make_single_resource_fork("TxSt", 1, txstPayload);
+	CountingResourceOutput txstOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{txstFork.data(), txstFork.size()}, txstOutput));
+	assert(txstOutput.native_count == 1);
+	assert(txstOutput.json_count == 1);
+	assert(txstOutput.last_json.find("\"fontStyle\": 3") != std::string::npos);
+	assert(txstOutput.last_json.find("\"fontSize\": 12") != std::string::npos);
+	assert(txstOutput.last_json.find("\"fontName\": \"Helvetica\"") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

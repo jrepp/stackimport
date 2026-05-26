@@ -602,6 +602,47 @@ auto emit_rssc_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_txst_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed text style metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::txst::TextStyle style{};
+	auto parse_result = rsrcd::txst::parse(resource.data, style);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("fontStyle", style.font_style, allocator);
+	doc.AddMember("fontSize", style.font_size, allocator);
+	JsonValue color(rapidjson::kObjectType);
+	color.AddMember("red", style.red, allocator);
+	color.AddMember("green", style.green, allocator);
+	color.AddMember("blue", style.blue, allocator);
+	doc.AddMember("textColor", color, allocator);
+	std::string font_name = mac_roman_from_bytes(style.font_name.data, style.font_name.size);
+	doc.AddMember("fontName", json_string(font_name, allocator), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1570,6 +1611,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "RSSC"))
 		return emit_rssc_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "TxSt"))
+		return emit_txst_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

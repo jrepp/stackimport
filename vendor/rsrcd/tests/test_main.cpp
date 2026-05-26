@@ -992,6 +992,42 @@ static void test_parse_rssc_bad_offset() {
     CHECK(!r, "RSSC header offset should fail");
 }
 
+static void test_parse_txst() {
+    uint8_t data[20] = {};
+    data[0] = 0x03;
+    rsrcd::write_u16be(data + 2, 12);
+    rsrcd::write_u16be(data + 4, 0x1111);
+    rsrcd::write_u16be(data + 6, 0x2222);
+    rsrcd::write_u16be(data + 8, 0x3333);
+    data[10] = 9;
+    data[11] = 'H';
+    data[12] = 'e';
+    data[13] = 'l';
+    data[14] = 'v';
+    data[15] = 'e';
+    data[16] = 't';
+    data[17] = 'i';
+    data[18] = 'c';
+    data[19] = 'a';
+
+    rsrcd::txst::TextStyle style{};
+    auto r = rsrcd::txst::parse({data, sizeof(data)}, style);
+    CHECK_RESULT(r, "parse TxSt");
+    CHECK(style.font_style == 0x03, "TxSt font style");
+    CHECK(style.font_size == 12, "TxSt font size");
+    CHECK(style.green == 0x2222, "TxSt green");
+    CHECK(style.font_name.size == 9, "TxSt font name size");
+}
+
+static void test_parse_txst_truncated_name() {
+    uint8_t data[11] = {};
+    data[10] = 1;
+
+    rsrcd::txst::TextStyle style{};
+    auto r = rsrcd::txst::parse({data, sizeof(data)}, style);
+    CHECK(!r, "truncated TxSt name should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1720,6 +1756,8 @@ int main() {
     test_parse_rssc();
     test_parse_rssc_bad_signature();
     test_parse_rssc_bad_offset();
+    test_parse_txst();
+    test_parse_txst_truncated_name();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();
