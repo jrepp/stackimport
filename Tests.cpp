@@ -220,7 +220,8 @@ public:
 	{
 		wants_count++;
 		return payload.format == stackimport::ResourcePayloadFormat::Native ||
-			payload.format == stackimport::ResourcePayloadFormat::Rgba32;
+			payload.format == stackimport::ResourcePayloadFormat::Rgba32 ||
+			payload.format == stackimport::ResourcePayloadFormat::JsonUtf8;
 	}
 
 	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
@@ -234,15 +235,22 @@ public:
 			last_height = payload.height;
 			last_payload_size = payload.data.size;
 		}
+		if(payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
+		{
+			json_count++;
+			last_json.assign(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
+		}
 		return true;
 	}
 
 	int wants_count = 0;
 	int native_count = 0;
 	int rgba_count = 0;
+	int json_count = 0;
 	uint32_t last_width = 0;
 	uint32_t last_height = 0;
 	size_t last_payload_size = 0;
+	std::string last_json;
 };
 
 void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t map_off, uint32_t data_len, uint32_t map_len)
@@ -291,6 +299,34 @@ std::vector<uint8_t> make_snd_format2_fixture(bool extraNullCommand, uint32_t co
 	snd.push_back(60);
 	snd.insert(snd.end(), {0x80, 0x81, 0x82, 0x83});
 	return snd;
+}
+
+std::vector<uint8_t> make_single_resource_fork(const char type[4], int16_t id, const std::vector<uint8_t>& payload)
+{
+	const uint32_t data_off = 16;
+	const uint32_t data_len = static_cast<uint32_t>(4 + payload.size());
+	const uint32_t map_off = data_off + data_len;
+	const uint32_t map_len = 96;
+	std::vector<uint8_t> fork(map_off + map_len);
+	write_basic_resource_fork_header(fork.data(), data_off, map_off, data_len, map_len);
+	rsrcd::write_u32be(fork.data() + data_off, static_cast<uint32_t>(payload.size()));
+	if(!payload.empty())
+		std::memcpy(fork.data() + data_off + 4, payload.data(), payload.size());
+
+	uint8_t* map = fork.data() + map_off;
+	rsrcd::write_u16be(map + 24, 28);
+	rsrcd::write_u16be(map + 26, 64);
+	uint8_t* type_list = map + 28;
+	rsrcd::write_u16be(type_list, 0);
+	std::memcpy(type_list + 2, type, 4);
+	rsrcd::write_u16be(type_list + 6, 0);
+	rsrcd::write_u16be(type_list + 8, 10);
+	uint8_t* ref = type_list + 10;
+	rsrcd::write_u16be(ref + 0, static_cast<uint16_t>(id));
+	rsrcd::write_u16be(ref + 2, 0xFFFF);
+	rsrcd::write_u32be(ref + 4, 0);
+	rsrcd::write_u32be(ref + 8, 0);
+	return fork;
 }
 
 void append_block_header(std::vector<uint8_t>& data, uint32_t size, const char type[4], int32_t id)
@@ -562,6 +598,56 @@ void	RunTests()
 	assert(resourceForkPlatformState.opens > 0);
 	assert(resourceForkPlatformState.reads > 0);
 	assert(resourceForkPlatformState.writes > 0);
+
+	std::vector<uint8_t> addColorData;
+	addColorData.push_back(0x03);
+	append_u16be(addColorData, 10);
+	append_u16be(addColorData, 20);
+	append_u16be(addColorData, 30);
+	append_u16be(addColorData, 40);
+	append_u16be(addColorData, 2);
+	append_u16be(addColorData, 0x1111);
+	append_u16be(addColorData, 0x2222);
+	append_u16be(addColorData, 0x3333);
+	const std::vector<uint8_t> addColorFork = make_single_resource_fork("HCbg", 77, addColorData);
+	CountingResourceOutput addColorOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{addColorFork.data(), addColorFork.size()}, addColorOutput));
+	assert(addColorOutput.native_count == 1);
+	assert(addColorOutput.json_count == 1);
+	assert(addColorOutput.last_json.find("\"targetKind\": \"background\"") != std::string::npos);
+	assert(addColorOutput.last_json.find("\"targetId\": 77") != std::string::npos);
+	assert(addColorOutput.last_json.find("\"type\": \"rect\"") != std::string::npos);
+	assert(addColorOutput.last_json.find("\"red\": 4369") != std::string::npos);
+
+	const std::string addColorOutputPath = std::string("/tmp/stackimport-addcolor-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(addColorOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState addColorPlatformState;
+	addColorPlatformState.resource_fork_data = addColorFork.data();
+	addColorPlatformState.resource_fork_size = addColorFork.size();
+	stackimport_platform addColorPlatform = resourceForkPlatform;
+	addColorPlatform.user_data = &addColorPlatformState;
+	const stackimport_internal_platform addColorInternalPlatform = stackimport_internal_platform_from_api(&addColorPlatform);
+	std::vector<CResourceSummary> addColorSummaries;
+	std::string addColorStatus;
+	uint64_t addColorBytes = 0;
+	{
+		stackimport_platform_scope addColorScope(addColorInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			addColorOutputPath,
+			"Stack",
+			&addColorOutput,
+			addColorSummaries,
+			addColorStatus,
+			addColorBytes));
+	}
+	assert(addColorStatus == "ok");
+	assert(addColorSummaries.size() == 1);
+	assert(addColorSummaries[0].type == "HCbg");
+	assert(addColorSummaries[0].status == "exported");
+	assert(addColorSummaries[0].outputFile == "HCbg_77.json");
+	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
+	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
 
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;

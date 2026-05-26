@@ -166,12 +166,17 @@ public:
 	{
 		(void)resource;
 		(void)msg;
-		if(resource_type_is(res_, "PLTE"))
+		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd"))
 			summary_.status = "parse_failed";
 		else if(resource_type_is(res_, "snd "))
 		{
 			summary_.status = "convert_failed";
 			stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res_.id, msg);
+		}
+		else if(resource_type_is(res_, "PICT"))
+		{
+			summary_.status = "convert_failed";
+			stackimport_emit_diagnosticf("Warning: Couldn't render PICT #%d: %s.\n", res_.id, msg);
 		}
 		else if(resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
 			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn"))
@@ -231,7 +236,26 @@ private:
 
 	void write_binary_payload(const stackimport::ResourcePayload& payload)
 	{
-		if(!resource_type_is(res_, "snd ") || payload.data.data == nullptr)
+		if(payload.data.data == nullptr)
+			return;
+
+		if(resource_type_is(res_, "PICT") && payload.media_type != nullptr && std::strcmp(payload.media_type, "image/png") == 0)
+		{
+			char fname[64];
+			snprintf(fname, sizeof(fname), "PICT_%d.png", res_.id);
+			if(write_binary_file(output_path(basePath_, fname), payload.data))
+			{
+				summary_.status = "exported";
+				summary_.outputFile = fname;
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote PICT #%d as PNG.\n", res_.id);
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
+		if(!resource_type_is(res_, "snd "))
 			return;
 
 		const std::string soundsDir = output_path(basePath_, "sounds");
@@ -254,16 +278,24 @@ private:
 
 	void write_json_payload(const stackimport::ResourcePayload& payload)
 	{
-		if(!resource_type_is(res_, "PLTE") || payload.data.data == nullptr)
+		if(payload.data.data == nullptr)
 			return;
 		char fname[64];
-		snprintf(fname, sizeof(fname), "PLTE_%d.json", res_.id);
+		if(resource_type_is(res_, "PLTE"))
+			snprintf(fname, sizeof(fname), "PLTE_%d.json", res_.id);
+		else if(resource_type_is(res_, "HCbg"))
+			snprintf(fname, sizeof(fname), "HCbg_%d.json", res_.id);
+		else if(resource_type_is(res_, "HCcd"))
+			snprintf(fname, sizeof(fname), "HCcd_%d.json", res_.id);
+		else
+			return;
+
 		if(write_json_file(output_path(basePath_, fname), reinterpret_cast<const char*>(payload.data.data), payload.data.size))
 		{
 			summary_.status = "exported";
 			summary_.outputFile = fname;
 			exportedCount_++;
-			stackimport_emit_infof("Status: Parsed PLTE #%d.\n", res_.id);
+			stackimport_emit_infof("Status: Parsed %s #%d.\n", summary_.type.c_str(), res_.id);
 		}
 		else
 			summary_.status = "export_failed";
@@ -423,6 +455,13 @@ bool stackimport_load_resource_fork(
 			resourceSummaries.push_back(summary);
 			continue;
 		}
+		else if(std::memcmp(res.type.data, "PICT", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
 		else if(std::memcmp(res.type.data, "snd ", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
@@ -431,6 +470,13 @@ bool stackimport_load_resource_fork(
 			continue;
 		}
 		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "HCbg", 4) == 0 || std::memcmp(res.type.data, "HCcd", 4) == 0)
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);

@@ -184,6 +184,14 @@ when parser behavior changes, updates to the relevant format documentation under
 - Still open: promote the transform surface from payload-only callbacks to a
   fuller event model for summaries, diagnostics, artifact metadata, and future
   resource families.
+- Added `Stack File Format/ResourceForkCoverage.md` as the ownership map for
+  StackImport/rsrcd core parsers, resource_dasm fold/adapt candidates, and broad
+  fallback decoders.
+- AddColor `HCbg`/`HCcd` now uses the existing rsrcd typed parser in the
+  transform pipeline and emits JSON package artifacts.
+- Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
+  core StackImport code sees only a narrow PNG payload transform and still
+  preserves native bytes when the adapter is unavailable or conversion fails.
 - Remaining work: expand the shared transform interface into one owned
   event/converter pipeline for metadata, diagnostics, and artifacts beyond the
   current image-payload transform cases.
@@ -208,6 +216,9 @@ when parser behavior changes, updates to the relevant format documentation under
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.
+- Use `Stack File Format/ResourceForkCoverage.md` to choose whether each new
+  resource type belongs in rsrcd core, a narrow adapter, or raw-preservation
+  fallback.
 - Let package output, C resource callbacks, and future corpus indexing consume
   the same event stream.
 - Remove duplicate conversion code from `include/stackimport_sax.hpp` and

@@ -171,3 +171,4 @@ those dumps against the offset notes in this directory, then add a parser in
 | Font table | `FontTable/ReadFTBLBlock.txt` |
 | Report templates | `ReportTemplate/ReadPRFTBlock.txt`, `ReportTemplate/ReadItemData.txt` |
 | AddColor resources | `AddColor.md` |
+| Resource fork coverage map | `ResourceForkCoverage.md` |

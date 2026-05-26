@@ -1,12 +1,16 @@
 #include "Mac68kDisassembly.h"
 #include "StackImportResourceTransforms.h"
 
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+#include "StackImportResourceDasmPictAdapter.h"
+#endif
 #include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
 #include <cstring>
 #include <span>
 #include <string>
+#include <vector>
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -123,6 +127,112 @@ auto emit_plte_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+const char* addcolor_object_type_name(rsrcd::ac::ObjType type)
+{
+	switch(type)
+	{
+		case rsrcd::ac::ObjButton:
+			return "button";
+		case rsrcd::ac::ObjField:
+			return "field";
+		case rsrcd::ac::ObjRect:
+			return "rect";
+		case rsrcd::ac::ObjPictRes:
+			return "pictResource";
+		case rsrcd::ac::ObjPictFile:
+			return "pictFile";
+	}
+	return "unknown";
+}
+
+void add_json_rect(JsonValue& object, const rsrcd::ac::QDRect& rect, JsonPoolAllocator& allocator)
+{
+	JsonValue value(rapidjson::kObjectType);
+	value.AddMember("top", rect.top, allocator);
+	value.AddMember("left", rect.left, allocator);
+	value.AddMember("bottom", rect.bottom, allocator);
+	value.AddMember("right", rect.right, allocator);
+	object.AddMember("rect", value, allocator);
+}
+
+void add_json_color(JsonValue& object, const rsrcd::ac::RGBColor& color, JsonPoolAllocator& allocator)
+{
+	JsonValue value(rapidjson::kObjectType);
+	value.AddMember("red", color.red, allocator);
+	value.AddMember("green", color.green, allocator);
+	value.AddMember("blue", color.blue, allocator);
+	object.AddMember("color", value, allocator);
+}
+
+auto emit_addcolor_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const char* target_kind) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed AddColor overlay metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::ac::ObjectList<64> objects;
+	auto ac_result = rsrcd::ac::parse(resource.data, objects);
+	if(!ac_result)
+		return output.on_resource_error(ref, ac_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("targetKind", JsonValue().SetString(target_kind, allocator), allocator);
+	doc.AddMember("targetId", resource.id, allocator);
+
+	JsonValue object_array(rapidjson::kArrayType);
+	for(const rsrcd::ac::Object& object : objects)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("type", JsonValue().SetString(addcolor_object_type_name(object.type), allocator), allocator);
+		item.AddMember("hidden", object.hidden, allocator);
+		switch(object.type)
+		{
+			case rsrcd::ac::ObjButton:
+			case rsrcd::ac::ObjField:
+				item.AddMember("partId", object.part_id, allocator);
+				item.AddMember("bevel", object.bevel, allocator);
+				add_json_color(item, object.color, allocator);
+				break;
+			case rsrcd::ac::ObjRect:
+				item.AddMember("bevel", object.bevel, allocator);
+				add_json_rect(item, object.rect, allocator);
+				add_json_color(item, object.color, allocator);
+				break;
+			case rsrcd::ac::ObjPictRes:
+			case rsrcd::ac::ObjPictFile:
+				add_json_rect(item, object.rect, allocator);
+				item.AddMember("transparent", object.transparent, allocator);
+				if(!object.name.empty())
+				{
+					std::string name = mac_roman_from_bytes(object.name.data, object.name.size);
+					item.AddMember("name", json_string(name, allocator), allocator);
+				}
+				break;
+		}
+		object_array.PushBack(item, allocator);
+	}
+	doc.AddMember("objects", object_array, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -171,6 +281,38 @@ auto emit_code_resource_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_pict_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Binary,
+		rsrcd::Bytes{nullptr, 0},
+		"image/png",
+		"rendered PICT image");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+	std::vector<uint8_t> png;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	std::string error;
+	if(!DecodePictWithResourceDasmToPng(resource.data.data, resource.data.size, png, width, height, error))
+		return output.on_resource_error(ref, error.c_str());
+
+	descriptor.data = rsrcd::Bytes{png.data(), png.size()};
+	descriptor.width = width;
+	descriptor.height = height;
+	return output.on_resource_payload(descriptor);
+#else
+	(void)resource;
+	return true;
+#endif
+}
+
 } // namespace
 
 auto emit_builtin_resource_transforms(
@@ -183,6 +325,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "xcmd") || resource_type_is(resource, "xfcn"))
 		return emit_code_resource_transform(resource, ref, output, true);
+
+	if(resource_type_is(resource, "PICT"))
+		return emit_pict_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "ICON") && resource.data.size == 128)
 	{
@@ -269,6 +414,12 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "PLTE"))
 		return emit_plte_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "HCbg"))
+		return emit_addcolor_transform(resource, ref, output, "background");
+
+	if(resource_type_is(resource, "HCcd"))
+		return emit_addcolor_transform(resource, ref, output, "card");
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);
