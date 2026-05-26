@@ -1009,6 +1009,11 @@ void test_resource_package_writes()
 	assert(resourceSummaries.size() == 1);
 	assert(resourceSummaries[0].type == "ICON");
 	assert(resourceSummaries[0].status == "exported");
+	assert(resourceSummaries[0].outputFile == "ICON_128.png");
+	assert(resourceSummaries[0].outputArtifacts.size() == 1);
+	assert(resourceSummaries[0].outputArtifacts[0].path == "ICON_128.png");
+	assert(resourceSummaries[0].outputArtifacts[0].format == "png");
+	assert(resourceSummaries[0].outputArtifacts[0].mediaType == "image/png");
 	assert(packageResourceOutput.native_count == 1);
 	assert(packageResourceOutput.rgba_count == 1);
 	assert(resourceForkPlatformState.opens > 0);
@@ -1054,8 +1059,53 @@ void test_resource_package_writes()
 	assert(addColorSummaries[0].type == "HCbg");
 	assert(addColorSummaries[0].status == "exported");
 	assert(addColorSummaries[0].outputFile == "HCbg_77.json");
+	assert(addColorSummaries[0].outputArtifacts.size() == 1);
+	assert(addColorSummaries[0].outputArtifacts[0].path == "HCbg_77.json");
+	assert(addColorSummaries[0].outputArtifacts[0].format == "json");
+	assert(addColorSummaries[0].outputArtifacts[0].mediaType == "application/json");
 	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
 	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
+
+	std::vector<uint8_t> sicnPayload(64, 0x00);
+	for(size_t row = 0; row < 16; row++)
+	{
+		sicnPayload[row * 2] = 0xFF;
+		sicnPayload[32 + row * 2 + 1] = 0xFF;
+	}
+	const std::vector<uint8_t> sicnFork = make_single_resource_fork("SICN", 33, sicnPayload);
+	const std::string sicnOutputPath = std::string("/tmp/stackimport-sicn-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(sicnOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState sicnPlatformState;
+	sicnPlatformState.resource_fork_data = sicnFork.data();
+	sicnPlatformState.resource_fork_size = sicnFork.size();
+	stackimport_platform sicnPlatform = resourceForkPlatform;
+	sicnPlatform.user_data = &sicnPlatformState;
+	const stackimport_internal_platform sicnInternalPlatform = stackimport_internal_platform_from_api(&sicnPlatform);
+	CountingResourceOutput sicnOutput;
+	std::vector<CResourceSummary> sicnSummaries;
+	std::string sicnStatus;
+	uint64_t sicnBytes = 0;
+	{
+		stackimport_platform_scope sicnScope(sicnInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			sicnOutputPath,
+			"Stack",
+			&sicnOutput,
+			sicnSummaries,
+			sicnStatus,
+			sicnBytes));
+	}
+	assert(sicnStatus == "ok");
+	assert(sicnSummaries.size() == 1);
+	assert(sicnSummaries[0].type == "SICN");
+	assert(sicnSummaries[0].status == "exported");
+	assert(sicnSummaries[0].outputFile == "SICN_33_00.png");
+	assert(sicnSummaries[0].outputArtifacts.size() == 2);
+	assert(sicnSummaries[0].outputArtifacts[0].path == "SICN_33_00.png");
+	assert(sicnSummaries[0].outputArtifacts[0].variantIndex == 0);
+	assert(sicnSummaries[0].outputArtifacts[1].path == "SICN_33_01.png");
+	assert(sicnSummaries[0].outputArtifacts[1].variantIndex == 1);
 
 	const std::vector<uint8_t> strFork = make_single_resource_fork("STR ", 12, {5, 'H', 0x8E, 'l', 'l', 'o'});
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
@@ -1086,6 +1136,9 @@ void test_resource_package_writes()
 	assert(textSummaries[0].type == "STR ");
 	assert(textSummaries[0].status == "exported");
 	assert(textSummaries[0].outputFile == "resource-text/Stack_STR%20_12.txt");
+	assert(textSummaries[0].outputArtifacts.size() == 1);
+	assert(textSummaries[0].outputArtifacts[0].path == "resource-text/Stack_STR%20_12.txt");
+	assert(textSummaries[0].outputArtifacts[0].format == "text");
 	const std::string convertedText = read_text_file(textOutputPath + "/resource-text/Stack_STR%20_12.txt");
 	assert(convertedText == "H\xC3\xA9llo");
 }

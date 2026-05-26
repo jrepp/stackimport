@@ -133,6 +133,15 @@ struct CSourceBlockSummary
 	std::string	status;
 };
 
+struct CResourceOutputArtifact
+{
+	std::string	path;
+	std::string	format;
+	std::string	mediaType;
+	std::string	description;
+	uint32_t	variantIndex;
+};
+
 struct CResourceSummary
 {
 	std::string	type;
@@ -145,6 +154,7 @@ struct CResourceSummary
 	std::string	disassemblyFile;
 	std::string	architecture;
 	std::string	outputFile;
+	std::vector<CResourceOutputArtifact> outputArtifacts;
 };
 
 class CStyleEntry

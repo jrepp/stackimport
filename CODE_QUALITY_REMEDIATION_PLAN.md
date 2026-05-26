@@ -170,6 +170,10 @@ when parser behavior changes, updates to the relevant format documentation under
 - Resource reference conversion, native/converted payload construction, and
   callback filtering/delivery now share helpers between the SAX walker and
   package exporter.
+- Package resource summaries now keep a typed `outputArtifacts` list alongside
+  the legacy `outputFile` field, so one converted resource stream can emit JSON,
+  PNG, text, WAV, or disassembly files without losing secondary artifacts in
+  `source-manifest.json`.
 - Resource domain types and callback helpers moved to
   `StackImportResourceTypes.h`, and built-in zero-allocation resource transforms
   for ICON, CURS, and PAT# plus the typed PLTE parser/JSON serializer moved to
@@ -181,9 +185,9 @@ when parser behavior changes, updates to the relevant format documentation under
   PAT#, PLTE, `snd `, and code-resource disassembly artifacts from the same
   transform payloads instead of decoding, serializing, converting, or
   disassembling them a second time.
-- Still open: promote the transform surface from payload-only callbacks to a
-  fuller event model for summaries, diagnostics, artifact metadata, and future
-  resource families.
+- Still open: promote the transform surface from payload callbacks plus package
+  artifact tracking to a fuller event model for summaries, diagnostics, and
+  future typed resource outputs.
 - Added `Stack File Format/ResourceForkCoverage.md` as the ownership map for
   StackImport/rsrcd core parsers, resource_dasm fold/adapt candidates, and broad
   fallback decoders.
@@ -358,9 +362,10 @@ when parser behavior changes, updates to the relevant format documentation under
   writing through the shared transform payload.
 - Done for `DITL` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
-- Promote transform handlers from payload callbacks to a richer resource-event
-  stream that can carry summaries, diagnostics, artifact metadata, and future
-  typed resource outputs without adding ad hoc package-export branches.
+- Promote transform handlers from payload callbacks plus package artifact
+  tracking to a richer resource-event stream that can carry summaries,
+  diagnostics, and future typed resource outputs without adding ad hoc
+  package-export branches.
 - Use `Stack File Format/ResourceForkCoverage.md` to choose whether each new
   resource type belongs in rsrcd core, a narrow adapter, or raw-preservation
   fallback.

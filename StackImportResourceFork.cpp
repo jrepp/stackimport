@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <utility>
 
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
@@ -221,6 +222,52 @@ public:
 	auto exported_count() const -> int { return exportedCount_; }
 
 private:
+	static auto artifact_format_for_payload(const stackimport::ResourcePayload& payload) -> const char*
+	{
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
+			return "png";
+		if(payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
+			return "json";
+		if(payload.format == stackimport::ResourcePayloadFormat::TextUtf8)
+			return "text";
+		if(payload.format == stackimport::ResourcePayloadFormat::Binary && payload.media_type != nullptr)
+		{
+			if(std::strcmp(payload.media_type, "image/png") == 0)
+				return "png";
+			if(std::strcmp(payload.media_type, "audio/wav") == 0)
+				return "wav";
+		}
+		return "binary";
+	}
+
+	static auto media_type_for_payload(const stackimport::ResourcePayload& payload) -> const char*
+	{
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
+			return "image/png";
+		if(payload.media_type != nullptr)
+			return payload.media_type;
+		if(payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
+			return "application/json";
+		if(payload.format == stackimport::ResourcePayloadFormat::TextUtf8)
+			return "text/plain; charset=utf-8";
+		return "application/octet-stream";
+	}
+
+	void record_output_artifact(const std::string& relativePath, const stackimport::ResourcePayload& payload, bool primaryOutput)
+	{
+		if(primaryOutput && summary_.outputFile.empty())
+			summary_.outputFile = relativePath;
+
+		CResourceOutputArtifact artifact;
+		artifact.path = relativePath;
+		artifact.format = artifact_format_for_payload(payload);
+		artifact.mediaType = media_type_for_payload(payload);
+		artifact.variantIndex = payload.variant_index;
+		if(payload.description != nullptr)
+			artifact.description = payload.description;
+		summary_.outputArtifacts.push_back(std::move(artifact));
+	}
+
 	void write_png_payload(const stackimport::ResourcePayload& payload)
 	{
 		if(payload.data.data == nullptr || payload.width == 0 || payload.height == 0 || payload.row_bytes == 0)
@@ -233,7 +280,7 @@ private:
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = fname;
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote ICON #%d as PNG.\n", res_.id);
 			}
@@ -248,7 +295,7 @@ private:
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = fname;
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote ICN# #%d as PNG.\n", res_.id);
 			}
@@ -263,7 +310,7 @@ private:
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = fname;
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote CURS #%d as PNG (hotspot %u,%u).\n", res_.id, static_cast<unsigned>(payload.hotspot_x), static_cast<unsigned>(payload.hotspot_y));
 			}
@@ -276,7 +323,10 @@ private:
 		{
 			snprintf(fname, sizeof(fname), "PAT#_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
+			}
 			return;
 		}
 
@@ -286,7 +336,7 @@ private:
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = fname;
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote PAT #%d as PNG.\n", res_.id);
 			}
@@ -299,7 +349,10 @@ private:
 		{
 			snprintf(fname, sizeof(fname), "SICN_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
+			}
 			return;
 		}
 
@@ -312,7 +365,10 @@ private:
 				static_cast<char>(res_.type.data[3]),
 				res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
+			}
 			else
 				summary_.status = "export_failed";
 			return;
@@ -328,7 +384,10 @@ private:
 				res_.id,
 				static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
+			}
 			else
 				summary_.status = "export_failed";
 			return;
@@ -347,7 +406,7 @@ private:
 			if(write_binary_file(output_path(basePath_, fname), payload.data))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = fname;
+				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote PICT #%d as PNG.\n", res_.id);
 			}
@@ -366,7 +425,7 @@ private:
 			if(write_binary_file(soundsDir + "/" + wavFileName, payload.data))
 			{
 				summary_.status = "exported";
-				summary_.outputFile = std::string("sounds/") + wavFileName;
+				record_output_artifact(std::string("sounds/") + wavFileName, payload, true);
 				exportedCount_++;
 				stackimport_emit_infof("Status: Wrote snd #%d as WAV.\n", res_.id);
 			}
@@ -474,7 +533,7 @@ private:
 		if(write_json_file(output_path(basePath_, fname), reinterpret_cast<const char*>(payload.data.data), payload.data.size))
 		{
 			summary_.status = "exported";
-			summary_.outputFile = fname;
+			record_output_artifact(fname, payload, true);
 			exportedCount_++;
 			stackimport_emit_infof("Status: Parsed %s #%d.\n", summary_.type.c_str(), res_.id);
 		}
@@ -514,12 +573,13 @@ private:
 			{
 				summary_.status = "disassembled";
 				summary_.disassemblyFile = relativePath;
+				record_output_artifact(relativePath, payload, false);
 				stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary_.architecture.c_str(), summary_.type.c_str(), summary_.id);
 			}
 			else
 			{
 				summary_.status = "exported";
-				summary_.outputFile = relativePath;
+				record_output_artifact(relativePath, payload, true);
 				stackimport_emit_infof("Status: Wrote %s #%d as UTF-8 text.\n", summary_.type.c_str(), summary_.id);
 			}
 			exportedCount_++;

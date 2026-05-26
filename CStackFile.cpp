@@ -488,6 +488,21 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 			item.AddMember("disassemblyFile", json_string(resource.disassemblyFile, allocator), allocator);
 		if(!resource.outputFile.empty())
 			item.AddMember("outputFile", json_string(resource.outputFile, allocator), allocator);
+		if(!resource.outputArtifacts.empty())
+		{
+			JsonValue artifacts(rapidjson::kArrayType);
+			for(const CResourceOutputArtifact& artifact : resource.outputArtifacts)
+			{
+				JsonValue artifactItem(rapidjson::kObjectType);
+				artifactItem.AddMember("path", json_string(artifact.path, allocator), allocator);
+				artifactItem.AddMember("format", json_string(artifact.format, allocator), allocator);
+				artifactItem.AddMember("mediaType", json_string(artifact.mediaType, allocator), allocator);
+				artifactItem.AddMember("description", json_string(artifact.description, allocator), allocator);
+				artifactItem.AddMember("variantIndex", artifact.variantIndex, allocator);
+				artifacts.PushBack(artifactItem, allocator);
+			}
+			item.AddMember("outputArtifacts", artifacts, allocator);
+		}
 		resources.PushBack(item, allocator);
 		resourceTypeCounts[resource.type]++;
 	}
