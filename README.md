@@ -107,8 +107,9 @@ The main build currently uses these vendored libraries:
   `vendor_rapidjson`.
 - `stb/` - `stb_image_write.h` for PNG output; MIT or public domain; used
   through `vendor_stb_image_write`.
-- `dr_wav/` - single-header WAV reader/writer candidate; public domain or MIT-0;
-  exposed as `vendor_dr_wav`.
+- `dr_wav/` - single-header WAV reader/writer candidate retained for comparison;
+  public domain or MIT-0; exposed as `vendor_dr_wav` but not linked into the core
+  importer.
 - `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot retained as reference
   material; built as `vendor_snd2wav`; see `vendor/INDEX.md` for its licensing
   caveat.
