@@ -10,19 +10,7 @@
 
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
-#include "stackimport_rapidjson_allocator.h"
 #include "rsrcd.hpp"
-#include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-
-using JsonPoolAllocator = rapidjson::MemoryPoolAllocator<StackImportRapidJsonAllocator>;
-using JsonDocument = rapidjson::GenericDocument<rapidjson::UTF8<>, JsonPoolAllocator, StackImportRapidJsonAllocator>;
-using JsonValue = rapidjson::GenericValue<rapidjson::UTF8<>, JsonPoolAllocator>;
-using JsonStringBuffer = rapidjson::GenericStringBuffer<rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
-using JsonWriter = rapidjson::PrettyWriter<JsonStringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
-
-extern unsigned char sMacRomanToUTF8Table[128][5];
 
 namespace {
 
@@ -32,13 +20,6 @@ std::string output_path(const std::string& basePath, const char* fileName)
 	if(!result.empty() && result[result.size() - 1] != '/')
 		result += '/';
 	result += fileName;
-	return result;
-}
-
-JsonValue json_string(const std::string& value, JsonPoolAllocator& allocator)
-{
-	JsonValue result;
-	result.SetString(value.c_str(), static_cast<rapidjson::SizeType>(value.size()), allocator);
 	return result;
 }
 
@@ -134,25 +115,6 @@ bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 	return closeStatus == 0;
 }
 
-std::string mac_roman_from_bytes(const uint8_t* data, size_t len)
-{
-	std::string result;
-	for(size_t i = 0; i < len; i++)
-	{
-		unsigned char ch = data[i];
-		if(ch >= 128)
-			result.append(reinterpret_cast<const char*>(sMacRomanToUTF8Table[ch - 128]));
-		else if(ch == 0x11)
-		{
-			static unsigned char commandKey[4] = {0xe2, 0x8c, 0x98, 0};
-			result.append(reinterpret_cast<const char*>(commandKey));
-		}
-		else
-			result.push_back(static_cast<char>(ch));
-	}
-	return result;
-}
-
 bool resource_type_is(const rsrcd::ResRef& res, const char* type)
 {
 	return res.type.size == 4 && res.type.data != nullptr && std::memcmp(res.type.data, type, 4) == 0;
@@ -175,7 +137,7 @@ public:
 
 	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
 	{
-		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
+		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32 || payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
 			return true;
 		if(downstream_ == nullptr || downstreamStopped_)
 			return false;
@@ -186,8 +148,19 @@ public:
 	{
 		if(payload.format == stackimport::ResourcePayloadFormat::Rgba32)
 			write_png_payload(payload);
+		else if(payload.format == stackimport::ResourcePayloadFormat::JsonUtf8)
+			write_json_payload(payload);
 		if(downstream_ != nullptr && !downstreamStopped_ && !stackimport::emit_resource_payload(*downstream_, payload))
 			downstreamStopped_ = true;
+		return true;
+	}
+
+	auto on_resource_error(const stackimport::ResourceRef& resource, const char* msg) -> bool override
+	{
+		(void)resource;
+		(void)msg;
+		if(resource_type_is(res_, "PLTE"))
+			summary_.status = "parse_failed";
 		return true;
 	}
 
@@ -236,6 +209,23 @@ private:
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 				exportedCount_++;
 		}
+	}
+
+	void write_json_payload(const stackimport::ResourcePayload& payload)
+	{
+		if(!resource_type_is(res_, "PLTE") || payload.data.data == nullptr)
+			return;
+		char fname[64];
+		snprintf(fname, sizeof(fname), "PLTE_%d.json", res_.id);
+		if(write_json_file(output_path(basePath_, fname), reinterpret_cast<const char*>(payload.data.data), payload.data.size))
+		{
+			summary_.status = "exported";
+			summary_.outputFile = fname;
+			exportedCount_++;
+			stackimport_emit_infof("Status: Parsed PLTE #%d.\n", res_.id);
+		}
+		else
+			summary_.status = "export_failed";
 	}
 
 	const rsrcd::ResRef& res_;
@@ -402,64 +392,8 @@ bool stackimport_load_resource_fork(
 		}
 		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
 		{
-			rsrcd::plte::Palette<64> pal;
-			auto plteResult = rsrcd::plte::parse(res.data, pal);
-			if(plteResult)
-			{
-				StackImportRapidJsonAllocator baseAlloc;
-				JsonPoolAllocator pool(1024, &baseAlloc);
-				JsonDocument doc(&pool, 1024, &baseAlloc);
-				doc.SetObject();
-				JsonPoolAllocator& a = doc.GetAllocator();
-				doc.AddMember("wdef", pal.wdef, a);
-				doc.AddMember("showName", pal.show_name, a);
-				doc.AddMember("selection", pal.selection, a);
-				doc.AddMember("frame", pal.frame, a);
-				doc.AddMember("pictRef", pal.pict_ref, a);
-				doc.AddMember("top", pal.top, a);
-				doc.AddMember("left", pal.left, a);
-
-				JsonValue buttons(rapidjson::kArrayType);
-				for(size_t bi = 0; bi < pal.button_count; bi++)
-				{
-					JsonValue btn(rapidjson::kObjectType);
-					const auto& b = pal.buttons[bi];
-					btn.AddMember("top", b.top, a);
-					btn.AddMember("left", b.left, a);
-					btn.AddMember("bottom", b.bottom, a);
-					btn.AddMember("right", b.right, a);
-					if(!b.message.empty())
-					{
-						std::string msg = mac_roman_from_bytes(b.message.data, b.message.size);
-						btn.AddMember("message", json_string(msg, a), a);
-					}
-					buttons.PushBack(btn, a);
-				}
-				doc.AddMember("buttons", buttons, a);
-
-				JsonStringBuffer jsonBuffer(&baseAlloc);
-				JsonWriter writer(jsonBuffer, &baseAlloc);
-				doc.Accept(writer);
-				if(!resourceStreamingStopped)
-				{
-					auto payload = stackimport::make_converted_resource_payload(resourceRef, stackimport::ResourcePayloadFormat::JsonUtf8, rsrcd::Bytes{reinterpret_cast<const uint8_t*>(jsonBuffer.GetString()), jsonBuffer.GetSize()}, "application/json", "parsed PLTE palette metadata");
-					if(!stackimport::emit_resource_payload(resourceOutput, payload))
-						resourceStreamingStopped = true;
-				}
-
-				char fname[64];
-				snprintf(fname, sizeof(fname), "PLTE_%d.json", res.id);
-				if(write_json_file(output_path(basePath, fname), jsonBuffer.GetString(), jsonBuffer.GetSize()))
-				{
-					summary.status = "exported";
-					summary.outputFile = fname;
-					stackimport_emit_infof("Status: Parsed PLTE #%d (%zu buttons).\n", res.id, pal.button_count);
-				}
-				else
-					summary.status = "export_failed";
-			}
-			else
-				summary.status = "parse_failed";
+			PackageBuiltinTransformOutput transformOutput(res, basePath, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
 			resourceSummaries.push_back(summary);
 			continue;
 		}

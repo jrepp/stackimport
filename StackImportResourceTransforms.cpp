@@ -1,6 +1,21 @@
 #include "StackImportResourceTransforms.h"
 
+#include "stackimport_rapidjson_allocator.h"
+
 #include <cstring>
+#include <string>
+
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
+
+using JsonPoolAllocator = rapidjson::MemoryPoolAllocator<StackImportRapidJsonAllocator>;
+using JsonDocument = rapidjson::GenericDocument<rapidjson::UTF8<>, JsonPoolAllocator, StackImportRapidJsonAllocator>;
+using JsonValue = rapidjson::GenericValue<rapidjson::UTF8<>, JsonPoolAllocator>;
+using JsonStringBuffer = rapidjson::GenericStringBuffer<rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
+using JsonWriter = rapidjson::PrettyWriter<JsonStringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, StackImportRapidJsonAllocator>;
+
+extern unsigned char sMacRomanToUTF8Table[128][5];
 
 namespace stackimport {
 
@@ -20,6 +35,89 @@ auto resource_type_is(const rsrcd::ResRef& resource, const char* type) -> bool
 {
 	return resource.type.size == 4 && resource.type.data != nullptr &&
 		std::memcmp(resource.type.data, type, 4) == 0;
+}
+
+auto json_string(const std::string& value, JsonPoolAllocator& allocator) -> JsonValue
+{
+	JsonValue result;
+	result.SetString(value.c_str(), static_cast<rapidjson::SizeType>(value.size()), allocator);
+	return result;
+}
+
+auto mac_roman_from_bytes(const uint8_t* data, size_t len) -> std::string
+{
+	std::string result;
+	for(size_t i = 0; i < len; i++)
+	{
+		unsigned char ch = data[i];
+		if(ch >= 128)
+			result.append(reinterpret_cast<const char*>(sMacRomanToUTF8Table[ch - 128]));
+		else if(ch == 0x11)
+		{
+			static unsigned char command_key[4] = {0xe2, 0x8c, 0x98, 0};
+			result.append(reinterpret_cast<const char*>(command_key));
+		}
+		else
+			result.push_back(static_cast<char>(ch));
+	}
+	return result;
+}
+
+auto emit_plte_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed PLTE palette metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::plte::Palette<64> pal;
+	auto plte_result = rsrcd::plte::parse(resource.data, pal);
+	if(!plte_result)
+		return output.on_resource_error(ref, plte_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("wdef", pal.wdef, allocator);
+	doc.AddMember("showName", pal.show_name, allocator);
+	doc.AddMember("selection", pal.selection, allocator);
+	doc.AddMember("frame", pal.frame, allocator);
+	doc.AddMember("pictRef", pal.pict_ref, allocator);
+	doc.AddMember("top", pal.top, allocator);
+	doc.AddMember("left", pal.left, allocator);
+
+	JsonValue buttons(rapidjson::kArrayType);
+	for(size_t bi = 0; bi < pal.button_count; bi++)
+	{
+		JsonValue btn(rapidjson::kObjectType);
+		const auto& b = pal.buttons[bi];
+		btn.AddMember("top", b.top, allocator);
+		btn.AddMember("left", b.left, allocator);
+		btn.AddMember("bottom", b.bottom, allocator);
+		btn.AddMember("right", b.right, allocator);
+		if(!b.message.empty())
+		{
+			std::string msg = mac_roman_from_bytes(b.message.data, b.message.size);
+			btn.AddMember("message", json_string(msg, allocator), allocator);
+		}
+		buttons.PushBack(btn, allocator);
+	}
+	doc.AddMember("buttons", buttons, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
 }
 
 } // namespace
@@ -111,6 +209,9 @@ auto emit_builtin_resource_transforms(
 				return false;
 		}
 	}
+
+	if(resource_type_is(resource, "PLTE"))
+		return emit_plte_transform(resource, ref, output);
 
 	return true;
 }
