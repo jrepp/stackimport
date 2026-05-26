@@ -129,6 +129,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - C API allocation failures now surface as
   `STACKIMPORT_STATUS_ALLOCATION_FAILED`, with tests covering platform allocator
   and RapidJSON allocation failure paths.
+- Public C header now documents that caller callbacks must not unwind across the
+  C ABI boundary and should report failures through callback return values.
 - Remaining work: extend allocation-failure coverage to every resource
   conversion branch, especially optional sound/disassembly paths.
 
@@ -140,7 +142,7 @@ when parser behavior changes, updates to the relevant format documentation under
   optional source location.
 - Done: make `CBuf`, `PlatformAllocator`, RapidJSON allocation, and resource
   conversion report allocation failure without terminating.
-- Define API behavior when callbacks throw is not relevant because exceptions
+- Done: define API behavior when callbacks throw is not relevant because exceptions
   are disabled; document that callbacks must not unwind.
 
 ### Tests

@@ -75,6 +75,12 @@ typedef enum stackimport_resource_payload_flags {
 	STACKIMPORT_RESOURCE_PAYLOADS_ALL = STACKIMPORT_RESOURCE_PAYLOADS_NATIVE | STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED
 } stackimport_resource_payload_flags;
 
+/*
+ * Caller-provided callbacks are invoked synchronously and must not unwind across
+ * the StackImport C ABI boundary. Report failure by returning a null handle,
+ * short read/write, non-zero close/mkdir result, or 0 from resource callbacks.
+ */
+
 typedef struct stackimport_resource_payload {
 	uint32_t struct_size;
 	char type[4];
