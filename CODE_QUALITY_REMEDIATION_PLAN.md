@@ -255,6 +255,8 @@ when parser behavior changes, updates to the relevant format documentation under
   interfaces instead of exporting the source root as the install interface.
 - The existing install-tree `pkg-config` smoke test passes in default,
   warning-as-error, and vendor-tools-off builds.
+- Added a shared-library symbol smoke test that checks the exported C API
+  surface with `nm` when available.
 - `include/stackimport_sax.hpp` remains an internal/experimental header: it is
   used by the CLI/core implementation but is not installed or documented as a
   public API.
@@ -276,7 +278,7 @@ when parser behavior changes, updates to the relevant format documentation under
 - Add an install-tree smoke test that compiles a minimal C program using only
   `stackimport_c.h` and `pkg-config`.
 - Add a static-link smoke test if static archive installation remains supported.
-- Add a shared-library visibility check for exported C symbols.
+- Done: add a shared-library visibility check for exported C symbols.
 
 ### Lateral Audit
 

@@ -274,6 +274,15 @@ if(STACKIMPORT_BUILD_TESTS)
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/InstallPkgConfigSmokeTest.cmake"
         )
     endif()
+    if(CMAKE_NM)
+        add_test(
+            NAME stackimport-shared-symbol-smoke
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSTACKIMPORT_SHARED_LIBRARY=$<TARGET_FILE:stackimport_shared>"
+                "-DSTACKIMPORT_NM_EXECUTABLE=${CMAKE_NM}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SharedLibrarySymbolSmokeTest.cmake"
+        )
+    endif()
 endif()
 
 add_custom_target(import-stacks
