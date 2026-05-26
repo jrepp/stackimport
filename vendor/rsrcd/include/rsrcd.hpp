@@ -693,6 +693,25 @@ inline auto decode_pat(Bytes data, MutableBytes out) -> Result {
     return Result::ok();
 }
 
+// Decode single 16x16 1-bit small icon (32 bytes) to BGRA.
+// out must be 16*16*4 = 1024 bytes.
+inline auto decode_sicn(Bytes data, MutableBytes out) -> Result {
+    constexpr int w = 16, h = 16;
+    constexpr size_t bgra_size = static_cast<size_t>(w * h * 4);
+    if (data.size < 32) return Error::unexpected_end();
+    if (out.size < bgra_size) return Error::bounds();
+
+    for (int y = 0; y < h; ++y) {
+        uint16_t row = read_u16be(data.data + y * 2);
+        for (int x = 0; x < w; ++x) {
+            bool black = (row >> (15 - x)) & 1;
+            uint32_t c = black ? 0xFF000000u : 0xFFFFFFFFu;
+            put_bgra(out, c);
+        }
+    }
+    return Result::ok();
+}
+
 } // namespace img
 
 // ============================================================================

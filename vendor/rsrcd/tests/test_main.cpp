@@ -675,6 +675,30 @@ static void test_decode_pat_checkerboard() {
     CHECK(bgra[4] == 0xFF, "checker pixel 1 white");
 }
 
+static void test_decode_sicn() {
+    uint8_t sicn[32] = {};
+    sicn[0] = 0x80;
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_sicn({sicn, sizeof(sicn)}, out);
+    CHECK_RESULT(r, "decode small icon");
+
+    CHECK(bgra[0] == 0x00, "SICN top-left pixel black");
+    CHECK(bgra[3] == 0xFF, "SICN top-left pixel opaque");
+    CHECK(bgra[4] == 0xFF, "SICN second pixel white");
+    CHECK(bgra[7] == 0xFF, "SICN second pixel opaque");
+}
+
+static void test_decode_sicn_too_small() {
+    uint8_t sicn[31] = {};
+    uint8_t bgra[16 * 16 * 4];
+    rsrcd::MutableBytes out{bgra, sizeof(bgra)};
+
+    auto r = rsrcd::img::decode_sicn({sicn, sizeof(sicn)}, out);
+    CHECK(!r, "small icon too small should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1380,6 +1404,8 @@ int main() {
     test_decode_curs_too_small();
     test_decode_pat_all_white();
     test_decode_pat_checkerboard();
+    test_decode_sicn();
+    test_decode_sicn_too_small();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

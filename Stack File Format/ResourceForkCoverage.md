@@ -17,6 +17,7 @@ where new support should live. The target architecture is:
 | `CURS` | RGBA transform and PNG package artifact | `rsrcd::img`, `StackImportResourceTransforms.cpp` | Includes hotspot metadata. |
 | `PAT ` | RGBA transform and PNG package artifact | `rsrcd::img`, `StackImportResourceTransforms.cpp` | Single 8x8 1-bit pattern. |
 | `PAT#` | RGBA transform per pattern and PNG package artifacts | `rsrcd::patlist`, `StackImportResourceTransforms.cpp` | 8x8 1-bit patterns. |
+| `SICN` | RGBA transform per small icon and PNG package artifacts | `rsrcd::img`, `StackImportResourceTransforms.cpp` | 16x16 1-bit small icon list. |
 | `PLTE` | Typed parse to JSON transform and package artifact | `rsrcd::plte`, `StackImportResourceTransforms.cpp` | Palette window metadata and buttons. |
 | `clut` / `CTBL` / `actb` / `cctb` / `dctb` / `fctb` / `wctb` | Typed color-table parse to JSON transform and package artifact | `rsrcd::color_table`, `StackImportResourceTransforms.cpp` | Color table entries with 16-bit RGB. |
 | `pltt` | Typed palette parse to JSON transform and package artifact | `rsrcd::pltt`, `StackImportResourceTransforms.cpp` | Palette entries with 16-bit RGB. |
@@ -49,7 +50,7 @@ interface is clear.
 | Family | Types | Current resource_dasm support | Preferred StackImport direction |
 | --- | --- | --- | --- |
 | PICT | `PICT` | `decode_PICT` and exporter support | Adapter first; current StackImport support uses `StackImportResourceDasmPictAdapter` and does not expose resource_dasm internals to core code. |
-| Icon families | `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`, `SICN`, `cicn`, `icns` | typed decoders and exporters | Fold small bitmap/icon decoders into rsrcd; keep `icns` container handling adapter-backed until bounded. `ICN#` now lives in StackImport core. |
+| Icon families | `icm#`, `ics#`, `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8`, `cicn`, `icns` | typed decoders and exporters | Fold small bitmap/icon decoders into rsrcd; keep `icns` container handling adapter-backed until bounded. `ICN#` and `SICN` now live in StackImport core. |
 | Color tables and patterns | `ppat`, `ppt#` | typed decoders and exporters | Fold bounded parsers into rsrcd. `PAT `, `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, `wctb`, and `pltt` now live in StackImport core. |
 | Text | `styl`, `KCHR` | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, `TEXT`, and `TwCS` now live in StackImport core. |
 | Metadata/templates | `TMPL`, `cfrg`, `ROv#`, `RSSC` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. `vers` and `SIZE` now live in StackImport core. |

@@ -269,6 +269,15 @@ private:
 			}
 			else
 				summary_.status = "export_failed";
+			return;
+		}
+
+		if(resource_type_is(res_, "SICN"))
+		{
+			snprintf(fname, sizeof(fname), "SICN_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+				exportedCount_++;
+			return;
 		}
 	}
 
@@ -564,6 +573,19 @@ bool stackimport_load_resource_fork(
 		{
 			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
 			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			resourceSummaries.push_back(summary);
+			continue;
+		}
+		else if(std::memcmp(res.type.data, "SICN", 4) == 0)
+		{
+			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+			int exported = transformOutput.exported_count();
+			if(exported > 0)
+			{
+				summary.status = "exported";
+				stackimport_emit_infof("Status: Wrote %d small icons from SICN #%d as PNG.\n", exported, res.id);
+			}
 			resourceSummaries.push_back(summary);
 			continue;
 		}

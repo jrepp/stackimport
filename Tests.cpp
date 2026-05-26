@@ -588,6 +588,17 @@ void	RunTests()
 	assert(patOutput.last_height == 8);
 	assert(patOutput.last_payload_size == 8u * 8u * 4u);
 
+	std::vector<uint8_t> sicnPayload(32);
+	sicnPayload[0] = 0x80;
+	const std::vector<uint8_t> sicnFork = make_single_resource_fork("SICN", 10, sicnPayload);
+	CountingResourceOutput sicnOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{sicnFork.data(), sicnFork.size()}, sicnOutput));
+	assert(sicnOutput.native_count == 1);
+	assert(sicnOutput.rgba_count == 1);
+	assert(sicnOutput.last_width == 16);
+	assert(sicnOutput.last_height == 16);
+	assert(sicnOutput.last_payload_size == 16u * 16u * 4u);
+
 	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
 	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);

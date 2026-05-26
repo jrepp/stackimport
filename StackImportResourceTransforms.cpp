@@ -998,6 +998,38 @@ auto emit_builtin_resource_transforms(
 		return output.on_resource_payload(descriptor);
 	}
 
+	if(resource_type_is(resource, "SICN"))
+	{
+		if((resource.data.size % 32u) != 0)
+			return output.on_resource_error(ref, "SICN size is not a multiple of 32 bytes");
+		const size_t icon_count = resource.data.size / 32u;
+		for(size_t si = 0; si < icon_count; ++si)
+		{
+			ResourcePayload descriptor = make_converted_resource_payload(
+				ref,
+				ResourcePayloadFormat::Rgba32,
+				rsrcd::Bytes{nullptr, 16u * 16u * 4u},
+				"image/x-rgba32",
+				"decoded 16x16 SICN pixels");
+			descriptor.variant_index = static_cast<uint32_t>(si);
+			descriptor.width = 16;
+			descriptor.height = 16;
+			descriptor.row_bytes = 16 * 4;
+			if(!output.wants_resource_payload(descriptor))
+				continue;
+
+			uint8_t rgba[16 * 16 * 4];
+			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
+			rsrcd::Bytes sicn = resource.data.slice(si * 32u, 32u);
+			if(!rsrcd::img::decode_sicn(sicn, dst))
+				continue;
+			swap_bgra_to_rgba(rgba, 16u * 16u);
+			descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
+			if(!output.on_resource_payload(descriptor))
+				return false;
+		}
+	}
+
 	if(resource_type_is(resource, "PLTE"))
 		return emit_plte_transform(resource, ref, output);
 
