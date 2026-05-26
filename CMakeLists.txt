@@ -21,6 +21,16 @@ option(STACKIMPORT_ENABLE_CPPCHECK "Run cppcheck during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_INCLUDE_WHAT_YOU_USE "Run include-what-you-use during CMake builds" OFF)
 option(STACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER "Run Clang static analyzer checks through clang-tidy" OFF)
 
+if(NOT STACKIMPORT_ENABLE_VENDOR)
+    message(FATAL_ERROR "STACKIMPORT_ENABLE_VENDOR=OFF is unsupported; remove unused vendored dependencies instead of compiling without them")
+endif()
+set(STACKIMPORT_ENABLE_VENDOR ON CACHE BOOL "Expose vendored conversion support targets" FORCE)
+
+if(DEFINED STACKIMPORT_BUILD_VENDOR_TOOLS AND NOT STACKIMPORT_BUILD_VENDOR_TOOLS)
+    message(FATAL_ERROR "STACKIMPORT_BUILD_VENDOR_TOOLS=OFF is unsupported; vendor tools are part of StackImport resource coverage")
+endif()
+set(STACKIMPORT_BUILD_VENDOR_TOOLS ON CACHE BOOL "Build vendored conversion tools required by StackImport resource coverage" FORCE)
+
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)

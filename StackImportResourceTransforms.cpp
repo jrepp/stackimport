@@ -1,9 +1,7 @@
 #include "Mac68kDisassembly.h"
 #include "StackImportResourceTransforms.h"
 
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 #include "StackImportResourceDasmPictAdapter.h"
-#endif
 #include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
@@ -295,7 +293,6 @@ auto emit_pict_transform(
 	if(!output.wants_resource_payload(descriptor))
 		return true;
 
-#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 	std::vector<uint8_t> png;
 	uint32_t width = 0;
 	uint32_t height = 0;
@@ -307,10 +304,6 @@ auto emit_pict_transform(
 	descriptor.width = width;
 	descriptor.height = height;
 	return output.on_resource_payload(descriptor);
-#else
-	(void)resource;
-	return true;
-#endif
 }
 
 } // namespace

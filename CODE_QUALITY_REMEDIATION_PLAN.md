@@ -191,7 +191,7 @@ when parser behavior changes, updates to the relevant format documentation under
   transform pipeline and emits JSON package artifacts.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
-  preserves native bytes when the adapter is unavailable or conversion fails.
+  preserves native bytes when conversion fails.
 - Remaining work: expand the shared transform interface into one owned
   event/converter pipeline for metadata, diagnostics, and artifacts beyond the
   current image-payload transform cases.
@@ -269,8 +269,8 @@ when parser behavior changes, updates to the relevant format documentation under
 - ROM SHA-256 hashing now goes through `StackImportPhosgHashAdapter`; the
   direct `phosg/Hash.hh` include is isolated to an adapter source under
   `vendor/`.
-- Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
-  configurations build and pass tests after the adapter split.
+- Vendor tools are required project infrastructure; unused vendored dependencies
+  should be removed rather than compiled out.
 - Remaining work: fold `resource_dasm` concepts into typed, memory-safe,
   streaming StackImport/rsrcd interfaces where useful; broader
   license/provenance audit.
@@ -294,7 +294,7 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ### Tests
 
-- Done: build with `STACKIMPORT_BUILD_VENDOR_TOOLS=ON` and `OFF`.
+- Done: enforce vendor tools as part of the normal build.
 - Done: build shared and static targets with warning-as-error settings.
 - Add adapter-level tests around MACE decode, PNG bytes, and disassembly fallback
   behavior.
@@ -302,7 +302,7 @@ when parser behavior changes, updates to the relevant format documentation under
 ### Lateral Audit
 
 - Check license/provenance notes for any copied codec code.
-- Check Homebrew/release build behavior with vendor tools disabled.
+- Check Homebrew/release build behavior with vendor tools enabled.
 - Check that installed headers do not require private vendor include paths unless
   explicitly part of the public API.
 
@@ -315,8 +315,8 @@ when parser behavior changes, updates to the relevant format documentation under
   still publishes only `stackimport_c.h`.
 - Target include directories now distinguish build-tree and install-tree include
   interfaces instead of exporting the source root as the install interface.
-- The existing install-tree `pkg-config` smoke test passes in default,
-  warning-as-error, and vendor-tools-off builds.
+- The existing install-tree `pkg-config` smoke test passes in default and
+  warning-as-error builds.
 - Added a shared-library symbol smoke test that checks the exported C API
   surface with `nm` when available.
 - `include/stackimport_sax.hpp` remains an internal/experimental header: it is

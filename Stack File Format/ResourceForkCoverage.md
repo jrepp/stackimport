@@ -18,7 +18,7 @@ where new support should live. The target architecture is:
 | `PLTE` | Typed parse to JSON transform and package artifact | `rsrcd::plte`, `StackImportResourceTransforms.cpp` | Palette window metadata and buttons. |
 | `HCbg` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Background overlay metadata. |
 | `HCcd` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Card overlay metadata. |
-| `PICT` | Optional PNG transform and package artifact | `StackImportResourceDasmPictAdapter` | Adapter-backed when vendor tools are enabled; native bytes are still preserved when unavailable or render fails. |
+| `PICT` | PNG transform and package artifact | `StackImportResourceDasmPictAdapter` | Adapter-backed through resource_dasm; native bytes are still preserved when rendering fails. |
 | `snd ` | WAV transform and package artifact | `StackImportSoundConverter.cpp` | MACE uses the resource_dasm-backed MACE adapter when enabled. |
 | `XCMD` / `XFCN` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | 68K code resources. |
 | `xcmd` / `xfcn` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | PowerPC code resources. |

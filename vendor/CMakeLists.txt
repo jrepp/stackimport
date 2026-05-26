@@ -1,6 +1,9 @@
 include(ExternalProject)
 
-option(STACKIMPORT_BUILD_VENDOR_TOOLS "Enable local builds for vendored conversion tools" ON)
+if(DEFINED STACKIMPORT_BUILD_VENDOR_TOOLS AND NOT STACKIMPORT_BUILD_VENDOR_TOOLS)
+    message(FATAL_ERROR "STACKIMPORT_BUILD_VENDOR_TOOLS=OFF is unsupported; remove unused vendored dependencies instead")
+endif()
+set(STACKIMPORT_BUILD_VENDOR_TOOLS ON CACHE BOOL "Build vendored conversion tools required by StackImport resource coverage" FORCE)
 option(STACKIMPORT_VENDOR_STRICT_WARNINGS "Build vendored tools with stricter compiler warnings where supported" ON)
 option(STACKIMPORT_VENDOR_WARNINGS_AS_ERRORS "Treat local vendored library warnings as errors" ${STACKIMPORT_WARNINGS_AS_ERRORS})
 

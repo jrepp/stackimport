@@ -116,9 +116,10 @@ The main build currently uses these vendored libraries:
 - `ppcd/` - PowerPC disassembler snapshot for PPC code-resource work; CC0-1.0;
   built as `vendor_ppcd`.
 
-Optional vendor-tool targets also build Deark, `resource_dasm`, and `phosg` for
-conversion and reverse-engineering work. These are isolated from the default
-install-oriented Homebrew build with `-DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF`.
+Vendored conversion tools also build Deark, `resource_dasm`, and `phosg` for
+resource conversion and reverse-engineering work. These tools are part of the
+normal StackImport build; unused vendored dependencies should be removed rather
+than compiled out.
 
 Embedding API
 -------------
@@ -238,7 +239,6 @@ class Stackimport < Formula
     system "cmake", "-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Release",
                     "-DSTACKIMPORT_BUILD_TESTS=OFF",
                     "-DSTACKIMPORT_BUILD_VENDOR_TESTS=OFF",
-                    "-DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF",
                     "-DCMAKE_INSTALL_PREFIX=#{prefix}"
     system "cmake", "--build", "build", "--target", "install"
   end
