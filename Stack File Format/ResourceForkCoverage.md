@@ -43,7 +43,7 @@ where new support should live. The target architecture is:
 | `DITL` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Dialog item records, bounds, kind, text info, and resource IDs. |
 | `MBAR` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::mbar`, `StackImportResourceTransforms.cpp` | Counted list of menu resource IDs. |
 | `ALRT` / `FREF` / `BNDL` | Typed Finder/UI metadata parse to JSON transform and package artifact | `rsrcd::finder`, `StackImportResourceTransforms.cpp` | Alert bounds/stages, file references, and bundle type/id mappings. |
-| `RECT` / `TOOL` | Typed simple metadata parse to JSON transform and package artifact | `rsrcd::simple_metadata`, `StackImportResourceTransforms.cpp` | Rectangle resources and cursor-tool palette layouts. |
+| `RECT` / `TOOL` / `PICK` | Typed simple metadata parse to JSON transform and package artifact | `rsrcd::simple_metadata`, `StackImportResourceTransforms.cpp` | Rectangle resources, cursor-tool palette layouts, and picker resource lists. |
 | `PICT` | PNG transform and package artifact | `StackImportResourceDasmPictAdapter` | Adapter-backed through resource_dasm; native bytes are still preserved when rendering fails. |
 | `snd ` | WAV transform and package artifact | `StackImportSoundConverter.cpp` | MACE uses the resource_dasm-backed MACE adapter when enabled. |
 | `XCMD` / `XFCN` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | 68K code resources. |
@@ -67,7 +67,7 @@ interface is clear.
 | Fonts | `FONT`, `NFNT`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. `finf` now lives in StackImport core. |
 | Code | `CODE`, `DRVR`, `dcmp`, `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. |
 | Audio/music | `csnd`, `esnd`, `ESnd`, `Ysnd`, `SMSD`, `SOUN`, `SONG`, `INST`, `Tune`, MIDI-like resources | audio/music decoders and exporters | Adapter first for codecs; fold metadata-only parsing into rsrcd. |
-| Template-backed metadata | `LAYO`, `PAPA`, `PICK`, `TOOL`, `RECT` and other system templates | system-template description | Fold small bounded templates into rsrcd when they appear in corpus output paths. `RECT` and `TOOL` now live in StackImport core. |
+| Template-backed metadata | `LAYO`, `PAPA` and other system templates | system-template description | Fold small bounded templates into rsrcd when they appear in corpus output paths. `RECT`, `TOOL`, and `PICK` now live in StackImport core. |
 
 ## Broad Fallbacks
 

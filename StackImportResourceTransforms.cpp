@@ -714,6 +714,55 @@ auto emit_tool_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_pick_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed picker metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::simple_metadata::Picker<256> picker;
+	auto parse_result = rsrcd::simple_metadata::parse_pick(resource.data, picker);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("type", picker.type, allocator);
+	doc.AddMember("typeString", json_string(resource_type_string(picker.type), allocator), allocator);
+	doc.AddMember("useColor", picker.use_color, allocator);
+	doc.AddMember("pickerType", picker.picker_type, allocator);
+	doc.AddMember("viewBy", picker.view_by, allocator);
+	doc.AddMember("reserved", picker.reserved, allocator);
+	doc.AddMember("verticalCellSize", picker.vertical_cell_size, allocator);
+	JsonValue resources(rapidjson::kArrayType);
+	for(const auto& item : picker)
+	{
+		JsonValue value(rapidjson::kObjectType);
+		value.AddMember("type", item.type, allocator);
+		value.AddMember("typeString", json_string(resource_type_string(item.type), allocator), allocator);
+		value.AddMember("id", item.id, allocator);
+		resources.PushBack(value, allocator);
+	}
+	doc.AddMember("resources", resources, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1691,6 +1740,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "TOOL"))
 		return emit_tool_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "PICK"))
+		return emit_pick_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

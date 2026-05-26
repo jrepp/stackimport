@@ -951,6 +951,24 @@ void	RunTests()
 	assert(toolOutput.last_json.find("\"cursorIds\"") != std::string::npos);
 	assert(toolOutput.last_json.find("130") != std::string::npos);
 
+	std::vector<uint8_t> pickPayload;
+	append_u32be(pickPayload, 0x50494354);
+	pickPayload.insert(pickPayload.end(), {1, 2, 3, 0});
+	append_u16be(pickPayload, 16);
+	append_u16be(pickPayload, 1);
+	append_u32be(pickPayload, 0x49434F4E);
+	append_u16be(pickPayload, 128);
+	append_u32be(pickPayload, 0x50494354);
+	append_u16be(pickPayload, 129);
+	const std::vector<uint8_t> pickFork = make_single_resource_fork("PICK", 1, pickPayload);
+	CountingResourceOutput pickOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{pickFork.data(), pickFork.size()}, pickOutput));
+	assert(pickOutput.native_count == 1);
+	assert(pickOutput.json_count == 1);
+	assert(pickOutput.last_json.find("\"typeString\": \"PICT\"") != std::string::npos);
+	assert(pickOutput.last_json.find("\"verticalCellSize\": 16") != std::string::npos);
+	assert(pickOutput.last_json.find("\"id\": 129") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);

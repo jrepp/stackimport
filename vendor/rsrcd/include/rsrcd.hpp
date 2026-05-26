@@ -2073,6 +2073,62 @@ auto parse_tool(Bytes data, ToolList<Cap>& tools) -> Result {
     return Result::ok();
 }
 
+struct PickerResourceRef {
+    uint32_t type;
+    uint16_t id;
+};
+
+template<size_t InlineCapacity = 128>
+class Picker {
+public:
+    uint32_t type = 0;
+    uint8_t use_color = 0;
+    uint8_t picker_type = 0;
+    uint8_t view_by = 0;
+    uint8_t reserved = 0;
+    uint16_t vertical_cell_size = 0;
+
+    auto add(PickerResourceRef ref) -> Result {
+        if (count_ < InlineCapacity) {
+            resources_[count_++] = ref;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many picker resources");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const PickerResourceRef& { return resources_[i]; }
+    auto begin() const -> const PickerResourceRef* { return resources_; }
+    auto end() const -> const PickerResourceRef* { return resources_ + count_; }
+
+private:
+    PickerResourceRef resources_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 128>
+auto parse_pick(Bytes data, Picker<Cap>& picker) -> Result {
+    if (data.size < 12) return Error::unexpected_end();
+    picker.type = read_u32be(data.data);
+    picker.use_color = data.data[4];
+    picker.picker_type = data.data[5];
+    picker.view_by = data.data[6];
+    picker.reserved = data.data[7];
+    picker.vertical_cell_size = read_u16be(data.data + 8);
+    const size_t resource_count = static_cast<size_t>(read_u16be(data.data + 10)) + 1u;
+    if (resource_count > Cap) return Error::invalid_data("too many picker resources");
+    if (!range_in_bounds(12, resource_count * 6u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 12;
+    for (size_t i = 0; i < resource_count; ++i) {
+        PickerResourceRef ref{};
+        ref.type = read_u32be(data.data + offset);
+        ref.id = read_u16be(data.data + offset + 4);
+        if (auto r = picker.add(ref); !r) return r;
+        offset += 6;
+    }
+    return Result::ok();
+}
+
 } // namespace simple_metadata
 
 // ============================================================================

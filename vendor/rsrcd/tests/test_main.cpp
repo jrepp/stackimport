@@ -1067,6 +1067,39 @@ static void test_parse_tool_odd_length() {
     CHECK(!r, "odd-length TOOL should fail");
 }
 
+static void test_parse_pick() {
+    uint8_t data[24] = {};
+    rsrcd::write_u32be(data, 0x50494354);
+    data[4] = 1;
+    data[5] = 2;
+    data[6] = 3;
+    data[7] = 0;
+    rsrcd::write_u16be(data + 8, 16);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u32be(data + 12, 0x49434F4E);
+    rsrcd::write_u16be(data + 16, 128);
+    rsrcd::write_u32be(data + 18, 0x50494354);
+    rsrcd::write_u16be(data + 22, 129);
+
+    rsrcd::simple_metadata::Picker<4> picker;
+    auto r = rsrcd::simple_metadata::parse_pick({data, sizeof(data)}, picker);
+    CHECK_RESULT(r, "parse PICK");
+    CHECK(picker.type == 0x50494354, "PICK type");
+    CHECK(picker.use_color == 1, "PICK use color");
+    CHECK(picker.vertical_cell_size == 16, "PICK cell size");
+    CHECK(picker.count() == 2, "PICK resource count");
+    CHECK(picker[1].id == 129, "PICK second resource ID");
+}
+
+static void test_parse_pick_truncated() {
+    uint8_t data[23] = {};
+    rsrcd::write_u16be(data + 10, 1);
+
+    rsrcd::simple_metadata::Picker<4> picker;
+    auto r = rsrcd::simple_metadata::parse_pick({data, sizeof(data)}, picker);
+    CHECK(!r, "truncated PICK should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1800,6 +1833,8 @@ int main() {
     test_parse_rect_resource();
     test_parse_tool();
     test_parse_tool_odd_length();
+    test_parse_pick();
+    test_parse_pick_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();
