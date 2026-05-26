@@ -73,6 +73,19 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 2: Platform I/O Boundary
 
+### Status
+
+- In progress.
+- Package/resource output paths now use the internal platform file helpers, and
+  PNG writing uses `stbi_write_png_to_func`.
+- Removed the unused `FileStackReader` helper from `include/stackimport_sax.hpp`
+  so the internal SAX parser no longer carries its own direct `fopen` reader.
+- Remaining direct filesystem calls are either CLI/default-platform/test
+  shims or still need a deliberate CLI-local versus library-backed decision.
+- Remaining work: resource-fork input callback coverage, failing-write result
+  coverage for every output kind, path-separator behavior, and close/partial
+  write diagnostics.
+
 ### Tasks
 
 - Introduce internal reader and writer abstractions backed by
@@ -104,13 +117,25 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 3: Allocation And Error Propagation
 
+### Status
+
+- Mostly complete for owned library paths.
+- Current audit finds no `abort`, `std::abort`, or `exit` calls in owned C/C++
+  library code; remaining `new` use is placement-new into caller/context
+  storage.
+- C API allocation failures now surface as
+  `STACKIMPORT_STATUS_ALLOCATION_FAILED`, with tests covering platform allocator
+  and RapidJSON allocation failure paths.
+- Remaining work: extend allocation-failure coverage to every resource
+  conversion branch, especially optional sound/disassembly paths.
+
 ### Tasks
 
-- Replace library-path `std::abort()` allocation failures with explicit error
+- Done: replace library-path `std::abort()` allocation failures with explicit error
   propagation.
 - Add an internal import error object that carries status, diagnostic text, and
   optional source location.
-- Make `CBuf`, `PlatformAllocator`, RapidJSON allocation, and resource
+- Done: make `CBuf`, `PlatformAllocator`, RapidJSON allocation, and resource
   conversion report allocation failure without terminating.
 - Define API behavior when callbacks throw is not relevant because exceptions
   are disabled; document that callbacks must not unwind.
@@ -130,9 +155,23 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 4: Unified Resource Pipeline
 
+### Status
+
+- Partially complete.
+- The C callback path and package writer both use `ResourcePayload` for native
+  and converted payload metadata, and package output now emits converted ICON,
+  CURS, PAT#, `snd `, PLTE, 68K, and PowerPC artifacts from
+  `StackImportResourceFork.cpp`.
+- Still open: conversion logic is duplicated between
+  `include/stackimport_sax.hpp` and `StackImportResourceFork.cpp`; the SAX path
+  only covers a subset of converted resource families.
+- Remaining work: move conversion handlers behind one owned event/converter
+  pipeline and make SAX/resource walking delegate to it or remove the duplicate
+  conversion surface.
+
 ### Tasks
 
-- Define a `ResourceEvent` or equivalent owned domain model:
+- Partly done: define a `ResourceEvent` or equivalent owned domain model:
   native resource, converted payload, conversion diagnostic, output artifact, and
   summary metadata.
 - Move ICON, CURS, PAT#, PLTE, `snd `, 68K disassembly, and PowerPC disassembly
@@ -161,13 +200,24 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 5: Vendor Adapter Cleanup
 
+### Status
+
+- In progress.
+- MACE decoding now goes through `StackImportMaceResourceDasmAdapter`; the
+  private `resource_dasm/src/AudioCodecs.hh` include is isolated to the narrow
+  adapter source under `vendor/`.
+- Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
+  configurations build and pass tests after the adapter split.
+- Remaining work: resource-fork, disassembly, PNG, and WAV adapter target
+  boundaries; broader license/provenance audit.
+
 ### Tasks
 
-- Stop including private vendor paths such as
+- Done: stop including private vendor paths such as
   `vendor/resource_dasm/src/AudioCodecs.hh` from StackImport-owned sources.
 - Create narrow adapter targets for:
   - resource fork parsing and small resource decoders from `rsrcd`;
-  - MACE decoding from `resource_dasm` or an owned codec extraction;
+  - Done: MACE decoding from `resource_dasm` or an owned codec extraction;
   - disassembly support from `resource_dasm`;
   - PNG encoding through stb;
   - WAV writing through owned code or `dr_wav`.
@@ -179,8 +229,8 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ### Tests
 
-- Build with `STACKIMPORT_BUILD_VENDOR_TOOLS=ON` and `OFF`.
-- Build shared and static targets with warning-as-error settings.
+- Done: build with `STACKIMPORT_BUILD_VENDOR_TOOLS=ON` and `OFF`.
+- Done: build shared and static targets with warning-as-error settings.
 - Add adapter-level tests around MACE decode, PNG bytes, and disassembly fallback
   behavior.
 
@@ -193,12 +243,27 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 6: Public Target And Install Hygiene
 
+### Status
+
+- In progress.
+- Vendor libraries are linked privately by the core targets, and installation
+  still publishes only `stackimport_c.h`.
+- Target include directories now distinguish build-tree and install-tree include
+  interfaces instead of exporting the source root as the install interface.
+- The existing install-tree `pkg-config` smoke test passes in default,
+  warning-as-error, and vendor-tools-off builds.
+- `include/stackimport_sax.hpp` remains an internal/experimental header: it is
+  used by the CLI/core implementation but is not installed or documented as a
+  public API.
+- Remaining work: add CMake package/export coverage if embedders need imported
+  targets, expand static/shared smoke tests, and finish ABI/version review.
+
 ### Tasks
 
 - Make vendor libraries `PRIVATE` where they are implementation details.
-- Split public headers from internal headers in CMake include directories.
-- Install only supported public headers.
-- Decide whether `include/stackimport_sax.hpp` is a supported public C++ API or
+- Done: split public headers from internal headers in CMake include directories.
+- Done: install only supported public headers.
+- Done: decide whether `include/stackimport_sax.hpp` is a supported public C++ API or
   an internal experimental header. If public, give it stable install and
   dependency rules; if internal, remove it from public-facing docs.
 - Review `pkg-config` and CMake package needs for embedders.
@@ -217,9 +282,22 @@ when parser behavior changes, updates to the relevant format documentation under
 
 ## Phase 7: Legacy Buffer Hardening
 
+### Status
+
+- In progress.
+- Added `CBuf::checked_buf` accessors that return `nullptr` on out-of-bounds
+  reads or failed copy-on-write allocation instead of returning the legacy dummy
+  buffer.
+- The central `ReadBE*` helpers in `CStackFile.cpp` now use checked byte views,
+  so new big-endian parser reads no longer depend on dummy-buffer substitution.
+- Remaining work: convert high-risk block parsers to checked reads with
+  diagnostics, preserve malformed raw blocks before warnings, and remove or
+  quarantine remaining mutable dummy-buffer call paths.
+
 ### Tasks
 
-- Introduce checked byte-view helpers for parser code that still uses `CBuf`.
+- Done: introduce checked byte-view helpers for parser code that still uses
+  `CBuf`.
 - Convert high-risk block parsers from dummy-buffer reads to explicit
   bounds-checked parsing.
 - Preserve raw block dumps for malformed blocks before returning parse warnings.

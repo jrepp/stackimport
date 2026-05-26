@@ -651,6 +651,8 @@ void	RunTests()
 
 	CBuf sharedBuffer(4);
 	sharedBuffer[0] = 'A';
+	assert(sharedBuffer.checked_buf(0, 1) != nullptr);
+	assert(sharedBuffer.checked_buf(4, 1) == nullptr);
 	CBuf copiedBuffer(sharedBuffer);
 	{
 		stackimport_platform_scope scope(rapidJsonInternalPlatform);
@@ -667,6 +669,9 @@ void	RunTests()
 		assert(stackimport_internal_had_allocation_failure());
 		assert(sharedView[0] == 'A');
 		assert(copiedView[0] == 'A');
+		stackimport_internal_reset_allocation_failure();
+		assert(copiedBuffer.checked_buf(0, 1) == nullptr);
+		assert(stackimport_internal_had_allocation_failure());
 		stackimport_internal_reset_allocation_failure();
 		sharedBuffer.resize(8);
 		assert(stackimport_internal_had_allocation_failure());

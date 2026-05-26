@@ -15,7 +15,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
@@ -562,58 +561,6 @@ private:
         auto size() const -> size_t override { return 0; }
     };
     NullReader null_reader_;
-};
-
-// ============================================================================
-// FileStackReader - file-based IStackReader (owns the FILE*)
-// ============================================================================
-
-class FileStackReader : public IStackReader {
-public:
-    FileStackReader() : file_(nullptr), pos_(0), size_(0) {}
-
-    bool open(const char* path) {
-        file_ = fopen(path, "rb");
-        if (!file_) return false;
-        fseek(file_, 0, SEEK_END);
-        size_ = static_cast<size_t>(ftell(file_));
-        fseek(file_, 0, SEEK_SET);
-        pos_ = 0;
-        return true;
-    }
-
-    void close() {
-        if (file_) {
-            fclose(file_);
-            file_ = nullptr;
-        }
-        pos_ = 0;
-        size_ = 0;
-    }
-
-    ~FileStackReader() override { close(); }
-
-    auto read(uint8_t* dst, size_t len) -> size_t override {
-        if (!file_) return 0;
-        size_t r = fread(dst, 1, len, file_);
-        pos_ += r;
-        return r;
-    }
-
-    auto seek(size_t p) -> bool override {
-        if (!file_) return false;
-        if (p > size_) p = size_;
-        pos_ = p;
-        return fseek(file_, static_cast<long>(p), SEEK_SET) == 0;
-    }
-
-    auto position() const -> size_t override { return pos_; }
-    auto size() const -> size_t override { return size_; }
-
-private:
-    FILE* file_;
-    size_t pos_;
-    size_t size_;
 };
 
 // ============================================================================

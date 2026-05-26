@@ -260,6 +260,32 @@ const char*	CBuf::buf( size_t offs, size_t amount ) const
 }
 
 
+char*	CBuf::checked_buf( size_t offs, size_t amount )
+{
+	if( amount == SIZE_MAX )
+		amount = offs <= mShared->mSize ? mShared->mSize -offs : 0;
+	if( amount == 0 )
+		return mShared->mBuffer;
+	if( !hasdata( offs, amount ) )
+		return nullptr;
+	if( !make_buffer_exclusive() )
+		return nullptr;
+	return mShared->mBuffer + offs;
+}
+
+
+const char*	CBuf::checked_buf( size_t offs, size_t amount ) const
+{
+	if( amount == SIZE_MAX )
+		amount = offs <= mShared->mSize ? mShared->mSize -offs : 0;
+	if( amount == 0 )
+		return mShared->mBuffer;
+	if( !hasdata( offs, amount ) )
+		return nullptr;
+	return mShared->mBuffer + offs;
+}
+
+
 void	CBuf::xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amount )
 {
 	if( amount == 0 )

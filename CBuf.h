@@ -47,6 +47,8 @@ public:
 	
 	char*			buf( size_t offs = 0, size_t amount = SIZE_MAX );
 	const char*		buf( size_t offs = 0, size_t amount = SIZE_MAX ) const;
+	char*			checked_buf( size_t offs = 0, size_t amount = SIZE_MAX );
+	const char*		checked_buf( size_t offs = 0, size_t amount = SIZE_MAX ) const;
 	
 	void			xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amount );
 	void			xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amount );

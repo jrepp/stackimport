@@ -285,13 +285,17 @@ size_t	EvenAlign( size_t offs )
 
 int16_t	ReadBEInt16( const CBuf& data, size_t offs )
 {
-	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint16_t) ));
+	const auto* bytes = reinterpret_cast<const unsigned char*>(data.checked_buf( offs, sizeof(uint16_t) ));
+	if( !bytes )
+		return 0;
 	return static_cast<int16_t>(static_cast<uint16_t>(bytes[0]) << 8 | static_cast<uint16_t>(bytes[1]));
 }
 
 int32_t	ReadBEInt32( const CBuf& data, size_t offs )
 {
-	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint32_t) ));
+	const auto* bytes = reinterpret_cast<const unsigned char*>(data.checked_buf( offs, sizeof(uint32_t) ));
+	if( !bytes )
+		return 0;
 	return static_cast<int32_t>(static_cast<uint32_t>(bytes[0]) << 24
 		| static_cast<uint32_t>(bytes[1]) << 16
 		| static_cast<uint32_t>(bytes[2]) << 8
@@ -300,13 +304,17 @@ int32_t	ReadBEInt32( const CBuf& data, size_t offs )
 
 uint16_t	ReadBEUInt16( const CBuf& data, size_t offs )
 {
-	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint16_t) ));
+	const auto* bytes = reinterpret_cast<const unsigned char*>(data.checked_buf( offs, sizeof(uint16_t) ));
+	if( !bytes )
+		return 0;
 	return static_cast<uint16_t>(static_cast<uint16_t>(bytes[0]) << 8 | static_cast<uint16_t>(bytes[1]));
 }
 
 uint32_t	ReadBEUInt32( const CBuf& data, size_t offs )
 {
-	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data.buf( offs, sizeof(uint32_t) ));
+	const auto* bytes = reinterpret_cast<const unsigned char*>(data.checked_buf( offs, sizeof(uint32_t) ));
+	if( !bytes )
+		return 0;
 	return static_cast<uint32_t>(static_cast<uint32_t>(bytes[0]) << 24
 		| static_cast<uint32_t>(bytes[1]) << 16
 		| static_cast<uint32_t>(bytes[2]) << 8

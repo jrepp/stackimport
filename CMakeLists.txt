@@ -96,15 +96,31 @@ set(STACKIMPORT_SOURCES
     stackimport_logging.cpp
     stackimport_platform_internal.cpp
 )
+
 if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
-    list(APPEND STACKIMPORT_SOURCES vendor/resource_dasm/src/AudioCodecs.cc)
+    add_library(stackimport_mace_resource_dasm_adapter OBJECT
+        vendor/resource_dasm_stackimport_mace_adapter.cpp
+        vendor/resource_dasm/src/AudioCodecs.cc
+    )
+    target_include_directories(stackimport_mace_resource_dasm_adapter PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(stackimport_mace_resource_dasm_adapter PRIVATE vendor_resource_file_static)
+    add_dependencies(stackimport_mace_resource_dasm_adapter vendor_resource_dasm)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+        target_compile_options(stackimport_mace_resource_dasm_adapter PRIVATE -fexceptions -w)
+    elseif(MSVC)
+        target_compile_options(stackimport_mace_resource_dasm_adapter PRIVATE /EHsc /w)
+    endif()
 endif()
 
 add_library(stackimport_static STATIC ${STACKIMPORT_SOURCES})
 add_library(stackimport::static ALIAS stackimport_static)
 set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport)
 target_compile_definitions(stackimport_static PUBLIC MAC_CODE=0)
-target_include_directories(stackimport_static PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(stackimport_static
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 set_target_properties(stackimport_static PROPERTIES
     PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
 )
@@ -112,6 +128,7 @@ set_target_properties(stackimport_static PROPERTIES
 if(STACKIMPORT_ENABLE_VENDOR)
     target_link_libraries(stackimport_static PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
+        target_sources(stackimport_static PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
         target_link_libraries(stackimport_static PRIVATE vendor_resource_file_static)
         target_compile_definitions(stackimport_static PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_static vendor_resource_dasm)
@@ -131,11 +148,16 @@ target_compile_definitions(stackimport_shared
     PRIVATE STACKIMPORT_BUILD_SHARED=1 STACKIMPORT_SHARED=1
     PUBLIC MAC_CODE=0
 )
-target_include_directories(stackimport_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(stackimport_shared
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 
 if(STACKIMPORT_ENABLE_VENDOR)
     target_link_libraries(stackimport_shared PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
+        target_sources(stackimport_shared PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
         target_link_libraries(stackimport_shared PRIVATE vendor_resource_file_static)
         target_compile_definitions(stackimport_shared PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_shared vendor_resource_dasm)
@@ -231,12 +253,6 @@ foreach(target ${STACKIMPORT_CORE_TARGETS})
     stackimport_enable_static_analysis(${target})
     stackimport_disable_exceptions(${target})
 endforeach()
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
-    set_source_files_properties(vendor/resource_dasm/src/AudioCodecs.cc PROPERTIES COMPILE_OPTIONS "-fexceptions;-w")
-elseif(MSVC)
-    set_source_files_properties(vendor/resource_dasm/src/AudioCodecs.cc PROPERTIES COMPILE_OPTIONS "/EHsc;/w")
-endif()
 
 if(WIN32)
     foreach(target ${STACKIMPORT_CORE_TARGETS})
