@@ -2129,6 +2129,47 @@ auto parse_pick(Bytes data, Picker<Cap>& picker) -> Result {
     return Result::ok();
 }
 
+struct KeyboardName {
+    Bytes name;
+};
+
+inline auto parse_kbdn(Bytes data, KeyboardName& keyboard) -> Result {
+    if (data.size < 1) return Error::unexpected_end();
+    const uint8_t name_len = data.data[0];
+    if (!range_in_bounds(1, name_len, data.size)) return Error::unexpected_end();
+    keyboard.name = Bytes{data.data + 1, name_len};
+    return Result::ok();
+}
+
+struct PrinterParameters {
+    Bytes name;
+    Bytes type;
+    Bytes zone;
+    uint32_t address_block;
+    Bytes data;
+};
+
+inline auto read_pstring(Bytes data, size_t& offset, Bytes& value) -> Result {
+    if (!range_in_bounds(offset, 1, data.size)) return Error::unexpected_end();
+    const uint8_t len = data.data[offset++];
+    if (!range_in_bounds(offset, len, data.size)) return Error::unexpected_end();
+    value = Bytes{data.data + offset, len};
+    offset += len;
+    return Result::ok();
+}
+
+inline auto parse_papa(Bytes data, PrinterParameters& params) -> Result {
+    size_t offset = 0;
+    if (auto r = read_pstring(data, offset, params.name); !r) return r;
+    if (auto r = read_pstring(data, offset, params.type); !r) return r;
+    if (auto r = read_pstring(data, offset, params.zone); !r) return r;
+    if (!range_in_bounds(offset, 4, data.size)) return Error::unexpected_end();
+    params.address_block = read_u32be(data.data + offset);
+    offset += 4;
+    params.data = data.slice(offset, data.size - offset);
+    return Result::ok();
+}
+
 } // namespace simple_metadata
 
 // ============================================================================

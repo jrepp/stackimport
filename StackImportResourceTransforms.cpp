@@ -763,6 +763,84 @@ auto emit_pick_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_kbdn_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed keyboard name metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::simple_metadata::KeyboardName keyboard{};
+	auto parse_result = rsrcd::simple_metadata::parse_kbdn(resource.data, keyboard);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(512, &base_alloc);
+	JsonDocument doc(&pool, 512, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	std::string name = mac_roman_from_bytes(keyboard.name.data, keyboard.name.size);
+	doc.AddMember("name", json_string(name, allocator), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_papa_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed printer parameter metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::simple_metadata::PrinterParameters params{};
+	auto parse_result = rsrcd::simple_metadata::parse_papa(resource.data, params);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	std::string name = mac_roman_from_bytes(params.name.data, params.name.size);
+	std::string type = mac_roman_from_bytes(params.type.data, params.type.size);
+	std::string zone = mac_roman_from_bytes(params.zone.data, params.zone.size);
+	doc.AddMember("name", json_string(name, allocator), allocator);
+	doc.AddMember("type", json_string(type, allocator), allocator);
+	doc.AddMember("zone", json_string(zone, allocator), allocator);
+	doc.AddMember("addressBlock", params.address_block, allocator);
+	if(params.data.size > 0)
+	{
+		std::string data_hex = bytes_to_hex(params.data);
+		doc.AddMember("dataHex", json_string(data_hex, allocator), allocator);
+	}
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -1743,6 +1821,12 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "PICK"))
 		return emit_pick_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "KBDN"))
+		return emit_kbdn_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "PAPA"))
+		return emit_papa_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

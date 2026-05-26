@@ -1100,6 +1100,40 @@ static void test_parse_pick_truncated() {
     CHECK(!r, "truncated PICK should fail");
 }
 
+static void test_parse_kbdn() {
+    uint8_t data[4] = {3, 'U', 'S', 'A'};
+
+    rsrcd::simple_metadata::KeyboardName keyboard{};
+    auto r = rsrcd::simple_metadata::parse_kbdn({data, sizeof(data)}, keyboard);
+    CHECK_RESULT(r, "parse KBDN");
+    CHECK(keyboard.name.size == 3, "KBDN name size");
+}
+
+static void test_parse_papa() {
+    uint8_t data[21] = {
+        7, 'P', 'r', 'i', 'n', 't', 'e', 'r',
+        3, 'L', 'W', 'R',
+        4, 'Z', 'o', 'n', 'e',
+        0x12, 0x34, 0x56, 0x78,
+    };
+
+    rsrcd::simple_metadata::PrinterParameters params{};
+    auto r = rsrcd::simple_metadata::parse_papa({data, sizeof(data)}, params);
+    CHECK_RESULT(r, "parse PAPA");
+    CHECK(params.name.size == 7, "PAPA name size");
+    CHECK(params.type.size == 3, "PAPA type size");
+    CHECK(params.zone.size == 4, "PAPA zone size");
+    CHECK(params.address_block == 0x12345678, "PAPA address");
+}
+
+static void test_parse_papa_truncated() {
+    uint8_t data[3] = {4, 'B', 'a'};
+
+    rsrcd::simple_metadata::PrinterParameters params{};
+    auto r = rsrcd::simple_metadata::parse_papa({data, sizeof(data)}, params);
+    CHECK(!r, "truncated PAPA should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -1835,6 +1869,9 @@ int main() {
     test_parse_tool_odd_length();
     test_parse_pick();
     test_parse_pick_truncated();
+    test_parse_kbdn();
+    test_parse_papa();
+    test_parse_papa_truncated();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

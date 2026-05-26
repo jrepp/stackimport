@@ -969,6 +969,30 @@ void	RunTests()
 	assert(pickOutput.last_json.find("\"verticalCellSize\": 16") != std::string::npos);
 	assert(pickOutput.last_json.find("\"id\": 129") != std::string::npos);
 
+	const std::vector<uint8_t> kbdnPayload = {3, 'U', 'S', 'A'};
+	const std::vector<uint8_t> kbdnFork = make_single_resource_fork("KBDN", 1, kbdnPayload);
+	CountingResourceOutput kbdnOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{kbdnFork.data(), kbdnFork.size()}, kbdnOutput));
+	assert(kbdnOutput.native_count == 1);
+	assert(kbdnOutput.json_count == 1);
+	assert(kbdnOutput.last_json.find("\"name\": \"USA\"") != std::string::npos);
+
+	std::vector<uint8_t> papaPayload = {
+		7, 'P', 'r', 'i', 'n', 't', 'e', 'r',
+		3, 'L', 'W', 'R',
+		4, 'Z', 'o', 'n', 'e',
+	};
+	append_u32be(papaPayload, 0x12345678);
+	papaPayload.push_back(0xAA);
+	const std::vector<uint8_t> papaFork = make_single_resource_fork("PAPA", 1, papaPayload);
+	CountingResourceOutput papaOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{papaFork.data(), papaFork.size()}, papaOutput));
+	assert(papaOutput.native_count == 1);
+	assert(papaOutput.json_count == 1);
+	assert(papaOutput.last_json.find("\"name\": \"Printer\"") != std::string::npos);
+	assert(papaOutput.last_json.find("\"addressBlock\": 305419896") != std::string::npos);
+	assert(papaOutput.last_json.find("\"dataHex\": \"AA\"") != std::string::npos);
+
 	std::vector<uint8_t> colorTablePayload;
 	append_u32be(colorTablePayload, 0x12345678);
 	append_u16be(colorTablePayload, 0x8000);
