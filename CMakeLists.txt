@@ -127,7 +127,7 @@ set_target_properties(stackimport_static PROPERTIES
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
-    target_link_libraries(stackimport_static PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
+    target_link_libraries(stackimport_static PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_rapidjson vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_sources(stackimport_static PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
         target_link_libraries(stackimport_static PRIVATE vendor_resource_file_static)
@@ -156,7 +156,7 @@ target_include_directories(stackimport_shared
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
-    target_link_libraries(stackimport_shared PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
+    target_link_libraries(stackimport_shared PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_rapidjson vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_sources(stackimport_shared PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
         target_link_libraries(stackimport_shared PRIVATE vendor_resource_file_static)
