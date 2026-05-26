@@ -110,9 +110,9 @@ set_target_properties(stackimport_static PROPERTIES
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
-    target_link_libraries(stackimport_static PUBLIC vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
+    target_link_libraries(stackimport_static PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_dr_wav vendor_rapidjson vendor_rsrcd)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
-        target_link_libraries(stackimport_static PUBLIC vendor_resource_file_static)
+        target_link_libraries(stackimport_static PRIVATE vendor_resource_file_static)
         target_compile_definitions(stackimport_static PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_static vendor_resource_dasm)
     endif()

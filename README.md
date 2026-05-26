@@ -98,15 +98,15 @@ that index whenever a vendored dependency is added, removed, upgraded, or patche
 The main build currently uses these vendored libraries:
 
 - `rsrcd/` - header-only Classic Mac resource fork parser derived from
-  `rsrcdump`; MIT; exposed as `vendor_rsrcd`.
-- `quill/` - Quill logging headers used by stackimport diagnostics; MIT; exposed
-  as `vendor_quill`.
-- `rang/` - terminal color support for log/dump formatting; Unlicense; exposed
-  as `vendor_rang`.
-- `rapidjson/` - JSON DOM/writer used for `.xstk` metadata; MIT; exposed as
+  `rsrcdump`; MIT; used through `vendor_rsrcd`.
+- `quill/` - Quill logging headers used by stackimport diagnostics; MIT; used
+  through `vendor_quill`.
+- `rang/` - terminal color support for log/dump formatting; Unlicense; used
+  through `vendor_rang`.
+- `rapidjson/` - JSON DOM/writer used for `.xstk` metadata; MIT; used through
   `vendor_rapidjson`.
-- `stb/` - `stb_image_write.h` for PNG output; MIT or public domain; exposed as
-  `vendor_stb_image_write`.
+- `stb/` - `stb_image_write.h` for PNG output; MIT or public domain; used
+  through `vendor_stb_image_write`.
 - `dr_wav/` - single-header WAV reader/writer candidate; public domain or MIT-0;
   exposed as `vendor_dr_wav`.
 - `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot retained as reference
