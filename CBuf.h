@@ -72,7 +72,7 @@ public:
 protected:
 	void			alloc_buffer( size_t amount );
 	void			release_buffer();
-	void			make_buffer_exclusive();
+	bool			make_buffer_exclusive();
 
 protected:
 	shared_buffer*	mShared;

@@ -114,16 +114,22 @@ void	CBuf::release_buffer()
 }
 
 
-void	CBuf::make_buffer_exclusive()
+bool	CBuf::make_buffer_exclusive()
 {
 	if( mShared->mRefCount == 1 )
-		return;	// Already are exclusive owner.
+		return true;	// Already are exclusive owner.
 	
 	shared_buffer*	oldBuffer = mShared;
 	alloc_buffer( oldBuffer->mSize );
+	if( oldBuffer->mSize > 0 && !mShared->mBuffer )
+	{
+		mShared = oldBuffer;
+		return false;
+	}
 	if( oldBuffer->mSize > 0 )
 		::memmove( mShared->mBuffer, oldBuffer->mBuffer, oldBuffer->mSize );
 	oldBuffer->mRefCount --;
+	return true;
 }
 
 
@@ -156,7 +162,8 @@ void	CBuf::resize( size_t inSize )
 
 void	CBuf::memcpy( size_t toOffs, const char* fromPtr, size_t fromOffs, size_t amount )
 {
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return;
 	
 	char*		thePtr = mShared->mBuffer;
 	if( !fromPtr || toOffs > mShared->mSize || amount > (mShared->mSize -toOffs) )
@@ -190,7 +197,8 @@ char& CBuf::operator [] ( int idx )
 	if( idx < 0 || static_cast<size_t>(idx) >= mShared->mSize )
 		return dummy[0];
 	
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return dummy[0];
 	return mShared->mBuffer[static_cast<size_t>(idx)];
 }
 
@@ -209,7 +217,8 @@ char& CBuf::operator [] ( size_t idx )
 	if( idx >= mShared->mSize )
 		return dummy[0];
 	
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return dummy[0];
 	return mShared->mBuffer[idx];
 }
 
@@ -225,7 +234,8 @@ char*	CBuf::buf( size_t offs, size_t amount )
 		return dummy;
 	assert( mShared->mBuffer != nullptr );
 	
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return dummy;
 	return mShared->mBuffer + offs;
 }
 
@@ -253,7 +263,8 @@ void	CBuf::xornstr( size_t dstOffs, const char * src, size_t srcOffs, size_t amo
 		return;
 	assert( mShared->mBuffer != nullptr);
 	assert( (amount +dstOffs) <= mShared->mSize );
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return;
 	::xornstr( mShared->mBuffer +dstOffs, src +srcOffs, amount );
 }
 
@@ -266,7 +277,8 @@ void	CBuf::xornstr( size_t dstOffs, const CBuf& src, size_t srcOffs, size_t amou
 		return;
 	assert( mShared->mBuffer != nullptr );
 	assert( (amount +dstOffs) <= mShared->mSize );
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return;
 	::xornstr( mShared->mBuffer +dstOffs, src.buf(srcOffs,amount), amount );
 }
 
@@ -279,7 +291,8 @@ void	CBuf::shiftnstr( size_t dstOffs, size_t amount, int shiftAmount )
 		return;
 	assert( mShared->mBuffer != nullptr );
 	assert( (dstOffs +amount) <= mShared->mSize );
-	make_buffer_exclusive();
+	if( !make_buffer_exclusive() )
+		return;
 	::shiftnstr( mShared->mBuffer +dstOffs, amount, shiftAmount );
 }
 

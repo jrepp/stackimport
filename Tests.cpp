@@ -569,4 +569,24 @@ void	RunTests()
 		assert(stackimport_internal_had_allocation_failure());
 	}
 
+	CBuf sharedBuffer(4);
+	sharedBuffer[0] = 'A';
+	CBuf copiedBuffer(sharedBuffer);
+	{
+		stackimport_platform_scope scope(rapidJsonInternalPlatform);
+		stackimport_internal_reset_allocation_failure();
+		copiedBuffer[0] = 'B';
+		assert(stackimport_internal_had_allocation_failure());
+		const CBuf& sharedView = sharedBuffer;
+		const CBuf& copiedView = copiedBuffer;
+		assert(sharedView[0] == 'A');
+		assert(copiedView[0] == 'A');
+		stackimport_internal_reset_allocation_failure();
+		char* copiedBytes = copiedBuffer.buf(0, 1);
+		copiedBytes[0] = 'C';
+		assert(stackimport_internal_had_allocation_failure());
+		assert(sharedView[0] == 'A');
+		assert(copiedView[0] == 'A');
+	}
+
 }
