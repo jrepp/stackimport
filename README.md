@@ -108,13 +108,12 @@ The main build currently uses these vendored libraries:
 - `stb/` - `stb_image_write.h` for PNG output; MIT or public domain; used
   through `vendor_stb_image_write`.
 - `dr_wav/` - single-header WAV reader/writer candidate retained for comparison;
-  public domain or MIT-0; exposed as `vendor_dr_wav` but not linked into the core
-  importer.
+  public domain or MIT-0; linked into the core importer through `vendor_dr_wav`.
 - `snd2wav/` - legacy Mac `snd ` to WAV helper snapshot retained as reference
   material; built as `vendor_snd2wav`; see `vendor/INDEX.md` for its licensing
-  caveat.
+  caveat; linked into the core importer.
 - `ppcd/` - PowerPC disassembler snapshot for PPC code-resource work; CC0-1.0;
-  built as `vendor_ppcd`.
+  built as `vendor_ppcd` and linked into the core importer.
 
 Vendored conversion tools also build Deark, `resource_dasm`, and `phosg` for
 resource conversion and reverse-engineering work. These tools are part of the

@@ -1,4 +1,5 @@
 #include "../StackImportResourceDasmPictAdapter.h"
+#include "../StackImportPngWriter.h"
 
 #include <exception>
 #include <limits>
@@ -39,17 +40,48 @@ bool DecodePictWithResourceDasmToPng(
 			error = "PICT decoded to an empty image";
 			return false;
 		}
-		if(decoded.image.get_width() > std::numeric_limits<uint32_t>::max() ||
-			decoded.image.get_height() > std::numeric_limits<uint32_t>::max())
+		const size_t imageWidth = decoded.image.get_width();
+		const size_t imageHeight = decoded.image.get_height();
+		if(imageWidth > std::numeric_limits<uint32_t>::max() ||
+			imageHeight > std::numeric_limits<uint32_t>::max())
 		{
 			error = "PICT dimensions exceed 32-bit payload metadata";
 			return false;
 		}
+		if(imageWidth > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+			imageHeight > static_cast<size_t>(std::numeric_limits<int>::max()))
+		{
+			error = "PICT dimensions exceed PNG encoder limits";
+			return false;
+		}
+		if(imageHeight != 0 && imageWidth > std::numeric_limits<size_t>::max() / imageHeight / 4)
+		{
+			error = "PICT dimensions exceed PNG staging buffer limits";
+			return false;
+		}
 
-		const std::string png_data = decoded.image.serialize(phosg::ImageFormat::PNG);
-		png.assign(png_data.begin(), png_data.end());
-		width = static_cast<uint32_t>(decoded.image.get_width());
-		height = static_cast<uint32_t>(decoded.image.get_height());
+		const auto imageWidthInt = static_cast<int>(imageWidth);
+		const auto imageHeightInt = static_cast<int>(imageHeight);
+		std::vector<uint8_t> rgba(imageWidth * imageHeight * 4);
+		for(size_t y = 0; y < imageHeight; ++y)
+		{
+			for(size_t x = 0; x < imageWidth; ++x)
+			{
+				const uint32_t color = decoded.image.read(x, y);
+				const size_t offset = ((y * imageWidth) + x) * 4;
+				rgba[offset] = static_cast<uint8_t>((color >> 24) & 0xFF);
+				rgba[offset + 1] = static_cast<uint8_t>((color >> 16) & 0xFF);
+				rgba[offset + 2] = static_cast<uint8_t>((color >> 8) & 0xFF);
+				rgba[offset + 3] = static_cast<uint8_t>(color & 0xFF);
+			}
+		}
+		if(!WritePngToMemory(png, imageWidthInt, imageHeightInt, 4, rgba.data(), imageWidthInt * 4))
+		{
+			error = "PICT PNG encoding failed";
+			return false;
+		}
+		width = static_cast<uint32_t>(imageWidth);
+		height = static_cast<uint32_t>(imageHeight);
 		return true;
 	}
 	catch(const std::exception& e)

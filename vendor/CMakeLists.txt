@@ -156,6 +156,11 @@ add_custom_target(vendor-header-libraries
     DEPENDS vendor_ppcd vendor_snd2wav
     COMMENT "Header-only and local vendored conversion libraries are available"
 )
+set(STACKIMPORT_VENDOR_STATIC_LIBRARY_TARGETS
+    vendor_ppcd
+    vendor_snd2wav
+    PARENT_SCOPE
+)
 
 if(STACKIMPORT_BUILD_VENDOR_TOOLS)
     set(VENDOR_BUILD_DIR "${CMAKE_BINARY_DIR}/vendor-build")
@@ -200,6 +205,11 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         "-DCMAKE_CXX_EXTENSIONS=OFF"
         "-DCMAKE_BUILD_TYPE=$<CONFIG>"
     )
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+        list(APPEND VENDOR_CMAKE_ARGS
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+        )
+    endif()
 
     if(STACKIMPORT_VENDOR_CMAKE_WARNING_FLAGS)
         # The CMake-based vendor projects already use -Werror, so keep forwarded
@@ -233,6 +243,10 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
 
     set(DEARK_CFLAGS "-std=c17 -g -O2 -Wall -Wextra -Wmissing-prototypes -Wformat-security -Wno-unused-parameter")
     set(DEARK_LDFLAGS "-Wall")
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+        string(APPEND DEARK_CFLAGS " -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        string(APPEND DEARK_LDFLAGS " -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
     if(STACKIMPORT_VENDOR_STRICT_WARNINGS)
         # Deark intentionally performs many byte/color narrowing conversions and
         # uses nested locals in old-style decoder code; keep strict C hygiene flags

@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
+if(CMAKE_HOST_APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL ""))
+    set(STACKIMPORT_ENV_MACOSX_DEPLOYMENT_TARGET "")
+    if(DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+        set(STACKIMPORT_ENV_MACOSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET}")
+    endif()
+    if(NOT STACKIMPORT_ENV_MACOSX_DEPLOYMENT_TARGET STREQUAL "")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "${STACKIMPORT_ENV_MACOSX_DEPLOYMENT_TARGET}" CACHE STRING "Minimum macOS deployment target" FORCE)
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS deployment target" FORCE)
+    endif()
+endif()
+
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt" STACKIMPORT_VERSION_FULL)
 string(STRIP "${STACKIMPORT_VERSION_FULL}" STACKIMPORT_VERSION_FULL)
 if(NOT STACKIMPORT_VERSION_FULL MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$")
@@ -129,7 +141,7 @@ endif()
 
 add_library(stackimport_static STATIC ${STACKIMPORT_SOURCES})
 add_library(stackimport::static ALIAS stackimport_static)
-set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport)
+set_target_properties(stackimport_static PROPERTIES OUTPUT_NAME stackimport_core)
 target_compile_definitions(stackimport_static PUBLIC MAC_CODE=0)
 target_include_directories(stackimport_static
     PUBLIC
@@ -141,9 +153,22 @@ set_target_properties(stackimport_static PROPERTIES
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
+    set(STACKIMPORT_CORE_VENDOR_PUBLIC_LIBRARIES
+        vendor_rsrcd
+    )
+    set(STACKIMPORT_CORE_VENDOR_PRIVATE_LIBRARIES
+        vendor_quill
+        vendor_rang
+        vendor_stb_image_write
+        vendor_dr_wav
+        vendor_rapidjson
+        vendor_ppcd
+        vendor_snd2wav
+    )
+
     target_link_libraries(stackimport_static
-        PUBLIC vendor_rsrcd
-        PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_rapidjson
+        PUBLIC ${STACKIMPORT_CORE_VENDOR_PUBLIC_LIBRARIES}
+        PRIVATE ${STACKIMPORT_CORE_VENDOR_PRIVATE_LIBRARIES}
     )
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_sources(stackimport_static PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
@@ -174,8 +199,8 @@ target_include_directories(stackimport_shared
 
 if(STACKIMPORT_ENABLE_VENDOR)
     target_link_libraries(stackimport_shared
-        PUBLIC vendor_rsrcd
-        PRIVATE vendor_quill vendor_rang vendor_stb_image_write vendor_rapidjson
+        PUBLIC ${STACKIMPORT_CORE_VENDOR_PUBLIC_LIBRARIES}
+        PRIVATE ${STACKIMPORT_CORE_VENDOR_PRIVATE_LIBRARIES}
     )
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_sources(stackimport_shared PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
@@ -201,19 +226,30 @@ configure_file(
     @ONLY
 )
 
-install(TARGETS stackimport stackimport_static stackimport_shared
+install(TARGETS stackimport stackimport_shared
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
+    set(STACKIMPORT_VENDOR_ARCHIVE "${CMAKE_BINARY_DIR}/libstackimport.a")
+    install(FILES "${STACKIMPORT_VENDOR_ARCHIVE}"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+else()
+    install(TARGETS stackimport_static
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stackimport.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
 )
 
 if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
-    set(STACKIMPORT_VENDOR_ARCHIVE "${CMAKE_BINARY_DIR}/libstackimport-vendor.a")
     set(STACKIMPORT_COMBINED_STATIC_INPUTS "$<TARGET_FILE:stackimport_static>")
+    foreach(vendor_static_library_target IN LISTS STACKIMPORT_VENDOR_STATIC_LIBRARY_TARGETS)
+        string(APPEND STACKIMPORT_COMBINED_STATIC_INPUTS "|$<TARGET_FILE:${vendor_static_library_target}>")
+    endforeach()
     foreach(vendor_static_library IN LISTS STACKIMPORT_VENDOR_STATIC_LIBRARIES)
         string(APPEND STACKIMPORT_COMBINED_STATIC_INPUTS "|${vendor_static_library}")
     endforeach()
@@ -226,10 +262,11 @@ if(STACKIMPORT_ENABLE_VENDOR AND STACKIMPORT_BUILD_VENDOR_TOOLS)
             "-DINPUT_SEPARATOR=|"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CombineStaticLibraries.cmake"
         DEPENDS stackimport_static vendor-static-artifacts ${STACKIMPORT_VENDOR_STATIC_LIBRARIES}
+            ${STACKIMPORT_VENDOR_STATIC_LIBRARY_TARGETS}
         COMMENT "Combining stackimport and vendored static libraries"
         VERBATIM
     )
-    add_custom_target(stackimport-vendor-static
+    add_custom_target(stackimport-vendor-static ALL
         DEPENDS "${STACKIMPORT_VENDOR_ARCHIVE}"
     )
 endif()

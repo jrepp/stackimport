@@ -14,6 +14,11 @@ struct PlatformPngWriter {
 	bool ok;
 };
 
+struct MemoryPngWriter {
+	std::vector<uint8_t>* data;
+	bool ok;
+};
+
 void write_png_chunk(void* context, void* data, int size)
 {
 	auto* writer = static_cast<PlatformPngWriter*>(context);
@@ -23,7 +28,35 @@ void write_png_chunk(void* context, void* data, int size)
 	writer->ok = stackimport_internal_write_file(writer->file, data, bytes) == bytes;
 }
 
+void write_png_memory_chunk(void* context, void* data, int size)
+{
+	auto* writer = static_cast<MemoryPngWriter*>(context);
+	if(!writer || !writer->ok || !writer->data || !data || size < 0)
+		return;
+	const auto* bytes = static_cast<const uint8_t*>(data);
+	writer->data->insert(writer->data->end(), bytes, bytes + static_cast<size_t>(size));
+}
+
 } // namespace
+
+bool WritePngToMemory(
+	std::vector<uint8_t>& png,
+	int width,
+	int height,
+	int components,
+	const void* data,
+	int strideBytes)
+{
+	png.clear();
+	MemoryPngWriter writer{&png, true};
+	const int encoded = stbi_write_png_to_func(write_png_memory_chunk, &writer, width, height, components, data, strideBytes);
+	if(encoded == 0 || !writer.ok)
+	{
+		png.clear();
+		return false;
+	}
+	return true;
+}
 
 bool WritePngFile(
 	const std::string& path,
