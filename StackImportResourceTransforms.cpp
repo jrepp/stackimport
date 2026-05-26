@@ -339,6 +339,52 @@ auto emit_vers_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_color_table_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed color table metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::color_table::Table<256> table;
+	auto table_result = rsrcd::color_table::parse(resource.data, table);
+	if(!table_result)
+		return output.on_resource_error(ref, table_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("seed", table.seed, allocator);
+	doc.AddMember("flags", table.flags, allocator);
+
+	JsonValue entries(rapidjson::kArrayType);
+	for(const rsrcd::color_table::Entry& entry : table)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("value", entry.value, allocator);
+		item.AddMember("red", entry.red, allocator);
+		item.AddMember("green", entry.green, allocator);
+		item.AddMember("blue", entry.blue, allocator);
+		entries.PushBack(item, allocator);
+	}
+	doc.AddMember("entries", entries, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -579,6 +625,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "vers"))
 		return emit_vers_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "clut") || resource_type_is(resource, "CTBL"))
+		return emit_color_table_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "snd "))
 		return emit_snd_transform(resource, ref, output);

@@ -711,6 +711,23 @@ void	RunTests()
 	assert(versionOutput.last_json.find("\"minorAndBugRevision\": 35") != std::string::npos);
 	assert(versionOutput.last_json.find("\"shortVersion\": \"1.2\"") != std::string::npos);
 
+	std::vector<uint8_t> colorTablePayload;
+	append_u32be(colorTablePayload, 0x12345678);
+	append_u16be(colorTablePayload, 0x8000);
+	append_u16be(colorTablePayload, 0);
+	append_u16be(colorTablePayload, 7);
+	append_u16be(colorTablePayload, 0x1111);
+	append_u16be(colorTablePayload, 0x2222);
+	append_u16be(colorTablePayload, 0x3333);
+	const std::vector<uint8_t> colorTableFork = make_single_resource_fork("clut", 8, colorTablePayload);
+	CountingResourceOutput colorTableOutput;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{colorTableFork.data(), colorTableFork.size()}, colorTableOutput));
+	assert(colorTableOutput.native_count == 1);
+	assert(colorTableOutput.json_count == 1);
+	assert(colorTableOutput.last_json.find("\"seed\": 305419896") != std::string::npos);
+	assert(colorTableOutput.last_json.find("\"flags\": 32768") != std::string::npos);
+	assert(colorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
+
 	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
 	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
 	ResourceForkPlatformState textPlatformState;

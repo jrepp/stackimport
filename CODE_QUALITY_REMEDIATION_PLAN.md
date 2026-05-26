@@ -197,6 +197,8 @@ when parser behavior changes, updates to the relevant format documentation under
   helpers and shared RGBA transforms, with PNG package artifacts.
 - `vers` metadata now has an rsrcd typed parser and shared JSON transform that
   preserves raw numeric version fields while decoding version strings.
+- `clut` and `CTBL` color tables now have an rsrcd typed parser and shared JSON
+  transform for seed, flags, and 16-bit RGB entries.
 - Heavy `PICT` rendering is kept behind `StackImportResourceDasmPictAdapter`;
   core StackImport code sees only a narrow PNG payload transform and still
   preserves native bytes when conversion fails.
@@ -229,6 +231,8 @@ when parser behavior changes, updates to the relevant format documentation under
   transform payloads.
 - Done for `vers` metadata: parse through rsrcd and route package JSON artifact
   writing through the shared transform payload.
+- Done for `clut`/`CTBL` color tables: parse through rsrcd and route package
+  JSON artifact writing through the shared transform payload.
 - Promote transform handlers from payload callbacks to a richer resource-event
   stream that can carry summaries, diagnostics, artifact metadata, and future
   typed resource outputs without adding ad hoc package-export branches.

@@ -981,6 +981,67 @@ inline auto parse(Bytes data, Version& version) -> Result {
 } // namespace vers
 
 // ============================================================================
+// Color table resources (clut / CTBL)
+// ============================================================================
+
+namespace color_table {
+
+struct Entry {
+    uint16_t value;
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+};
+
+template<size_t InlineCapacity = 256>
+class Table {
+public:
+    uint32_t seed = 0;
+    uint16_t flags = 0;
+
+    auto add(Entry entry) -> Result {
+        if (count_ < InlineCapacity) {
+            entries_[count_++] = entry;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many color table entries");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const Entry& { return entries_[i]; }
+    auto begin() const -> const Entry* { return entries_; }
+    auto end() const -> const Entry* { return entries_ + count_; }
+
+private:
+    Entry entries_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 256>
+auto parse(Bytes data, Table<Cap>& table) -> Result {
+    if (data.size < 8) return Error::unexpected_end();
+    table.seed = read_u32be(data.data);
+    table.flags = read_u16be(data.data + 4);
+    uint16_t last_index = read_u16be(data.data + 6);
+    size_t entry_count = static_cast<size_t>(last_index) + 1u;
+    if (entry_count > Cap) return Error::invalid_data("too many color table entries");
+    if (!range_in_bounds(8, entry_count * 8u, data.size)) return Error::unexpected_end();
+
+    size_t offset = 8;
+    for (size_t i = 0; i < entry_count; ++i) {
+        Entry entry{};
+        entry.value = read_u16be(data.data + offset);
+        entry.red = read_u16be(data.data + offset + 2);
+        entry.green = read_u16be(data.data + offset + 4);
+        entry.blue = read_u16be(data.data + offset + 6);
+        if (auto r = table.add(entry); !r) return r;
+        offset += 8;
+    }
+    return Result::ok();
+}
+
+} // namespace color_table
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 

@@ -976,6 +976,41 @@ static void test_vers_truncated() {
 }
 
 // ============================================================================
+// Color tables
+// ============================================================================
+
+static void test_color_table() {
+    uint8_t data[24] = {};
+    rsrcd::write_u32be(data, 0x12345678);
+    rsrcd::write_u16be(data + 4, 0x8000);
+    rsrcd::write_u16be(data + 6, 1);
+    rsrcd::write_u16be(data + 8, 0);
+    rsrcd::write_u16be(data + 10, 0xFFFF);
+    rsrcd::write_u16be(data + 12, 0);
+    rsrcd::write_u16be(data + 14, 0);
+    rsrcd::write_u16be(data + 16, 1);
+    rsrcd::write_u16be(data + 18, 0);
+    rsrcd::write_u16be(data + 20, 0xFFFF);
+    rsrcd::write_u16be(data + 22, 0);
+
+    rsrcd::color_table::Table<4> table;
+    auto r = rsrcd::color_table::parse({data, sizeof(data)}, table);
+    CHECK_RESULT(r, "parse color table");
+    CHECK(table.seed == 0x12345678, "color table seed");
+    CHECK(table.flags == 0x8000, "color table flags");
+    CHECK(table.count() == 2, "color table count");
+    CHECK(table[1].green == 0xFFFF, "color table entry");
+}
+
+static void test_color_table_truncated() {
+    uint8_t data[15] = {};
+    rsrcd::write_u16be(data + 6, 1);
+    rsrcd::color_table::Table<4> table;
+    auto r = rsrcd::color_table::parse({data, sizeof(data)}, table);
+    CHECK(!r, "truncated color table should fail");
+}
+
+// ============================================================================
 // PAT# helpers
 // ============================================================================
 
@@ -1088,6 +1123,8 @@ int main() {
     test_text_text();
     test_vers();
     test_vers_truncated();
+    test_color_table();
+    test_color_table_truncated();
     test_patlist_count();
     test_palette_lookup();
 
