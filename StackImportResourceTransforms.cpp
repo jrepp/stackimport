@@ -1706,6 +1706,14 @@ void add_json_pixel_map(JsonValue& object, const rsrcd::pixel_pattern::PixelMap&
 	object.AddMember("pixelMap", value, allocator);
 }
 
+void add_json_bitmap_header(JsonValue& object, const char* name, const rsrcd::color_icon::Bitmap& bitmap, JsonPoolAllocator& allocator)
+{
+	JsonValue value(rapidjson::kObjectType);
+	value.AddMember("rowBytes", bitmap.row_bytes, allocator);
+	add_json_ui_rect(value, bitmap.bounds, allocator);
+	object.AddMember(JsonValue().SetString(name, allocator), value, allocator);
+}
+
 void add_json_pixel_pattern(JsonValue& object, const rsrcd::pixel_pattern::Pattern& pattern, JsonPoolAllocator& allocator)
 {
 	object.AddMember("type", pattern.type, allocator);
@@ -1780,6 +1788,43 @@ auto emit_ppt_list_transform(
 		entries.PushBack(item, allocator);
 	}
 	doc.AddMember("patterns", entries, allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
+auto emit_cicn_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed color icon metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::color_icon::Icon icon{};
+	auto parse_result = rsrcd::color_icon::parse(resource.data, icon);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("pixMapUnused", icon.pix_map_unused, allocator);
+	add_json_pixel_map(doc, icon.pix_map, allocator);
+	doc.AddMember("maskUnused", icon.mask_unused, allocator);
+	add_json_bitmap_header(doc, "mask", icon.mask, allocator);
+	doc.AddMember("bitmapUnused", icon.bitmap_unused, allocator);
+	add_json_bitmap_header(doc, "bitmap", icon.bitmap, allocator);
+	doc.AddMember("iconData", icon.icon_data, allocator);
+	doc.AddMember("maskDataOffset", icon.mask_data_offset, allocator);
+	doc.AddMember("bitmapDataOffset", icon.bitmap_data_offset, allocator);
+	doc.AddMember("colorTableOffset", icon.color_table_offset, allocator);
 	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
@@ -2312,6 +2357,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "ppt#"))
 		return emit_ppt_list_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "cicn"))
+		return emit_cicn_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "SIZE"))
 		return emit_size_transform(resource, ref, output);

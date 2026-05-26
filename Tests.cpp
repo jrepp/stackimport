@@ -883,6 +883,19 @@ void test_resource_color_and_ui_transforms()
 		"\"monochromePatternHex\": \"1111111122222222\"",
 	});
 
+	std::vector<uint8_t> cicnPayload(83);
+	rsrcd::write_u16be(cicnPayload.data() + 4, 1);
+	rsrcd::write_u16be(cicnPayload.data() + 10, 1);
+	rsrcd::write_u16be(cicnPayload.data() + 32, 1);
+	rsrcd::write_u16be(cicnPayload.data() + 54, 1);
+	rsrcd::write_u16be(cicnPayload.data() + 60, 1);
+	rsrcd::write_u16be(cicnPayload.data() + 74, 1);
+	assert_json_resource_contains("cicn", 3, cicnPayload, {
+		"\"pixelSize\": 1",
+		"\"maskDataOffset\": 82",
+		"\"colorTableOffset\": 83",
+	});
+
 	std::vector<uint8_t> sizePayload;
 	append_u16be(sizePayload, 0xD048);
 	append_u32be(sizePayload, 0x00100000);

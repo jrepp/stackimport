@@ -1411,6 +1411,38 @@ static void test_parse_ppt_bad_offset() {
     CHECK(!r, "bad ppt# offset should fail");
 }
 
+static void test_parse_cicn_metadata() {
+    uint8_t data[83] = {};
+    rsrcd::write_u16be(data + 4, 1);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 32, 1);
+    rsrcd::write_u16be(data + 54, 1);
+    rsrcd::write_u16be(data + 60, 1);
+    rsrcd::write_u16be(data + 74, 1);
+
+    rsrcd::color_icon::Icon icon{};
+    auto r = rsrcd::color_icon::parse({data, sizeof(data)}, icon);
+    CHECK_RESULT(r, "parse cicn metadata");
+    CHECK(icon.pix_map.pixel_size == 1, "cicn pixel size");
+    CHECK(icon.mask.row_bytes == 1, "cicn mask row bytes");
+    CHECK(icon.mask_data_offset == 82, "cicn mask offset");
+    CHECK(icon.color_table_offset == 83, "cicn color table offset");
+}
+
+static void test_parse_cicn_bad_depth() {
+    uint8_t data[83] = {};
+    rsrcd::write_u16be(data + 4, 1);
+    rsrcd::write_u16be(data + 10, 1);
+    rsrcd::write_u16be(data + 32, 16);
+    rsrcd::write_u16be(data + 54, 1);
+    rsrcd::write_u16be(data + 60, 1);
+    rsrcd::write_u16be(data + 74, 1);
+
+    rsrcd::color_icon::Icon icon{};
+    auto r = rsrcd::color_icon::parse({data, sizeof(data)}, icon);
+    CHECK(!r, "bad cicn depth should fail");
+}
+
 // ============================================================================
 // AddColor parser
 // ============================================================================
@@ -2165,6 +2197,8 @@ int main() {
     test_parse_ppat_mono();
     test_parse_ppt_list();
     test_parse_ppt_bad_offset();
+    test_parse_cicn_metadata();
+    test_parse_cicn_bad_depth();
     test_addcolor_button();
     test_addcolor_hidden_field();
     test_addcolor_rect();

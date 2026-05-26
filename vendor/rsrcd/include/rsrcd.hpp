@@ -2732,6 +2732,89 @@ auto parse_ppt_list(Bytes data, PatternList<Cap>& list) -> Result {
 } // namespace pixel_pattern
 
 // ============================================================================
+// Color icon metadata (cicn)
+// ============================================================================
+
+namespace color_icon {
+
+struct Bitmap {
+    uint16_t row_bytes;
+    ui::Rect bounds;
+};
+
+struct Icon {
+    uint32_t pix_map_unused;
+    pixel_pattern::PixelMap pix_map;
+    uint32_t mask_unused;
+    Bitmap mask;
+    uint32_t bitmap_unused;
+    Bitmap bitmap;
+    uint32_t icon_data;
+    uint32_t mask_data_offset;
+    uint32_t bitmap_data_offset;
+    uint32_t color_table_offset;
+};
+
+inline auto rect_width(const ui::Rect& rect) -> int32_t {
+    return static_cast<int32_t>(rect.right) - rect.left;
+}
+
+inline auto rect_height(const ui::Rect& rect) -> int32_t {
+    return static_cast<int32_t>(rect.bottom) - rect.top;
+}
+
+inline auto parse_bitmap(Bytes data, size_t offset, Bitmap& bitmap) -> Result {
+    if (!range_in_bounds(offset, 10, data.size)) return Error::unexpected_end();
+    bitmap.row_bytes = read_u16be(data.data + offset) & 0x3FFFu;
+    return pixel_pattern::parse_pattern_rect(data, offset + 2, bitmap.bounds);
+}
+
+inline auto bitmap_bytes(const Bitmap& bitmap, size_t& bytes) -> Result {
+    const int32_t height = rect_height(bitmap.bounds);
+    if (height < 0) return Error::invalid_data("bitmap has negative height");
+    bytes = static_cast<size_t>(bitmap.row_bytes) * static_cast<size_t>(height);
+    return Result::ok();
+}
+
+inline auto parse(Bytes data, Icon& icon) -> Result {
+    constexpr size_t header_size = 82;
+    if (data.size < header_size) return Error::unexpected_end();
+    icon.pix_map_unused = read_u32be(data.data);
+    if (auto r = pixel_pattern::parse_pixel_map(data, 4, icon.pix_map); !r) return r;
+    icon.mask_unused = read_u32be(data.data + 50);
+    if (auto r = parse_bitmap(data, 54, icon.mask); !r) return r;
+    icon.bitmap_unused = read_u32be(data.data + 64);
+    if (auto r = parse_bitmap(data, 68, icon.bitmap); !r) return r;
+    icon.icon_data = read_u32be(data.data + 78);
+
+    if (rect_width(icon.pix_map.bounds) != rect_width(icon.mask.bounds) ||
+        rect_height(icon.pix_map.bounds) != rect_height(icon.mask.bounds)) {
+        return Error::invalid_data("cicn mask dimensions do not match pixel map");
+    }
+    if (icon.bitmap.row_bytes != 0 &&
+        (rect_width(icon.pix_map.bounds) != rect_width(icon.bitmap.bounds) ||
+         rect_height(icon.pix_map.bounds) != rect_height(icon.bitmap.bounds))) {
+        return Error::invalid_data("cicn bitmap dimensions do not match pixel map");
+    }
+    if (icon.pix_map.pixel_size != 1 && icon.pix_map.pixel_size != 2 &&
+        icon.pix_map.pixel_size != 4 && icon.pix_map.pixel_size != 8) {
+        return Error::invalid_data("unsupported cicn pixel depth");
+    }
+
+    size_t mask_bytes = 0;
+    if (auto r = bitmap_bytes(icon.mask, mask_bytes); !r) return r;
+    size_t bitmap_bytes_value = 0;
+    if (auto r = bitmap_bytes(icon.bitmap, bitmap_bytes_value); !r) return r;
+    icon.mask_data_offset = header_size;
+    icon.bitmap_data_offset = static_cast<uint32_t>(header_size + mask_bytes);
+    icon.color_table_offset = static_cast<uint32_t>(header_size + mask_bytes + bitmap_bytes_value);
+    if (icon.color_table_offset > data.size) return Error::unexpected_end();
+    return Result::ok();
+}
+
+} // namespace color_icon
+
+// ============================================================================
 // PAT# (Pattern List) helpers
 // ============================================================================
 
