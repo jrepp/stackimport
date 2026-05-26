@@ -227,20 +227,17 @@ when parser behavior changes, updates to the relevant format documentation under
   `vendor/`.
 - `StackImportSoundConverter.h` no longer exposes `rsrcd::Bytes`; sound
   conversion callers pass plain byte pointers and sizes.
-- ICON, CURS, and PAT# image decoding now goes through
-  `StackImportRsrcdAdapter`; the resource exporter no longer calls rsrcd image
-  decoder helpers directly.
 - Verified default vendor-tools-on and `STACKIMPORT_BUILD_VENDOR_TOOLS=OFF`
   configurations build and pass tests after the adapter split.
-- Remaining work: resource-fork parser and PLTE parser adapter boundaries, the
-  internal SAX header's rsrcd type surface, and broader license/provenance audit.
+- Remaining work: resource-fork parser/decoder adapter boundaries and broader
+  license/provenance audit.
 
 ### Tasks
 
 - Done: stop including private vendor paths such as
   `vendor/resource_dasm/src/AudioCodecs.hh` from StackImport-owned sources.
 - Create narrow adapter targets for:
-  - Partly done: resource fork parsing and small resource decoders from `rsrcd`;
+  - resource fork parsing and small resource decoders from `rsrcd`;
   - Done: MACE decoding from `resource_dasm` or an owned codec extraction;
   - Done: disassembly support from `resource_dasm`;
   - Done: PNG encoding through stb;
