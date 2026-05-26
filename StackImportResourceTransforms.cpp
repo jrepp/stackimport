@@ -643,6 +643,56 @@ auto emit_txst_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto emit_styl_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed text style run metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	rsrcd::styl::StyleRunList<512> style_runs;
+	auto parse_result = rsrcd::styl::parse(resource.data, style_runs);
+	if(!parse_result)
+		return output.on_resource_error(ref, parse_result.message());
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(4096, &base_alloc);
+	JsonDocument doc(&pool, 4096, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	JsonValue runs(rapidjson::kArrayType);
+	for(const auto& run : style_runs)
+	{
+		JsonValue item(rapidjson::kObjectType);
+		item.AddMember("offset", run.offset, allocator);
+		item.AddMember("lineHeight", run.line_height, allocator);
+		item.AddMember("fontAscent", run.font_ascent, allocator);
+		item.AddMember("fontId", run.font_id, allocator);
+		item.AddMember("styleFlags", run.style_flags, allocator);
+		item.AddMember("fontSize", run.font_size, allocator);
+		JsonValue color(rapidjson::kObjectType);
+		color.AddMember("red", run.color.red, allocator);
+		color.AddMember("green", run.color.green, allocator);
+		color.AddMember("blue", run.color.blue, allocator);
+		item.AddMember("color", color, allocator);
+		runs.PushBack(item, allocator);
+	}
+	doc.AddMember("runs", runs, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_rect_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -2017,6 +2067,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "TxSt"))
 		return emit_txst_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "styl"))
+		return emit_styl_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "RECT"))
 		return emit_rect_transform(resource, ref, output);

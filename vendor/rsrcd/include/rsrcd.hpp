@@ -2020,6 +2020,74 @@ inline auto parse(Bytes data, TextStyle& style) -> Result {
 } // namespace txst
 
 // ============================================================================
+// Text style run resources (styl)
+// ============================================================================
+
+namespace styl {
+
+struct Color {
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+};
+
+struct StyleRun {
+    uint32_t offset;
+    uint16_t line_height;
+    uint16_t font_ascent;
+    uint16_t font_id;
+    uint16_t style_flags;
+    uint16_t font_size;
+    Color color;
+};
+
+template<size_t InlineCapacity = 256>
+class StyleRunList {
+public:
+    auto add(StyleRun value) -> Result {
+        if (count_ < InlineCapacity) {
+            runs_[count_++] = value;
+            return Result::ok();
+        }
+        return Error::invalid_data("too many style runs");
+    }
+    auto count() const -> size_t { return count_; }
+    auto operator[](size_t i) const -> const StyleRun& { return runs_[i]; }
+    auto begin() const -> const StyleRun* { return runs_; }
+    auto end() const -> const StyleRun* { return runs_ + count_; }
+
+private:
+    StyleRun runs_[InlineCapacity];
+    size_t count_ = 0;
+};
+
+template<size_t Cap = 256>
+auto parse(Bytes data, StyleRunList<Cap>& runs) -> Result {
+    constexpr size_t command_size = 20;
+    if (data.size < 2) return Error::unexpected_end();
+    const uint16_t count = read_u16be(data.data);
+    size_t offset = 2;
+    for (uint16_t i = 0; i < count; ++i) {
+        if (!range_in_bounds(offset, command_size, data.size)) return Error::unexpected_end();
+        StyleRun run{};
+        run.offset = read_u32be(data.data + offset);
+        run.line_height = read_u16be(data.data + offset + 4);
+        run.font_ascent = read_u16be(data.data + offset + 6);
+        run.font_id = read_u16be(data.data + offset + 8);
+        run.style_flags = read_u16be(data.data + offset + 10);
+        run.font_size = read_u16be(data.data + offset + 12);
+        run.color.red = read_u16be(data.data + offset + 14);
+        run.color.green = read_u16be(data.data + offset + 16);
+        run.color.blue = read_u16be(data.data + offset + 18);
+        if (auto r = runs.add(run); !r) return r;
+        offset += command_size;
+    }
+    return Result::ok();
+}
+
+} // namespace styl
+
+// ============================================================================
 // Simple template-backed metadata resources (RECT / TOOL)
 // ============================================================================
 

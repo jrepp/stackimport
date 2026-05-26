@@ -189,6 +189,7 @@ public:
 			resource_type_is(res_, "ALRT") || resource_type_is(res_, "FREF") ||
 			resource_type_is(res_, "BNDL") || resource_type_is(res_, "ROv#") ||
 			resource_type_is(res_, "RSSC") || resource_type_is(res_, "TxSt") ||
+			resource_type_is(res_, "styl") ||
 			resource_type_is(res_, "RECT") || resource_type_is(res_, "TOOL") ||
 			resource_type_is(res_, "PICK") || resource_type_is(res_, "KBDN") ||
 			resource_type_is(res_, "PAPA") || resource_type_is(res_, "LAYO") ||
@@ -438,6 +439,8 @@ private:
 			snprintf(fname, sizeof(fname), "RSSC_%d.json", res_.id);
 		else if(resource_type_is(res_, "TxSt"))
 			snprintf(fname, sizeof(fname), "TxSt_%d.json", res_.id);
+		else if(resource_type_is(res_, "styl"))
+			snprintf(fname, sizeof(fname), "styl_%d.json", res_.id);
 		else if(resource_type_is(res_, "RECT"))
 			snprintf(fname, sizeof(fname), "RECT_%d.json", res_.id);
 		else if(resource_type_is(res_, "TOOL"))
@@ -766,6 +769,7 @@ bool stackimport_load_resource_fork(
 			std::memcmp(res.type.data, "ALRT", 4) == 0 || std::memcmp(res.type.data, "FREF", 4) == 0 ||
 			std::memcmp(res.type.data, "BNDL", 4) == 0 || std::memcmp(res.type.data, "ROv#", 4) == 0 ||
 			std::memcmp(res.type.data, "RSSC", 4) == 0 || std::memcmp(res.type.data, "TxSt", 4) == 0 ||
+			std::memcmp(res.type.data, "styl", 4) == 0 ||
 			std::memcmp(res.type.data, "RECT", 4) == 0 || std::memcmp(res.type.data, "TOOL", 4) == 0 ||
 			std::memcmp(res.type.data, "PICK", 4) == 0 || std::memcmp(res.type.data, "KBDN", 4) == 0 ||
 			std::memcmp(res.type.data, "PAPA", 4) == 0 || std::memcmp(res.type.data, "LAYO", 4) == 0 ||

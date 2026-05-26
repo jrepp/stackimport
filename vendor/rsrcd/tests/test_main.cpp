@@ -1028,6 +1028,47 @@ static void test_parse_txst_truncated_name() {
     CHECK(!r, "truncated TxSt name should fail");
 }
 
+static void test_parse_styl() {
+    uint8_t data[42] = {};
+    rsrcd::write_u16be(data, 2);
+    rsrcd::write_u32be(data + 2, 0);
+    rsrcd::write_u16be(data + 6, 12);
+    rsrcd::write_u16be(data + 8, 9);
+    rsrcd::write_u16be(data + 10, 128);
+    rsrcd::write_u16be(data + 12, 0x0001);
+    rsrcd::write_u16be(data + 14, 10);
+    rsrcd::write_u16be(data + 16, 0x1111);
+    rsrcd::write_u16be(data + 18, 0x2222);
+    rsrcd::write_u16be(data + 20, 0x3333);
+    rsrcd::write_u32be(data + 22, 5);
+    rsrcd::write_u16be(data + 26, 14);
+    rsrcd::write_u16be(data + 28, 11);
+    rsrcd::write_u16be(data + 30, 129);
+    rsrcd::write_u16be(data + 32, 0x0002);
+    rsrcd::write_u16be(data + 34, 12);
+    rsrcd::write_u16be(data + 36, 0x4444);
+    rsrcd::write_u16be(data + 38, 0x5555);
+    rsrcd::write_u16be(data + 40, 0x6666);
+
+    rsrcd::styl::StyleRunList<4> runs;
+    auto r = rsrcd::styl::parse({data, sizeof(data)}, runs);
+    CHECK_RESULT(r, "parse styl");
+    CHECK(runs.count() == 2, "styl run count");
+    CHECK(runs[0].font_id == 128, "styl first font");
+    CHECK(runs[0].color.green == 0x2222, "styl first color");
+    CHECK(runs[1].offset == 5, "styl second offset");
+    CHECK(runs[1].font_size == 12, "styl second font size");
+}
+
+static void test_parse_styl_truncated() {
+    uint8_t data[21] = {};
+    rsrcd::write_u16be(data, 1);
+
+    rsrcd::styl::StyleRunList<4> runs;
+    auto r = rsrcd::styl::parse({data, sizeof(data)}, runs);
+    CHECK(!r, "truncated styl should fail");
+}
+
 static void test_parse_rect_resource() {
     uint8_t data[8] = {};
     rsrcd::write_u16be(data, 1);
@@ -2024,6 +2065,8 @@ int main() {
     test_parse_rssc_bad_offset();
     test_parse_txst();
     test_parse_txst_truncated_name();
+    test_parse_styl();
+    test_parse_styl_truncated();
     test_parse_rect_resource();
     test_parse_tool();
     test_parse_tool_odd_length();

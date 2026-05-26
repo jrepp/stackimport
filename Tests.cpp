@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <vector>
 #include <span>
@@ -337,6 +338,52 @@ std::vector<uint8_t> make_single_resource_fork(const char type[4], int16_t id, c
 	return fork;
 }
 
+CountingResourceOutput parse_single_resource(const char type[4], int16_t id, const std::vector<uint8_t>& payload)
+{
+	const std::vector<uint8_t> fork = make_single_resource_fork(type, id, payload);
+	CountingResourceOutput output;
+	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{fork.data(), fork.size()}, output));
+	assert(output.native_count == 1);
+	return output;
+}
+
+void assert_rgba_resource(
+	const char type[4],
+	int16_t id,
+	const std::vector<uint8_t>& payload,
+	uint32_t width,
+	uint32_t height)
+{
+	CountingResourceOutput output = parse_single_resource(type, id, payload);
+	assert(output.rgba_count == 1);
+	assert(output.last_width == width);
+	assert(output.last_height == height);
+	assert(output.last_payload_size == static_cast<size_t>(width) * height * 4u);
+}
+
+void assert_json_resource_contains(
+	const char type[4],
+	int16_t id,
+	const std::vector<uint8_t>& payload,
+	std::initializer_list<const char*> needles)
+{
+	CountingResourceOutput output = parse_single_resource(type, id, payload);
+	assert(output.json_count == 1);
+	for(const char* needle : needles)
+		assert(output.last_json.find(needle) != std::string::npos);
+}
+
+void assert_text_resource_equals(
+	const char type[4],
+	int16_t id,
+	const std::vector<uint8_t>& payload,
+	const std::string& expected)
+{
+	CountingResourceOutput output = parse_single_resource(type, id, payload);
+	assert(output.text_count == 1);
+	assert(output.last_text == expected);
+}
+
 void append_block_header(std::vector<uint8_t>& data, uint32_t size, const char type[4], int32_t id)
 {
 	data.push_back(static_cast<uint8_t>((size >> 24u) & 0xFFu));
@@ -436,60 +483,604 @@ std::string read_text_file(const std::string& path)
 	return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
+std::vector<uint8_t> make_icon_payload()
+{
+	std::vector<uint8_t> payload(128);
+	payload[0] = 0xFF;
+	return payload;
+}
+
+void test_resource_image_transforms()
+{
+	assert_rgba_resource("ICON", 128, make_icon_payload(), 32, 32);
+
+	std::vector<uint8_t> icnPayload(256);
+	icnPayload[0] = 0x80;
+	icnPayload[128] = 0x80;
+	assert_rgba_resource("ICN#", 130, icnPayload, 32, 32);
+
+	assert_rgba_resource("PAT ", 9, {0x80, 0, 0, 0, 0, 0, 0, 0}, 8, 8);
+
+	std::vector<uint8_t> sicnPayload(32);
+	sicnPayload[0] = 0x80;
+	assert_rgba_resource("SICN", 10, sicnPayload, 16, 16);
+
+	struct IndexedIconCase
+	{
+		const char* type;
+		uint16_t width;
+		uint16_t height;
+		uint8_t bits_per_pixel;
+	};
+	const IndexedIconCase indexedIconCases[] = {
+		{"icl4", 32, 32, 4},
+		{"icl8", 32, 32, 8},
+		{"icm4", 16, 12, 4},
+		{"icm8", 16, 12, 8},
+		{"ics4", 16, 16, 4},
+		{"ics8", 16, 16, 8},
+	};
+	for(const IndexedIconCase& c : indexedIconCases)
+	{
+		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height * c.bits_per_pixel / 8u;
+		std::vector<uint8_t> payload(bytesPerIcon);
+		payload[0] = c.bits_per_pixel == 4 ? 0x0Fu : 0xFFu;
+		assert_rgba_resource(c.type, 11, payload, c.width, c.height);
+	}
+
+	struct MonoIconCase
+	{
+		const char* type;
+		uint16_t width;
+		uint16_t height;
+	};
+	const MonoIconCase monoIconCases[] = {
+		{"icm#", 16, 12},
+		{"ics#", 16, 16},
+	};
+	for(const MonoIconCase& c : monoIconCases)
+	{
+		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height / 8u;
+		std::vector<uint8_t> payload(bytesPerIcon * 2u);
+		payload[0] = 0x80;
+		payload[bytesPerIcon] = 0x80;
+		assert_rgba_resource(c.type, 12, payload, c.width, c.height);
+	}
+}
+
+void test_resource_text_transforms()
+{
+	assert_text_resource_equals("STR ", 12, {5, 'H', 0x8E, 'l', 'l', 'o'}, "H\xC3\xA9llo");
+
+	std::vector<uint8_t> stringListPayload;
+	append_u16be(stringListPayload, 2);
+	stringListPayload.insert(stringListPayload.end(), {3, 'O', 'n', 'e'});
+	stringListPayload.insert(stringListPayload.end(), {3, 'T', 'w', 'o'});
+	assert_json_resource_contains("STR#", 44, stringListPayload, {"\"One\"", "\"Two\""});
+
+	assert_json_resource_contains("TwCS", 1, {0, 1, 0, 5, 'T', 'w', 'C', 'S', '!'}, {"\"TwCS!\""});
+
+	std::vector<uint8_t> txstPayload;
+	txstPayload.push_back(0x03);
+	txstPayload.push_back(0x00);
+	append_u16be(txstPayload, 12);
+	append_u16be(txstPayload, 0x1111);
+	append_u16be(txstPayload, 0x2222);
+	append_u16be(txstPayload, 0x3333);
+	txstPayload.insert(txstPayload.end(), {9, 'H', 'e', 'l', 'v', 'e', 't', 'i', 'c', 'a'});
+	assert_json_resource_contains("TxSt", 1, txstPayload, {
+		"\"fontStyle\": 3",
+		"\"fontSize\": 12",
+		"\"fontName\": \"Helvetica\"",
+	});
+
+	std::vector<uint8_t> stylPayload;
+	append_u16be(stylPayload, 1);
+	append_u32be(stylPayload, 5);
+	append_u16be(stylPayload, 14);
+	append_u16be(stylPayload, 11);
+	append_u16be(stylPayload, 128);
+	append_u16be(stylPayload, 0x0001);
+	append_u16be(stylPayload, 12);
+	append_u16be(stylPayload, 0x1111);
+	append_u16be(stylPayload, 0x2222);
+	append_u16be(stylPayload, 0x3333);
+	assert_json_resource_contains("styl", 1, stylPayload, {
+		"\"offset\": 5",
+		"\"fontId\": 128",
+		"\"green\": 8738",
+	});
+}
+
+void test_resource_metadata_transforms()
+{
+	std::vector<uint8_t> addColorData;
+	addColorData.push_back(0x03);
+	append_u16be(addColorData, 10);
+	append_u16be(addColorData, 20);
+	append_u16be(addColorData, 30);
+	append_u16be(addColorData, 40);
+	append_u16be(addColorData, 2);
+	append_u16be(addColorData, 0x1111);
+	append_u16be(addColorData, 0x2222);
+	append_u16be(addColorData, 0x3333);
+	assert_json_resource_contains("HCbg", 77, addColorData, {
+		"\"targetKind\": \"background\"",
+		"\"targetId\": 77",
+		"\"type\": \"rect\"",
+		"\"red\": 4369",
+	});
+
+	std::vector<uint8_t> versionPayload = {0x01, 0x23, 0x80, 0x00, 0x00, 0x00};
+	versionPayload.insert(versionPayload.end(), {3, '1', '.', '2'});
+	versionPayload.insert(versionPayload.end(), {7, 'R', 'e', 'l', 'e', 'a', 's', 'e'});
+	assert_json_resource_contains("vers", 1, versionPayload, {
+		"\"majorRevision\": 1",
+		"\"minorAndBugRevision\": 35",
+		"\"shortVersion\": \"1.2\"",
+	});
+
+	std::vector<uint8_t> cfrgPayload(79);
+	rsrcd::write_u16be(cfrgPayload.data() + 10, 1);
+	rsrcd::write_u16be(cfrgPayload.data() + 30, 1);
+	size_t cfrgOffset = 32;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset, 0x70777063);
+	cfrgPayload[cfrgOffset + 7] = 2;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 8, 0x01020304);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 12, 0x00010000);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 16, 0x00002000);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 20, 7);
+	cfrgPayload[cfrgOffset + 22] = 1;
+	cfrgPayload[cfrgOffset + 23] = 2;
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 24, 0x434F4445);
+	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 28, 128);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 36, 1);
+	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 40, 47);
+	cfrgPayload[cfrgOffset + 42] = 4;
+	cfrgPayload[cfrgOffset + 43] = 'M';
+	cfrgPayload[cfrgOffset + 44] = 'a';
+	cfrgPayload[cfrgOffset + 45] = 'i';
+	cfrgPayload[cfrgOffset + 46] = 'n';
+	assert_json_resource_contains("cfrg", 1, cfrgPayload, {
+		"\"architectureType\": \"pwpc\"",
+		"\"usageName\": \"application\"",
+		"\"whereName\": \"resourceFork\"",
+		"\"name\": \"Main\"",
+	});
+
+	std::vector<uint8_t> mbarPayload;
+	append_u16be(mbarPayload, 2);
+	append_u16be(mbarPayload, 128);
+	append_u16be(mbarPayload, 129);
+	assert_json_resource_contains("MBAR", 1, mbarPayload, {"\"menuIds\"", "128", "129"});
+
+	std::vector<uint8_t> alrtPayload;
+	append_u16be(alrtPayload, 1);
+	append_u16be(alrtPayload, 2);
+	append_u16be(alrtPayload, 101);
+	append_u16be(alrtPayload, 202);
+	append_u16be(alrtPayload, 300);
+	alrtPayload.push_back(0x12);
+	alrtPayload.push_back(0x34);
+	append_u16be(alrtPayload, 0x0A00);
+	assert_json_resource_contains("ALRT", 1, alrtPayload, {"\"itemListId\": 300", "\"autoPosition\": 2560"});
+
+	std::vector<uint8_t> frefPayload;
+	append_u32be(frefPayload, 0x4150504C);
+	append_u16be(frefPayload, 42);
+	frefPayload.insert(frefPayload.end(), {4, 'A', 'p', 'p', 's'});
+	assert_json_resource_contains("FREF", 1, frefPayload, {"\"fileTypeString\": \"APPL\"", "\"fileName\": \"Apps\""});
+
+	std::vector<uint8_t> bndlPayload;
+	append_u32be(bndlPayload, 0x4F574E52);
+	append_u16be(bndlPayload, 128);
+	append_u16be(bndlPayload, 0);
+	append_u32be(bndlPayload, 0x49434F4E);
+	append_u16be(bndlPayload, 1);
+	append_u16be(bndlPayload, 0);
+	append_u16be(bndlPayload, 1000);
+	append_u16be(bndlPayload, 1);
+	append_u16be(bndlPayload, 1001);
+	assert_json_resource_contains("BNDL", 1, bndlPayload, {
+		"\"ownerNameString\": \"OWNR\"",
+		"\"typeString\": \"ICON\"",
+		"\"resourceId\": 1001",
+	});
+
+	std::vector<uint8_t> rovPayload;
+	append_u16be(rovPayload, 0x0750);
+	append_u16be(rovPayload, 1);
+	append_u32be(rovPayload, 0x4D454E55);
+	append_u16be(rovPayload, 128);
+	assert_json_resource_contains("ROv#", 1, rovPayload, {
+		"\"romVersion\": 1872",
+		"\"typeString\": \"MENU\"",
+		"\"id\": 128",
+	});
+
+	std::vector<uint8_t> rsscPayload(24);
+	rsrcd::write_u32be(rsscPayload.data(), 0x52535343);
+	rsrcd::write_u16be(rsscPayload.data() + 4, 22);
+	rsscPayload[22] = 0x4E;
+	rsscPayload[23] = 0x75;
+	assert_json_resource_contains("RSSC", 1, rsscPayload, {
+		"\"typeSignatureString\": \"RSSC\"",
+		"\"codeStartOffset\": 22",
+		"\"codeSize\": 2",
+	});
+
+	assert_json_resource_contains("RECT", 1, {0, 1, 0, 2, 0, 101, 0, 202}, {"\"top\": 1", "\"right\": 202"});
+
+	std::vector<uint8_t> toolPayload;
+	append_u16be(toolPayload, 2);
+	append_u16be(toolPayload, 1);
+	append_u16be(toolPayload, 128);
+	append_u16be(toolPayload, 129);
+	append_u16be(toolPayload, 130);
+	assert_json_resource_contains("TOOL", 1, toolPayload, {"\"toolsPerRow\": 2", "\"cursorIds\"", "130"});
+
+	std::vector<uint8_t> pickPayload;
+	append_u32be(pickPayload, 0x50494354);
+	pickPayload.insert(pickPayload.end(), {1, 2, 3, 0});
+	append_u16be(pickPayload, 16);
+	append_u16be(pickPayload, 1);
+	append_u32be(pickPayload, 0x49434F4E);
+	append_u16be(pickPayload, 128);
+	append_u32be(pickPayload, 0x50494354);
+	append_u16be(pickPayload, 129);
+	assert_json_resource_contains("PICK", 1, pickPayload, {
+		"\"typeString\": \"PICT\"",
+		"\"verticalCellSize\": 16",
+		"\"id\": 129",
+	});
+
+	assert_json_resource_contains("KBDN", 1, {3, 'U', 'S', 'A'}, {"\"name\": \"USA\""});
+
+	std::vector<uint8_t> papaPayload = {
+		7, 'P', 'r', 'i', 'n', 't', 'e', 'r',
+		3, 'L', 'W', 'R',
+		4, 'Z', 'o', 'n', 'e',
+	};
+	append_u32be(papaPayload, 0x12345678);
+	papaPayload.push_back(0xAA);
+	assert_json_resource_contains("PAPA", 1, papaPayload, {
+		"\"name\": \"Printer\"",
+		"\"addressBlock\": 305419896",
+		"\"dataHex\": \"AA\"",
+	});
+
+	std::vector<uint8_t> layoPayload;
+	append_u16be(layoPayload, 128);
+	append_u16be(layoPayload, 12);
+	append_u16be(layoPayload, 20);
+	append_u16be(layoPayload, 1);
+	append_u16be(layoPayload, 2);
+	append_u16be(layoPayload, 30);
+	append_u16be(layoPayload, 40);
+	append_u16be(layoPayload, 10);
+	append_u16be(layoPayload, 20);
+	append_u16be(layoPayload, 110);
+	append_u16be(layoPayload, 220);
+	append_u16be(layoPayload, 0);
+	append_u16be(layoPayload, 1);
+	append_u16be(layoPayload, 2);
+	append_u16be(layoPayload, 3);
+	append_u16be(layoPayload, 4);
+	assert_json_resource_contains("LAYO", 1, layoPayload, {"\"fontId\": 128", "\"right\": 220", "\"rectangles\""});
+}
+
+void test_resource_code_transforms()
+{
+	std::vector<uint8_t> code0Payload;
+	append_u32be(code0Payload, 0x1000);
+	append_u32be(code0Payload, 0x2000);
+	append_u32be(code0Payload, 8);
+	append_u32be(code0Payload, 16);
+	append_u16be(code0Payload, 0x0010);
+	append_u16be(code0Payload, 0x3F3C);
+	append_u16be(code0Payload, 1);
+	append_u16be(code0Payload, 0xA9F0);
+	assert_json_resource_contains("CODE", 0, code0Payload, {"\"kind\": \"jumpTable\"", "\"loadSegmentTrap\": true"});
+
+	std::vector<uint8_t> codePayload;
+	append_u16be(codePayload, 2);
+	append_u16be(codePayload, 3);
+	codePayload.insert(codePayload.end(), {0x4E, 0x75});
+	assert_json_resource_contains("CODE", 1, codePayload, {"\"kind\": \"nearSegment\"", "\"codeSize\": 2"});
+
+	std::vector<uint8_t> drvrPayload(26);
+	rsrcd::write_u16be(drvrPayload.data(), 0x0100);
+	rsrcd::write_u16be(drvrPayload.data() + 2, 60);
+	rsrcd::write_u16be(drvrPayload.data() + 4, 0xFFFF);
+	rsrcd::write_u16be(drvrPayload.data() + 6, 128);
+	rsrcd::write_u16be(drvrPayload.data() + 8, 24);
+	drvrPayload[18] = 4;
+	drvrPayload[19] = 'D';
+	drvrPayload[20] = 'r';
+	drvrPayload[21] = 'v';
+	drvrPayload[22] = 'r';
+	drvrPayload[24] = 0x4E;
+	drvrPayload[25] = 0x75;
+	assert_json_resource_contains("DRVR", 1, drvrPayload, {
+		"\"name\": \"Drvr\"",
+		"\"codeStartOffset\": 24",
+		"\"codeSize\": 2",
+	});
+
+	std::vector<uint8_t> dcmpPayload;
+	append_u16be(dcmpPayload, 10);
+	append_u16be(dcmpPayload, 12);
+	append_u16be(dcmpPayload, 14);
+	dcmpPayload.insert(dcmpPayload.end(), {0x4E, 0x75});
+	assert_json_resource_contains("dcmp", 1, dcmpPayload, {
+		"\"initLabel\": 10",
+		"\"pcOffset\": 6",
+		"\"codeSize\": 2",
+	});
+}
+
+void test_resource_color_and_ui_transforms()
+{
+	std::vector<uint8_t> colorTablePayload;
+	append_u32be(colorTablePayload, 0x12345678);
+	append_u16be(colorTablePayload, 0x8000);
+	append_u16be(colorTablePayload, 0);
+	append_u16be(colorTablePayload, 7);
+	append_u16be(colorTablePayload, 0x1111);
+	append_u16be(colorTablePayload, 0x2222);
+	append_u16be(colorTablePayload, 0x3333);
+	assert_json_resource_contains("clut", 8, colorTablePayload, {
+		"\"seed\": 305419896",
+		"\"flags\": 32768",
+		"\"green\": 8738",
+	});
+	assert_json_resource_contains("wctb", 0, colorTablePayload, {"\"green\": 8738"});
+
+	std::vector<uint8_t> plttPayload(32);
+	rsrcd::write_u16be(plttPayload.data(), 1);
+	rsrcd::write_u16be(plttPayload.data() + 18, 0x1111);
+	rsrcd::write_u16be(plttPayload.data() + 20, 0x2222);
+	rsrcd::write_u16be(plttPayload.data() + 22, 0x3333);
+	assert_json_resource_contains("pltt", 3, plttPayload, {"\"green\": 8738"});
+
+	std::vector<uint8_t> sizePayload;
+	append_u16be(sizePayload, 0xD048);
+	append_u32be(sizePayload, 0x00100000);
+	append_u32be(sizePayload, 0x00080000);
+	assert_json_resource_contains("SIZE", -1, sizePayload, {
+		"\"preferredSize\": 1048576",
+		"\"minimumSize\": 524288",
+		"\"saveScreen\": true",
+	});
+
+	std::vector<uint8_t> finfPayload;
+	append_u16be(finfPayload, 1);
+	append_u16be(finfPayload, 128);
+	append_u16be(finfPayload, 1);
+	append_u16be(finfPayload, 12);
+	assert_json_resource_contains("finf", 1, finfPayload, {"\"fontId\": 128", "\"size\": 12"});
+
+	std::vector<uint8_t> dlogPayload;
+	append_u16be(dlogPayload, 1);
+	append_u16be(dlogPayload, 2);
+	append_u16be(dlogPayload, 30);
+	append_u16be(dlogPayload, 40);
+	append_u16be(dlogPayload, 4);
+	append_u16be(dlogPayload, 1);
+	append_u16be(dlogPayload, 1);
+	append_u32be(dlogPayload, 0x12345678);
+	append_u16be(dlogPayload, 128);
+	dlogPayload.insert(dlogPayload.end(), {5, 'H', 'e', 'l', 'l', 'o'});
+	append_u16be(dlogPayload, 0xABCD);
+	assert_json_resource_contains("DLOG", 128, dlogPayload, {
+		"\"itemsId\": 128",
+		"\"title\": \"Hello\"",
+		"\"autoPosition\": 43981",
+	});
+
+	std::vector<uint8_t> menuPayload;
+	append_u16be(menuPayload, 128);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u16be(menuPayload, 0);
+	append_u32be(menuPayload, 0x00000003);
+	menuPayload.insert(menuPayload.end(), {4, 'F', 'i', 'l', 'e'});
+	menuPayload.insert(menuPayload.end(), {4, 'O', 'p', 'e', 'n', 0, 'O', 0, 0});
+	menuPayload.push_back(0);
+	assert_json_resource_contains("MENU", 128, menuPayload, {
+		"\"title\": \"File\"",
+		"\"name\": \"Open\"",
+		"\"keyEquivalent\": 79",
+	});
+
+	std::vector<uint8_t> ditlPayload;
+	append_u16be(ditlPayload, 1);
+	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
+	append_u16be(ditlPayload, 1);
+	append_u16be(ditlPayload, 2);
+	append_u16be(ditlPayload, 30);
+	append_u16be(ditlPayload, 40);
+	ditlPayload.insert(ditlPayload.end(), {0x04, 2, 'O', 'K'});
+	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
+	append_u16be(ditlPayload, 1);
+	append_u16be(ditlPayload, 2);
+	append_u16be(ditlPayload, 30);
+	append_u16be(ditlPayload, 40);
+	ditlPayload.insert(ditlPayload.end(), {0x20, 2});
+	append_u16be(ditlPayload, 128);
+	if((ditlPayload.size() & 1u) != 0)
+		ditlPayload.push_back(0);
+	assert_json_resource_contains("DITL", 128, ditlPayload, {
+		"\"kind\": \"button\"",
+		"\"info\": \"OK\"",
+		"\"resourceId\": 128",
+	});
+}
+
+void test_resource_package_writes()
+{
+	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
+	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);
+	const std::vector<uint8_t> iconFork = make_single_resource_fork("ICON", 128, make_icon_payload());
+	ResourceForkPlatformState resourceForkPlatformState;
+	resourceForkPlatformState.resource_fork_data = iconFork.data();
+	resourceForkPlatformState.resource_fork_size = iconFork.size();
+	stackimport_platform resourceForkPlatform = {};
+	stackimport_platform_init(&resourceForkPlatform);
+	resourceForkPlatform.open_file = resource_fork_open_file;
+	resourceForkPlatform.read_file = resource_fork_read_file;
+	resourceForkPlatform.write_file = resource_fork_write_file;
+	resourceForkPlatform.close_file = resource_fork_close_file;
+	resourceForkPlatform.make_directory = counting_make_directory;
+	resourceForkPlatform.user_data = &resourceForkPlatformState;
+	const stackimport_internal_platform resourceForkInternalPlatform = stackimport_internal_platform_from_api(&resourceForkPlatform);
+	CountingResourceOutput packageResourceOutput;
+	std::vector<CResourceSummary> resourceSummaries;
+	std::string resourceForkStatus;
+	uint64_t resourceForkBytes = 0;
+	{
+		stackimport_platform_scope resourceForkScope(resourceForkInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			resourceForkOutput,
+			"Stack",
+			&packageResourceOutput,
+			resourceSummaries,
+			resourceForkStatus,
+			resourceForkBytes));
+	}
+	assert(resourceForkStatus == "ok");
+	assert(resourceForkBytes == iconFork.size());
+	assert(resourceSummaries.size() == 1);
+	assert(resourceSummaries[0].type == "ICON");
+	assert(resourceSummaries[0].status == "exported");
+	assert(packageResourceOutput.native_count == 1);
+	assert(packageResourceOutput.rgba_count == 1);
+	assert(resourceForkPlatformState.opens > 0);
+	assert(resourceForkPlatformState.reads > 0);
+	assert(resourceForkPlatformState.writes > 0);
+
+	std::vector<uint8_t> addColorData;
+	addColorData.push_back(0x03);
+	append_u16be(addColorData, 10);
+	append_u16be(addColorData, 20);
+	append_u16be(addColorData, 30);
+	append_u16be(addColorData, 40);
+	append_u16be(addColorData, 2);
+	append_u16be(addColorData, 0x1111);
+	append_u16be(addColorData, 0x2222);
+	append_u16be(addColorData, 0x3333);
+	const std::vector<uint8_t> addColorFork = make_single_resource_fork("HCbg", 77, addColorData);
+	const std::string addColorOutputPath = std::string("/tmp/stackimport-addcolor-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(addColorOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState addColorPlatformState;
+	addColorPlatformState.resource_fork_data = addColorFork.data();
+	addColorPlatformState.resource_fork_size = addColorFork.size();
+	stackimport_platform addColorPlatform = resourceForkPlatform;
+	addColorPlatform.user_data = &addColorPlatformState;
+	const stackimport_internal_platform addColorInternalPlatform = stackimport_internal_platform_from_api(&addColorPlatform);
+	CountingResourceOutput addColorOutput;
+	std::vector<CResourceSummary> addColorSummaries;
+	std::string addColorStatus;
+	uint64_t addColorBytes = 0;
+	{
+		stackimport_platform_scope addColorScope(addColorInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			addColorOutputPath,
+			"Stack",
+			&addColorOutput,
+			addColorSummaries,
+			addColorStatus,
+			addColorBytes));
+	}
+	assert(addColorStatus == "ok");
+	assert(addColorSummaries.size() == 1);
+	assert(addColorSummaries[0].type == "HCbg");
+	assert(addColorSummaries[0].status == "exported");
+	assert(addColorSummaries[0].outputFile == "HCbg_77.json");
+	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
+	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
+
+	const std::vector<uint8_t> strFork = make_single_resource_fork("STR ", 12, {5, 'H', 0x8E, 'l', 'l', 'o'});
+	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState textPlatformState;
+	textPlatformState.resource_fork_data = strFork.data();
+	textPlatformState.resource_fork_size = strFork.size();
+	stackimport_platform textPlatform = resourceForkPlatform;
+	textPlatform.user_data = &textPlatformState;
+	const stackimport_internal_platform textInternalPlatform = stackimport_internal_platform_from_api(&textPlatform);
+	CountingResourceOutput textOutput;
+	std::vector<CResourceSummary> textSummaries;
+	std::string textStatus;
+	uint64_t textBytes = 0;
+	{
+		stackimport_platform_scope textScope(textInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			textOutputPath,
+			"Stack",
+			&textOutput,
+			textSummaries,
+			textStatus,
+			textBytes));
+	}
+	assert(textStatus == "ok");
+	assert(textSummaries.size() == 1);
+	assert(textSummaries[0].type == "STR ");
+	assert(textSummaries[0].status == "exported");
+	assert(textSummaries[0].outputFile == "resource-text/Stack_STR%20_12.txt");
+	const std::string convertedText = read_text_file(textOutputPath + "/resource-text/Stack_STR%20_12.txt");
+	assert(convertedText == "H\xC3\xA9llo");
+}
+
+void test_stack_block_identifier()
+{
+	CStackBlockIdentifier a("TEST", 1);
+	CStackBlockIdentifier b("TEST", 2);
+	CStackBlockIdentifier wildcardYes("TEST");
+	CStackBlockIdentifier wildcardNo("TOON");
+
+	assert((a == b) == false);
+	assert(a == wildcardYes);
+	assert(wildcardYes == a);
+	assert(b == wildcardYes);
+	assert(b == wildcardYes);
+	assert((a == wildcardNo) == false);
+	assert((wildcardNo == a) == false);
+	assert((b == wildcardNo) == false);
+	assert((wildcardNo == b) == false);
+
+	assert(a < b);
+	assert((a < wildcardYes) == false);
+	assert((wildcardYes < a) == false);
+	assert((b < wildcardYes) == false);
+	assert((wildcardYes < b) == false);
+	assert(a < wildcardNo);
+	assert((wildcardNo < a) == false);
+	assert(b < wildcardNo);
+	assert((wildcardNo < b) == false);
+
+	assert((a > b) == false);
+	assert((a > wildcardYes) == false);
+	assert((wildcardYes > a) == false);
+	assert((b > wildcardYes) == false);
+	assert((wildcardYes > b) == false);
+	assert((a > wildcardNo) == false);
+	assert(wildcardNo > a);
+	assert((b > wildcardNo) == false);
+	assert(wildcardNo > b);
+}
+
 }
 
 
 void	RunTests()
 {
-	CStackBlockIdentifier		a( "TEST", 1 );
-	CStackBlockIdentifier		b( "TEST", 2 );
-	CStackBlockIdentifier		wildcardYes( "TEST" );
-	CStackBlockIdentifier		wildcardNo( "TOON" );
-	
-	// ==
-	assert((a == b) == false);
-	
-	assert(a == wildcardYes);
-	assert(wildcardYes == a);
-	
-	assert(b == wildcardYes);
-	assert(b == wildcardYes);
-	
-	assert((a == wildcardNo) == false);
-	assert((wildcardNo == a) == false);
-	
-	assert((b == wildcardNo) == false);
-	assert((wildcardNo == b) == false);
-	
-	// <
-	assert( a < b );
-	
-	assert( (a < wildcardYes) == false );
-	assert( (wildcardYes < a) == false );
-	
-	assert( (b < wildcardYes) == false );
-	assert( (wildcardYes < b) == false );
-	
-	assert( a < wildcardNo );
-	assert( (wildcardNo < a) == false );
-	
-	assert( b < wildcardNo );
-	assert( (wildcardNo < b) == false );
-	
-	// >
-	assert( (a > b) == false );
-	
-	assert( (a > wildcardYes) == false );
-	assert( (wildcardYes > a) == false );
-	
-	assert( (b > wildcardYes) == false );
-	assert( (wildcardYes > b) == false );
-	
-	assert( (a > wildcardNo) == false );
-	assert( wildcardNo > a );
-	
-	assert( (b > wildcardNo) == false );
-	assert( wildcardNo > b );
+	test_stack_block_identifier();
 
 	assert(stackimport_context_size() <= 4096);
 	assert(stackimport_api_version() == STACKIMPORT_API_VERSION);
@@ -540,707 +1131,12 @@ void	RunTests()
 	assert(resourceOutput.on_resource_payload(payload));
 	assert(resourceOutput.seen_native);
 
-	uint8_t fork[256] = {};
-	write_basic_resource_fork_header(fork, 16, 160, 132, 96);
-	rsrcd::write_u32be(fork + 16, 128);
-	for(size_t i = 0; i < 128; ++i)
-		fork[20 + i] = 0xFF;
-	uint8_t* map = fork + 160;
-	rsrcd::write_u16be(map + 24, 28);
-	rsrcd::write_u16be(map + 26, 64);
-	uint8_t* type_list = map + 28;
-	rsrcd::write_u16be(type_list, 0);
-	std::memcpy(type_list + 2, "ICON", 4);
-	rsrcd::write_u16be(type_list + 6, 0);
-	rsrcd::write_u16be(type_list + 8, 10);
-	uint8_t* ref = type_list + 10;
-	rsrcd::write_u16be(ref + 0, 128);
-	rsrcd::write_u16be(ref + 2, 0xFFFF);
-	rsrcd::write_u32be(ref + 4, 0);
-	rsrcd::write_u32be(ref + 8, 0);
-	CountingResourceOutput countingOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{fork, sizeof(fork)}, countingOutput));
-	assert(countingOutput.native_count == 1);
-	assert(countingOutput.rgba_count == 1);
-	assert(countingOutput.last_width == 32);
-	assert(countingOutput.last_height == 32);
-	assert(countingOutput.last_payload_size == 32u * 32u * 4u);
-
-	std::vector<uint8_t> icnPayload(256);
-	icnPayload[0] = 0x80;
-	icnPayload[128] = 0x80;
-	const std::vector<uint8_t> icnFork = make_single_resource_fork("ICN#", 130, icnPayload);
-	CountingResourceOutput icnOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{icnFork.data(), icnFork.size()}, icnOutput));
-	assert(icnOutput.native_count == 1);
-	assert(icnOutput.rgba_count == 1);
-	assert(icnOutput.last_width == 32);
-	assert(icnOutput.last_height == 32);
-	assert(icnOutput.last_payload_size == 32u * 32u * 4u);
-
-	const std::vector<uint8_t> patPayload = {0x80, 0, 0, 0, 0, 0, 0, 0};
-	const std::vector<uint8_t> patFork = make_single_resource_fork("PAT ", 9, patPayload);
-	CountingResourceOutput patOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{patFork.data(), patFork.size()}, patOutput));
-	assert(patOutput.native_count == 1);
-	assert(patOutput.rgba_count == 1);
-	assert(patOutput.last_width == 8);
-	assert(patOutput.last_height == 8);
-	assert(patOutput.last_payload_size == 8u * 8u * 4u);
-
-	std::vector<uint8_t> sicnPayload(32);
-	sicnPayload[0] = 0x80;
-	const std::vector<uint8_t> sicnFork = make_single_resource_fork("SICN", 10, sicnPayload);
-	CountingResourceOutput sicnOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{sicnFork.data(), sicnFork.size()}, sicnOutput));
-	assert(sicnOutput.native_count == 1);
-	assert(sicnOutput.rgba_count == 1);
-	assert(sicnOutput.last_width == 16);
-	assert(sicnOutput.last_height == 16);
-	assert(sicnOutput.last_payload_size == 16u * 16u * 4u);
-
-	struct IndexedIconCase
-	{
-		const char* type;
-		uint16_t width;
-		uint16_t height;
-		uint8_t bits_per_pixel;
-	};
-	const IndexedIconCase indexedIconCases[] = {
-		{"icl4", 32, 32, 4},
-		{"icl8", 32, 32, 8},
-		{"icm4", 16, 12, 4},
-		{"icm8", 16, 12, 8},
-		{"ics4", 16, 16, 4},
-		{"ics8", 16, 16, 8},
-	};
-	for(const IndexedIconCase& c : indexedIconCases)
-	{
-		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height * c.bits_per_pixel / 8u;
-		std::vector<uint8_t> indexedPayload(bytesPerIcon);
-		indexedPayload[0] = c.bits_per_pixel == 4 ? 0x0Fu : 0xFFu;
-		const std::vector<uint8_t> indexedFork = make_single_resource_fork(c.type, 11, indexedPayload);
-		CountingResourceOutput indexedOutput;
-		assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{indexedFork.data(), indexedFork.size()}, indexedOutput));
-		assert(indexedOutput.native_count == 1);
-		assert(indexedOutput.rgba_count == 1);
-		assert(indexedOutput.last_width == c.width);
-		assert(indexedOutput.last_height == c.height);
-		assert(indexedOutput.last_payload_size == static_cast<size_t>(c.width) * c.height * 4u);
-	}
-
-	struct MonoIconCase
-	{
-		const char* type;
-		uint16_t width;
-		uint16_t height;
-	};
-	const MonoIconCase monoIconCases[] = {
-		{"icm#", 16, 12},
-		{"ics#", 16, 16},
-	};
-	for(const MonoIconCase& c : monoIconCases)
-	{
-		const size_t bytesPerIcon = static_cast<size_t>(c.width) * c.height / 8u;
-		std::vector<uint8_t> monoPayload(bytesPerIcon * 2u);
-		monoPayload[0] = 0x80;
-		monoPayload[bytesPerIcon] = 0x80;
-		const std::vector<uint8_t> monoFork = make_single_resource_fork(c.type, 12, monoPayload);
-		CountingResourceOutput monoOutput;
-		assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{monoFork.data(), monoFork.size()}, monoOutput));
-		assert(monoOutput.native_count == 1);
-		assert(monoOutput.rgba_count == 1);
-		assert(monoOutput.last_width == c.width);
-		assert(monoOutput.last_height == c.height);
-		assert(monoOutput.last_payload_size == static_cast<size_t>(c.width) * c.height * 4u);
-	}
-
-	const std::string resourceForkRoot = std::string("/tmp/stackimport-rsrc-root-") + std::to_string(std::rand());
-	const std::string resourceForkOutput = std::string("/tmp/stackimport-rsrc-output-") + std::to_string(std::rand());
-	assert(counting_make_directory(resourceForkOutput.c_str(), nullptr) == 0);
-	ResourceForkPlatformState resourceForkPlatformState;
-	resourceForkPlatformState.resource_fork_data = fork;
-	resourceForkPlatformState.resource_fork_size = sizeof(fork);
-	stackimport_platform resourceForkPlatform = {};
-	stackimport_platform_init(&resourceForkPlatform);
-	resourceForkPlatform.open_file = resource_fork_open_file;
-	resourceForkPlatform.read_file = resource_fork_read_file;
-	resourceForkPlatform.write_file = resource_fork_write_file;
-	resourceForkPlatform.close_file = resource_fork_close_file;
-	resourceForkPlatform.make_directory = counting_make_directory;
-	resourceForkPlatform.user_data = &resourceForkPlatformState;
-	const stackimport_internal_platform resourceForkInternalPlatform = stackimport_internal_platform_from_api(&resourceForkPlatform);
-	CountingResourceOutput packageResourceOutput;
-	std::vector<CResourceSummary> resourceSummaries;
-	std::string resourceForkStatus;
-	uint64_t resourceForkBytes = 0;
-	{
-		stackimport_platform_scope resourceForkScope(resourceForkInternalPlatform);
-		assert(stackimport_load_resource_fork(
-			resourceForkRoot,
-			resourceForkOutput,
-			"Stack",
-			&packageResourceOutput,
-			resourceSummaries,
-			resourceForkStatus,
-			resourceForkBytes));
-	}
-	assert(resourceForkStatus == "ok");
-	assert(resourceForkBytes == sizeof(fork));
-	assert(resourceSummaries.size() == 1);
-	assert(resourceSummaries[0].type == "ICON");
-	assert(resourceSummaries[0].status == "exported");
-	assert(packageResourceOutput.native_count == 1);
-	assert(packageResourceOutput.rgba_count == 1);
-	assert(resourceForkPlatformState.opens > 0);
-	assert(resourceForkPlatformState.reads > 0);
-	assert(resourceForkPlatformState.writes > 0);
-
-	std::vector<uint8_t> addColorData;
-	addColorData.push_back(0x03);
-	append_u16be(addColorData, 10);
-	append_u16be(addColorData, 20);
-	append_u16be(addColorData, 30);
-	append_u16be(addColorData, 40);
-	append_u16be(addColorData, 2);
-	append_u16be(addColorData, 0x1111);
-	append_u16be(addColorData, 0x2222);
-	append_u16be(addColorData, 0x3333);
-	const std::vector<uint8_t> addColorFork = make_single_resource_fork("HCbg", 77, addColorData);
-	CountingResourceOutput addColorOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{addColorFork.data(), addColorFork.size()}, addColorOutput));
-	assert(addColorOutput.native_count == 1);
-	assert(addColorOutput.json_count == 1);
-	assert(addColorOutput.last_json.find("\"targetKind\": \"background\"") != std::string::npos);
-	assert(addColorOutput.last_json.find("\"targetId\": 77") != std::string::npos);
-	assert(addColorOutput.last_json.find("\"type\": \"rect\"") != std::string::npos);
-	assert(addColorOutput.last_json.find("\"red\": 4369") != std::string::npos);
-
-	const std::string addColorOutputPath = std::string("/tmp/stackimport-addcolor-output-") + std::to_string(std::rand());
-	assert(counting_make_directory(addColorOutputPath.c_str(), nullptr) == 0);
-	ResourceForkPlatformState addColorPlatformState;
-	addColorPlatformState.resource_fork_data = addColorFork.data();
-	addColorPlatformState.resource_fork_size = addColorFork.size();
-	stackimport_platform addColorPlatform = resourceForkPlatform;
-	addColorPlatform.user_data = &addColorPlatformState;
-	const stackimport_internal_platform addColorInternalPlatform = stackimport_internal_platform_from_api(&addColorPlatform);
-	std::vector<CResourceSummary> addColorSummaries;
-	std::string addColorStatus;
-	uint64_t addColorBytes = 0;
-	{
-		stackimport_platform_scope addColorScope(addColorInternalPlatform);
-		assert(stackimport_load_resource_fork(
-			resourceForkRoot,
-			addColorOutputPath,
-			"Stack",
-			&addColorOutput,
-			addColorSummaries,
-			addColorStatus,
-			addColorBytes));
-	}
-	assert(addColorStatus == "ok");
-	assert(addColorSummaries.size() == 1);
-	assert(addColorSummaries[0].type == "HCbg");
-	assert(addColorSummaries[0].status == "exported");
-	assert(addColorSummaries[0].outputFile == "HCbg_77.json");
-	const std::string addColorJson = read_text_file(addColorOutputPath + "/HCbg_77.json");
-	assert(addColorJson.find("\"targetKind\": \"background\"") != std::string::npos);
-
-	const std::vector<uint8_t> strPayload = {5, 'H', 0x8E, 'l', 'l', 'o'};
-	const std::vector<uint8_t> strFork = make_single_resource_fork("STR ", 12, strPayload);
-	CountingResourceOutput textOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{strFork.data(), strFork.size()}, textOutput));
-	assert(textOutput.native_count == 1);
-	assert(textOutput.text_count == 1);
-	assert(textOutput.last_text == "H\xC3\xA9llo");
-
-	std::vector<uint8_t> stringListPayload;
-	append_u16be(stringListPayload, 2);
-	stringListPayload.insert(stringListPayload.end(), {3, 'O', 'n', 'e'});
-	stringListPayload.insert(stringListPayload.end(), {3, 'T', 'w', 'o'});
-	const std::vector<uint8_t> stringListFork = make_single_resource_fork("STR#", 44, stringListPayload);
-	CountingResourceOutput stringListOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{stringListFork.data(), stringListFork.size()}, stringListOutput));
-	assert(stringListOutput.native_count == 1);
-	assert(stringListOutput.json_count == 1);
-	assert(stringListOutput.last_json.find("\"One\"") != std::string::npos);
-	assert(stringListOutput.last_json.find("\"Two\"") != std::string::npos);
-
-	const std::vector<uint8_t> twcsPayload = {0, 1, 0, 5, 'T', 'w', 'C', 'S', '!'};
-	const std::vector<uint8_t> twcsFork = make_single_resource_fork("TwCS", 1, twcsPayload);
-	CountingResourceOutput twcsOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{twcsFork.data(), twcsFork.size()}, twcsOutput));
-	assert(twcsOutput.native_count == 1);
-	assert(twcsOutput.json_count == 1);
-	assert(twcsOutput.last_json.find("\"TwCS!\"") != std::string::npos);
-
-	std::vector<uint8_t> versionPayload = {0x01, 0x23, 0x80, 0x00, 0x00, 0x00};
-	versionPayload.insert(versionPayload.end(), {3, '1', '.', '2'});
-	versionPayload.insert(versionPayload.end(), {7, 'R', 'e', 'l', 'e', 'a', 's', 'e'});
-	const std::vector<uint8_t> versionFork = make_single_resource_fork("vers", 1, versionPayload);
-	CountingResourceOutput versionOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{versionFork.data(), versionFork.size()}, versionOutput));
-	assert(versionOutput.native_count == 1);
-	assert(versionOutput.json_count == 1);
-	assert(versionOutput.last_json.find("\"majorRevision\": 1") != std::string::npos);
-	assert(versionOutput.last_json.find("\"minorAndBugRevision\": 35") != std::string::npos);
-	assert(versionOutput.last_json.find("\"shortVersion\": \"1.2\"") != std::string::npos);
-
-	std::vector<uint8_t> cfrgPayload(79);
-	rsrcd::write_u16be(cfrgPayload.data() + 10, 1);
-	rsrcd::write_u16be(cfrgPayload.data() + 30, 1);
-	size_t cfrgOffset = 32;
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset, 0x70777063);
-	cfrgPayload[cfrgOffset + 7] = 2;
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 8, 0x01020304);
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 12, 0x00010000);
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 16, 0x00002000);
-	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 20, 7);
-	cfrgPayload[cfrgOffset + 22] = 1;
-	cfrgPayload[cfrgOffset + 23] = 2;
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 24, 0x434F4445);
-	rsrcd::write_u32be(cfrgPayload.data() + cfrgOffset + 28, 128);
-	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 36, 1);
-	rsrcd::write_u16be(cfrgPayload.data() + cfrgOffset + 40, 47);
-	cfrgPayload[cfrgOffset + 42] = 4;
-	cfrgPayload[cfrgOffset + 43] = 'M';
-	cfrgPayload[cfrgOffset + 44] = 'a';
-	cfrgPayload[cfrgOffset + 45] = 'i';
-	cfrgPayload[cfrgOffset + 46] = 'n';
-	const std::vector<uint8_t> cfrgFork = make_single_resource_fork("cfrg", 1, cfrgPayload);
-	CountingResourceOutput cfrgOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{cfrgFork.data(), cfrgFork.size()}, cfrgOutput));
-	assert(cfrgOutput.native_count == 1);
-	assert(cfrgOutput.json_count == 1);
-	assert(cfrgOutput.last_json.find("\"architectureType\": \"pwpc\"") != std::string::npos);
-	assert(cfrgOutput.last_json.find("\"usageName\": \"application\"") != std::string::npos);
-	assert(cfrgOutput.last_json.find("\"whereName\": \"resourceFork\"") != std::string::npos);
-	assert(cfrgOutput.last_json.find("\"name\": \"Main\"") != std::string::npos);
-
-	std::vector<uint8_t> mbarPayload;
-	append_u16be(mbarPayload, 2);
-	append_u16be(mbarPayload, 128);
-	append_u16be(mbarPayload, 129);
-	const std::vector<uint8_t> mbarFork = make_single_resource_fork("MBAR", 1, mbarPayload);
-	CountingResourceOutput mbarOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{mbarFork.data(), mbarFork.size()}, mbarOutput));
-	assert(mbarOutput.native_count == 1);
-	assert(mbarOutput.json_count == 1);
-	assert(mbarOutput.last_json.find("\"menuIds\"") != std::string::npos);
-	assert(mbarOutput.last_json.find("128") != std::string::npos);
-	assert(mbarOutput.last_json.find("129") != std::string::npos);
-
-	std::vector<uint8_t> alrtPayload;
-	append_u16be(alrtPayload, 1);
-	append_u16be(alrtPayload, 2);
-	append_u16be(alrtPayload, 101);
-	append_u16be(alrtPayload, 202);
-	append_u16be(alrtPayload, 300);
-	alrtPayload.push_back(0x12);
-	alrtPayload.push_back(0x34);
-	append_u16be(alrtPayload, 0x0A00);
-	const std::vector<uint8_t> alrtFork = make_single_resource_fork("ALRT", 1, alrtPayload);
-	CountingResourceOutput alrtOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{alrtFork.data(), alrtFork.size()}, alrtOutput));
-	assert(alrtOutput.native_count == 1);
-	assert(alrtOutput.json_count == 1);
-	assert(alrtOutput.last_json.find("\"itemListId\": 300") != std::string::npos);
-	assert(alrtOutput.last_json.find("\"autoPosition\": 2560") != std::string::npos);
-
-	std::vector<uint8_t> frefPayload;
-	append_u32be(frefPayload, 0x4150504C);
-	append_u16be(frefPayload, 42);
-	frefPayload.insert(frefPayload.end(), {4, 'A', 'p', 'p', 's'});
-	const std::vector<uint8_t> frefFork = make_single_resource_fork("FREF", 1, frefPayload);
-	CountingResourceOutput frefOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{frefFork.data(), frefFork.size()}, frefOutput));
-	assert(frefOutput.native_count == 1);
-	assert(frefOutput.json_count == 1);
-	assert(frefOutput.last_json.find("\"fileTypeString\": \"APPL\"") != std::string::npos);
-	assert(frefOutput.last_json.find("\"fileName\": \"Apps\"") != std::string::npos);
-
-	std::vector<uint8_t> bndlPayload;
-	append_u32be(bndlPayload, 0x4F574E52);
-	append_u16be(bndlPayload, 128);
-	append_u16be(bndlPayload, 0);
-	append_u32be(bndlPayload, 0x49434F4E);
-	append_u16be(bndlPayload, 1);
-	append_u16be(bndlPayload, 0);
-	append_u16be(bndlPayload, 1000);
-	append_u16be(bndlPayload, 1);
-	append_u16be(bndlPayload, 1001);
-	const std::vector<uint8_t> bndlFork = make_single_resource_fork("BNDL", 1, bndlPayload);
-	CountingResourceOutput bndlOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{bndlFork.data(), bndlFork.size()}, bndlOutput));
-	assert(bndlOutput.native_count == 1);
-	assert(bndlOutput.json_count == 1);
-	assert(bndlOutput.last_json.find("\"ownerNameString\": \"OWNR\"") != std::string::npos);
-	assert(bndlOutput.last_json.find("\"typeString\": \"ICON\"") != std::string::npos);
-	assert(bndlOutput.last_json.find("\"resourceId\": 1001") != std::string::npos);
-
-	std::vector<uint8_t> rovPayload;
-	append_u16be(rovPayload, 0x0750);
-	append_u16be(rovPayload, 1);
-	append_u32be(rovPayload, 0x4D454E55);
-	append_u16be(rovPayload, 128);
-	const std::vector<uint8_t> rovFork = make_single_resource_fork("ROv#", 1, rovPayload);
-	CountingResourceOutput rovOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rovFork.data(), rovFork.size()}, rovOutput));
-	assert(rovOutput.native_count == 1);
-	assert(rovOutput.json_count == 1);
-	assert(rovOutput.last_json.find("\"romVersion\": 1872") != std::string::npos);
-	assert(rovOutput.last_json.find("\"typeString\": \"MENU\"") != std::string::npos);
-	assert(rovOutput.last_json.find("\"id\": 128") != std::string::npos);
-
-	std::vector<uint8_t> rsscPayload(24);
-	rsrcd::write_u32be(rsscPayload.data(), 0x52535343);
-	rsrcd::write_u16be(rsscPayload.data() + 4, 22);
-	rsscPayload[22] = 0x4E;
-	rsscPayload[23] = 0x75;
-	const std::vector<uint8_t> rsscFork = make_single_resource_fork("RSSC", 1, rsscPayload);
-	CountingResourceOutput rsscOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rsscFork.data(), rsscFork.size()}, rsscOutput));
-	assert(rsscOutput.native_count == 1);
-	assert(rsscOutput.json_count == 1);
-	assert(rsscOutput.last_json.find("\"typeSignatureString\": \"RSSC\"") != std::string::npos);
-	assert(rsscOutput.last_json.find("\"codeStartOffset\": 22") != std::string::npos);
-	assert(rsscOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
-
-	std::vector<uint8_t> txstPayload;
-	txstPayload.push_back(0x03);
-	txstPayload.push_back(0x00);
-	append_u16be(txstPayload, 12);
-	append_u16be(txstPayload, 0x1111);
-	append_u16be(txstPayload, 0x2222);
-	append_u16be(txstPayload, 0x3333);
-	txstPayload.insert(txstPayload.end(), {9, 'H', 'e', 'l', 'v', 'e', 't', 'i', 'c', 'a'});
-	const std::vector<uint8_t> txstFork = make_single_resource_fork("TxSt", 1, txstPayload);
-	CountingResourceOutput txstOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{txstFork.data(), txstFork.size()}, txstOutput));
-	assert(txstOutput.native_count == 1);
-	assert(txstOutput.json_count == 1);
-	assert(txstOutput.last_json.find("\"fontStyle\": 3") != std::string::npos);
-	assert(txstOutput.last_json.find("\"fontSize\": 12") != std::string::npos);
-	assert(txstOutput.last_json.find("\"fontName\": \"Helvetica\"") != std::string::npos);
-
-	std::vector<uint8_t> rectPayload;
-	append_u16be(rectPayload, 1);
-	append_u16be(rectPayload, 2);
-	append_u16be(rectPayload, 101);
-	append_u16be(rectPayload, 202);
-	const std::vector<uint8_t> rectFork = make_single_resource_fork("RECT", 1, rectPayload);
-	CountingResourceOutput rectOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{rectFork.data(), rectFork.size()}, rectOutput));
-	assert(rectOutput.native_count == 1);
-	assert(rectOutput.json_count == 1);
-	assert(rectOutput.last_json.find("\"top\": 1") != std::string::npos);
-	assert(rectOutput.last_json.find("\"right\": 202") != std::string::npos);
-
-	std::vector<uint8_t> toolPayload;
-	append_u16be(toolPayload, 2);
-	append_u16be(toolPayload, 1);
-	append_u16be(toolPayload, 128);
-	append_u16be(toolPayload, 129);
-	append_u16be(toolPayload, 130);
-	const std::vector<uint8_t> toolFork = make_single_resource_fork("TOOL", 1, toolPayload);
-	CountingResourceOutput toolOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{toolFork.data(), toolFork.size()}, toolOutput));
-	assert(toolOutput.native_count == 1);
-	assert(toolOutput.json_count == 1);
-	assert(toolOutput.last_json.find("\"toolsPerRow\": 2") != std::string::npos);
-	assert(toolOutput.last_json.find("\"cursorIds\"") != std::string::npos);
-	assert(toolOutput.last_json.find("130") != std::string::npos);
-
-	std::vector<uint8_t> pickPayload;
-	append_u32be(pickPayload, 0x50494354);
-	pickPayload.insert(pickPayload.end(), {1, 2, 3, 0});
-	append_u16be(pickPayload, 16);
-	append_u16be(pickPayload, 1);
-	append_u32be(pickPayload, 0x49434F4E);
-	append_u16be(pickPayload, 128);
-	append_u32be(pickPayload, 0x50494354);
-	append_u16be(pickPayload, 129);
-	const std::vector<uint8_t> pickFork = make_single_resource_fork("PICK", 1, pickPayload);
-	CountingResourceOutput pickOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{pickFork.data(), pickFork.size()}, pickOutput));
-	assert(pickOutput.native_count == 1);
-	assert(pickOutput.json_count == 1);
-	assert(pickOutput.last_json.find("\"typeString\": \"PICT\"") != std::string::npos);
-	assert(pickOutput.last_json.find("\"verticalCellSize\": 16") != std::string::npos);
-	assert(pickOutput.last_json.find("\"id\": 129") != std::string::npos);
-
-	const std::vector<uint8_t> kbdnPayload = {3, 'U', 'S', 'A'};
-	const std::vector<uint8_t> kbdnFork = make_single_resource_fork("KBDN", 1, kbdnPayload);
-	CountingResourceOutput kbdnOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{kbdnFork.data(), kbdnFork.size()}, kbdnOutput));
-	assert(kbdnOutput.native_count == 1);
-	assert(kbdnOutput.json_count == 1);
-	assert(kbdnOutput.last_json.find("\"name\": \"USA\"") != std::string::npos);
-
-	std::vector<uint8_t> papaPayload = {
-		7, 'P', 'r', 'i', 'n', 't', 'e', 'r',
-		3, 'L', 'W', 'R',
-		4, 'Z', 'o', 'n', 'e',
-	};
-	append_u32be(papaPayload, 0x12345678);
-	papaPayload.push_back(0xAA);
-	const std::vector<uint8_t> papaFork = make_single_resource_fork("PAPA", 1, papaPayload);
-	CountingResourceOutput papaOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{papaFork.data(), papaFork.size()}, papaOutput));
-	assert(papaOutput.native_count == 1);
-	assert(papaOutput.json_count == 1);
-	assert(papaOutput.last_json.find("\"name\": \"Printer\"") != std::string::npos);
-	assert(papaOutput.last_json.find("\"addressBlock\": 305419896") != std::string::npos);
-	assert(papaOutput.last_json.find("\"dataHex\": \"AA\"") != std::string::npos);
-
-	std::vector<uint8_t> layoPayload;
-	append_u16be(layoPayload, 128);
-	append_u16be(layoPayload, 12);
-	append_u16be(layoPayload, 20);
-	append_u16be(layoPayload, 1);
-	append_u16be(layoPayload, 2);
-	append_u16be(layoPayload, 30);
-	append_u16be(layoPayload, 40);
-	append_u16be(layoPayload, 10);
-	append_u16be(layoPayload, 20);
-	append_u16be(layoPayload, 110);
-	append_u16be(layoPayload, 220);
-	append_u16be(layoPayload, 0);
-	append_u16be(layoPayload, 1);
-	append_u16be(layoPayload, 2);
-	append_u16be(layoPayload, 3);
-	append_u16be(layoPayload, 4);
-	const std::vector<uint8_t> layoFork = make_single_resource_fork("LAYO", 1, layoPayload);
-	CountingResourceOutput layoOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{layoFork.data(), layoFork.size()}, layoOutput));
-	assert(layoOutput.native_count == 1);
-	assert(layoOutput.json_count == 1);
-	assert(layoOutput.last_json.find("\"fontId\": 128") != std::string::npos);
-	assert(layoOutput.last_json.find("\"right\": 220") != std::string::npos);
-	assert(layoOutput.last_json.find("\"rectangles\"") != std::string::npos);
-
-	std::vector<uint8_t> code0Payload;
-	append_u32be(code0Payload, 0x1000);
-	append_u32be(code0Payload, 0x2000);
-	append_u32be(code0Payload, 8);
-	append_u32be(code0Payload, 16);
-	append_u16be(code0Payload, 0x0010);
-	append_u16be(code0Payload, 0x3F3C);
-	append_u16be(code0Payload, 1);
-	append_u16be(code0Payload, 0xA9F0);
-	const std::vector<uint8_t> code0Fork = make_single_resource_fork("CODE", 0, code0Payload);
-	CountingResourceOutput code0Output;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{code0Fork.data(), code0Fork.size()}, code0Output));
-	assert(code0Output.native_count == 1);
-	assert(code0Output.json_count == 1);
-	assert(code0Output.last_json.find("\"kind\": \"jumpTable\"") != std::string::npos);
-	assert(code0Output.last_json.find("\"loadSegmentTrap\": true") != std::string::npos);
-
-	std::vector<uint8_t> codePayload;
-	append_u16be(codePayload, 2);
-	append_u16be(codePayload, 3);
-	codePayload.insert(codePayload.end(), {0x4E, 0x75});
-	const std::vector<uint8_t> codeFork = make_single_resource_fork("CODE", 1, codePayload);
-	CountingResourceOutput codeOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{codeFork.data(), codeFork.size()}, codeOutput));
-	assert(codeOutput.native_count == 1);
-	assert(codeOutput.json_count == 1);
-	assert(codeOutput.last_json.find("\"kind\": \"nearSegment\"") != std::string::npos);
-	assert(codeOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
-
-	std::vector<uint8_t> drvrPayload(26);
-	rsrcd::write_u16be(drvrPayload.data(), 0x0100);
-	rsrcd::write_u16be(drvrPayload.data() + 2, 60);
-	rsrcd::write_u16be(drvrPayload.data() + 4, 0xFFFF);
-	rsrcd::write_u16be(drvrPayload.data() + 6, 128);
-	rsrcd::write_u16be(drvrPayload.data() + 8, 24);
-	drvrPayload[18] = 4;
-	drvrPayload[19] = 'D';
-	drvrPayload[20] = 'r';
-	drvrPayload[21] = 'v';
-	drvrPayload[22] = 'r';
-	drvrPayload[24] = 0x4E;
-	drvrPayload[25] = 0x75;
-	const std::vector<uint8_t> drvrFork = make_single_resource_fork("DRVR", 1, drvrPayload);
-	CountingResourceOutput drvrOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{drvrFork.data(), drvrFork.size()}, drvrOutput));
-	assert(drvrOutput.native_count == 1);
-	assert(drvrOutput.json_count == 1);
-	assert(drvrOutput.last_json.find("\"name\": \"Drvr\"") != std::string::npos);
-	assert(drvrOutput.last_json.find("\"codeStartOffset\": 24") != std::string::npos);
-	assert(drvrOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
-
-	std::vector<uint8_t> dcmpPayload;
-	append_u16be(dcmpPayload, 10);
-	append_u16be(dcmpPayload, 12);
-	append_u16be(dcmpPayload, 14);
-	dcmpPayload.insert(dcmpPayload.end(), {0x4E, 0x75});
-	const std::vector<uint8_t> dcmpFork = make_single_resource_fork("dcmp", 1, dcmpPayload);
-	CountingResourceOutput dcmpOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{dcmpFork.data(), dcmpFork.size()}, dcmpOutput));
-	assert(dcmpOutput.native_count == 1);
-	assert(dcmpOutput.json_count == 1);
-	assert(dcmpOutput.last_json.find("\"initLabel\": 10") != std::string::npos);
-	assert(dcmpOutput.last_json.find("\"pcOffset\": 6") != std::string::npos);
-	assert(dcmpOutput.last_json.find("\"codeSize\": 2") != std::string::npos);
-
-	std::vector<uint8_t> colorTablePayload;
-	append_u32be(colorTablePayload, 0x12345678);
-	append_u16be(colorTablePayload, 0x8000);
-	append_u16be(colorTablePayload, 0);
-	append_u16be(colorTablePayload, 7);
-	append_u16be(colorTablePayload, 0x1111);
-	append_u16be(colorTablePayload, 0x2222);
-	append_u16be(colorTablePayload, 0x3333);
-	const std::vector<uint8_t> colorTableFork = make_single_resource_fork("clut", 8, colorTablePayload);
-	CountingResourceOutput colorTableOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{colorTableFork.data(), colorTableFork.size()}, colorTableOutput));
-	assert(colorTableOutput.native_count == 1);
-	assert(colorTableOutput.json_count == 1);
-	assert(colorTableOutput.last_json.find("\"seed\": 305419896") != std::string::npos);
-	assert(colorTableOutput.last_json.find("\"flags\": 32768") != std::string::npos);
-	assert(colorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
-
-	const std::vector<uint8_t> windowColorTableFork = make_single_resource_fork("wctb", 0, colorTablePayload);
-	CountingResourceOutput windowColorTableOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{windowColorTableFork.data(), windowColorTableFork.size()}, windowColorTableOutput));
-	assert(windowColorTableOutput.native_count == 1);
-	assert(windowColorTableOutput.json_count == 1);
-	assert(windowColorTableOutput.last_json.find("\"green\": 8738") != std::string::npos);
-
-	std::vector<uint8_t> plttPayload(32);
-	rsrcd::write_u16be(plttPayload.data(), 1);
-	rsrcd::write_u16be(plttPayload.data() + 18, 0x1111);
-	rsrcd::write_u16be(plttPayload.data() + 20, 0x2222);
-	rsrcd::write_u16be(plttPayload.data() + 22, 0x3333);
-	const std::vector<uint8_t> plttFork = make_single_resource_fork("pltt", 3, plttPayload);
-	CountingResourceOutput plttOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{plttFork.data(), plttFork.size()}, plttOutput));
-	assert(plttOutput.native_count == 1);
-	assert(plttOutput.json_count == 1);
-	assert(plttOutput.last_json.find("\"green\": 8738") != std::string::npos);
-
-	std::vector<uint8_t> sizePayload;
-	append_u16be(sizePayload, 0xD048);
-	append_u32be(sizePayload, 0x00100000);
-	append_u32be(sizePayload, 0x00080000);
-	const std::vector<uint8_t> sizeFork = make_single_resource_fork("SIZE", -1, sizePayload);
-	CountingResourceOutput sizeOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{sizeFork.data(), sizeFork.size()}, sizeOutput));
-	assert(sizeOutput.native_count == 1);
-	assert(sizeOutput.json_count == 1);
-	assert(sizeOutput.last_json.find("\"preferredSize\": 1048576") != std::string::npos);
-	assert(sizeOutput.last_json.find("\"minimumSize\": 524288") != std::string::npos);
-	assert(sizeOutput.last_json.find("\"saveScreen\": true") != std::string::npos);
-
-	std::vector<uint8_t> finfPayload;
-	append_u16be(finfPayload, 1);
-	append_u16be(finfPayload, 128);
-	append_u16be(finfPayload, 1);
-	append_u16be(finfPayload, 12);
-	const std::vector<uint8_t> finfFork = make_single_resource_fork("finf", 1, finfPayload);
-	CountingResourceOutput finfOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{finfFork.data(), finfFork.size()}, finfOutput));
-	assert(finfOutput.native_count == 1);
-	assert(finfOutput.json_count == 1);
-	assert(finfOutput.last_json.find("\"fontId\": 128") != std::string::npos);
-	assert(finfOutput.last_json.find("\"size\": 12") != std::string::npos);
-
-	std::vector<uint8_t> dlogPayload;
-	append_u16be(dlogPayload, 1);
-	append_u16be(dlogPayload, 2);
-	append_u16be(dlogPayload, 30);
-	append_u16be(dlogPayload, 40);
-	append_u16be(dlogPayload, 4);
-	append_u16be(dlogPayload, 1);
-	append_u16be(dlogPayload, 1);
-	append_u32be(dlogPayload, 0x12345678);
-	append_u16be(dlogPayload, 128);
-	dlogPayload.insert(dlogPayload.end(), {5, 'H', 'e', 'l', 'l', 'o'});
-	append_u16be(dlogPayload, 0xABCD);
-	const std::vector<uint8_t> dlogFork = make_single_resource_fork("DLOG", 128, dlogPayload);
-	CountingResourceOutput dlogOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{dlogFork.data(), dlogFork.size()}, dlogOutput));
-	assert(dlogOutput.native_count == 1);
-	assert(dlogOutput.json_count == 1);
-	assert(dlogOutput.last_json.find("\"itemsId\": 128") != std::string::npos);
-	assert(dlogOutput.last_json.find("\"title\": \"Hello\"") != std::string::npos);
-	assert(dlogOutput.last_json.find("\"autoPosition\": 43981") != std::string::npos);
-
-	std::vector<uint8_t> menuPayload;
-	append_u16be(menuPayload, 128);
-	append_u16be(menuPayload, 0);
-	append_u16be(menuPayload, 0);
-	append_u16be(menuPayload, 0);
-	append_u16be(menuPayload, 0);
-	append_u32be(menuPayload, 0x00000003);
-	menuPayload.insert(menuPayload.end(), {4, 'F', 'i', 'l', 'e'});
-	menuPayload.insert(menuPayload.end(), {4, 'O', 'p', 'e', 'n', 0, 'O', 0, 0});
-	menuPayload.push_back(0);
-	const std::vector<uint8_t> menuFork = make_single_resource_fork("MENU", 128, menuPayload);
-	CountingResourceOutput menuOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{menuFork.data(), menuFork.size()}, menuOutput));
-	assert(menuOutput.native_count == 1);
-	assert(menuOutput.json_count == 1);
-	assert(menuOutput.last_json.find("\"title\": \"File\"") != std::string::npos);
-	assert(menuOutput.last_json.find("\"name\": \"Open\"") != std::string::npos);
-	assert(menuOutput.last_json.find("\"keyEquivalent\": 79") != std::string::npos);
-
-	std::vector<uint8_t> ditlPayload;
-	append_u16be(ditlPayload, 1);
-	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
-	append_u16be(ditlPayload, 1);
-	append_u16be(ditlPayload, 2);
-	append_u16be(ditlPayload, 30);
-	append_u16be(ditlPayload, 40);
-	ditlPayload.insert(ditlPayload.end(), {0x04, 2, 'O', 'K'});
-	ditlPayload.insert(ditlPayload.end(), {0, 0, 0, 0});
-	append_u16be(ditlPayload, 1);
-	append_u16be(ditlPayload, 2);
-	append_u16be(ditlPayload, 30);
-	append_u16be(ditlPayload, 40);
-	ditlPayload.insert(ditlPayload.end(), {0x20, 2});
-	append_u16be(ditlPayload, 128);
-	if((ditlPayload.size() & 1u) != 0)
-		ditlPayload.push_back(0);
-	const std::vector<uint8_t> ditlFork = make_single_resource_fork("DITL", 128, ditlPayload);
-	CountingResourceOutput ditlOutput;
-	assert(stackimport::ResourceForkParser{}.parse_fork(rsrcd::Bytes{ditlFork.data(), ditlFork.size()}, ditlOutput));
-	assert(ditlOutput.native_count == 1);
-	assert(ditlOutput.json_count == 1);
-	assert(ditlOutput.last_json.find("\"kind\": \"button\"") != std::string::npos);
-	assert(ditlOutput.last_json.find("\"info\": \"OK\"") != std::string::npos);
-	assert(ditlOutput.last_json.find("\"resourceId\": 128") != std::string::npos);
-
-	const std::string textOutputPath = std::string("/tmp/stackimport-text-output-") + std::to_string(std::rand());
-	assert(counting_make_directory(textOutputPath.c_str(), nullptr) == 0);
-	ResourceForkPlatformState textPlatformState;
-	textPlatformState.resource_fork_data = strFork.data();
-	textPlatformState.resource_fork_size = strFork.size();
-	stackimport_platform textPlatform = resourceForkPlatform;
-	textPlatform.user_data = &textPlatformState;
-	const stackimport_internal_platform textInternalPlatform = stackimport_internal_platform_from_api(&textPlatform);
-	std::vector<CResourceSummary> textSummaries;
-	std::string textStatus;
-	uint64_t textBytes = 0;
-	{
-		stackimport_platform_scope textScope(textInternalPlatform);
-		assert(stackimport_load_resource_fork(
-			resourceForkRoot,
-			textOutputPath,
-			"Stack",
-			&textOutput,
-			textSummaries,
-			textStatus,
-			textBytes));
-	}
-	assert(textStatus == "ok");
-	assert(textSummaries.size() == 1);
-	assert(textSummaries[0].type == "STR ");
-	assert(textSummaries[0].status == "exported");
-	assert(textSummaries[0].outputFile == "resource-text/Stack_STR%20_12.txt");
-	const std::string convertedText = read_text_file(textOutputPath + "/resource-text/Stack_STR%20_12.txt");
-	assert(convertedText == "H\xC3\xA9llo");
+	test_resource_image_transforms();
+	test_resource_package_writes();
+	test_resource_metadata_transforms();
+	test_resource_text_transforms();
+	test_resource_code_transforms();
+	test_resource_color_and_ui_transforms();
 
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;
