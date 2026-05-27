@@ -1,0 +1,96 @@
+---
+title: CLI Import Acceptance
+description: Workflow for stackimport import mode acceptance checks.
+---
+
+Use this workflow when changing default stack import behavior, import mode
+dispatch, output package handling, or import-related CLI options.
+
+## Fixture Sources
+
+Stack import fixtures come from the public test-base checkout:
+
+```text
+~/d/hype-import-tests
+```
+
+Use `~/d/hype-import-tests/manifest.tsv` as the source of expected stack
+coverage and `~/d/hype-import-tests/canaries/` as the archive source.
+
+## Prerequisites
+
+Build the CLI from the repository root:
+
+```sh
+cmake -S . -B build
+cmake --build build --target stackimport
+```
+
+Refresh extracted canary stacks when the local `uncompressed/` tree is missing
+or stale:
+
+```sh
+cd ~/d/hype-import-tests
+scripts/extract-canaries.sh --clean
+```
+
+## Commands
+
+Run the preferred subcommand spelling:
+
+```sh
+build/stackimport import \
+  --nodumprawblocks \
+  --output /tmp/stackimport-acceptance-autoPainter.xstk \
+  ~/d/hype-import-tests/uncompressed/graphics/autoPainter/autoPainter/auto•painter\ ƒ/auto•painter.hc
+```
+
+Run the legacy implicit import spelling:
+
+```sh
+build/stackimport \
+  --nodumprawblocks \
+  --output /tmp/stackimport-acceptance-legacy-import.xstk \
+  ~/d/hype-import-tests/uncompressed/graphics/autoPainter/autoPainter/auto•painter\ ƒ/auto•painter.hc
+```
+
+## Acceptance Criteria
+
+- Both commands exit with status 0.
+- Both output packages are created.
+- Status output includes resource conversion attempts when resources are present.
+- Status output reaches final import progress instead of stopping at argument
+  parsing or mode selection.
+- The preferred subcommand and legacy spelling produce equivalent user-visible
+  import behavior for the canary stack.
+
+## Follow-Up Validation
+
+Run the CTest suite after import behavior changes:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Run the strict warning pass before handing off C++ changes:
+
+```sh
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+## Last Local Run
+
+On 2026-05-27, `build/stackimport import --nodumprawblocks` succeeded on the
+auto-painter canary stack.
+
+## Handoff
+
+Report the stack path, output package paths, exit statuses, and whether the
+legacy spelling was still accepted.

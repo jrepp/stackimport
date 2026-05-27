@@ -7,8 +7,10 @@ ROM mode is separate from HyperCard stack importing. It analyzes a ROM image and
 writes `disassembly.s` plus `analysis.json`.
 
 ```sh
-build/stackimport --rom --rom-base 0x40800000 --output /tmp/rom-analysis /path/to/ROM
+build/stackimport rom --rom-base 0x40800000 --output /tmp/rom-analysis /path/to/ROM
 ```
+
+The legacy `--rom` flag is still accepted.
 
 If `--output` is omitted, StackImport writes to `<input>.rom`. `--rom-base`
 accepts C-style integer syntax such as `0x40800000`.
@@ -17,7 +19,7 @@ Atlas interchange files can be emitted alongside the disassembly output:
 
 ```sh
 build/stackimport \
-  --rom /path/to/ROM \
+  rom /path/to/ROM \
   --rom-base 0x40800000 \
   --output data/disassembly/example-rom \
   --atlas-output atlas/maps/example \

@@ -6,8 +6,11 @@ description: Convert a stack to a .xstk package.
 Import mode is the default mode:
 
 ```sh
-stackimport [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
+stackimport import [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
 ```
+
+For compatibility, the input path can still be supplied without the `import`
+subcommand.
 
 If `--output` is omitted, StackImport writes a sibling `.xstk` directory next to
 the input stack.

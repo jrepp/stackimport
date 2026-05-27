@@ -25,6 +25,7 @@ struct Options {
 	bool emit_atlas = false;
 	bool emit_json = false;
 	bool emit_assets = false;
+	bool exit_after_parse = false;
 	uint32_t rom_base_address = 0;
 };
 

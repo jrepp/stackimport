@@ -1,0 +1,119 @@
+---
+title: CLI ROM Acceptance
+description: Workflow for stackimport ROM mode acceptance checks.
+---
+
+Use this workflow when changing ROM mode dispatch, ROM metadata extraction,
+atlas output, or ROM-related CLI options.
+
+## Fixture Sources
+
+ROM fixture metadata lives in the public test-base checkout:
+
+```text
+~/d/hype-import-tests/roms/manifest.tsv
+```
+
+Validated atlas metadata lives in the local mac-rom-atlas checkout:
+
+```text
+~/d/mac-rom-atlas/atlas/maps/supermario-rom-analysis/roms.tsv
+```
+
+The upstream ROM reference archive is:
+
+```text
+https://www.macintoshrepository.org/7038-all-macintosh-roms-68k-ppc-
+```
+
+Do not commit ROM bytes. The `~/d/hype-import-tests/roms/` tree is ignored by
+Git for `.ROM` and `.rom` payloads, and its manifest should only include Old
+World ROMs already validated by mac-rom-atlas.
+
+## Prerequisites
+
+Build the CLI from the repository root:
+
+```sh
+cmake -S . -B build
+cmake --build build --target stackimport
+```
+
+Verify local ROM bytes against the manifest before running ROM mode:
+
+```sh
+cd ~/d/hype-import-tests
+while IFS=$'\t' read -r name local_path size crc32 sha256 atlas_path source dataset notes; do
+  [ "$name" = "name" ] && continue
+  if [ -f "$local_path" ]; then
+    actual_size="$(wc -c < "$local_path" | tr -d ' ')"
+    actual_sha="$(shasum -a 256 "$local_path" | awk '{print toupper($1)}')"
+    printf '%s\t%s\t%s\n' "$name" "$actual_size" "$actual_sha"
+  else
+    printf 'missing\t%s\t%s\n' "$name" "$local_path"
+  fi
+done < roms/manifest.tsv
+```
+
+Do not substitute unvalidated bytes for missing ROM files. Record the scenario
+as blocked until the expected local path matches the manifest.
+
+## Commands
+
+For each present manifest entry, run ROM mode from the stackimport repository
+root:
+
+```sh
+build/stackimport rom \
+  --rom-base 0x40800000 \
+  --output /tmp/stackimport-rom-acceptance/<rom-slug> \
+  --atlas-output /tmp/stackimport-rom-acceptance/atlas/<rom-slug> \
+  --emit-atlas \
+  <local-rom-path>
+```
+
+Use a deterministic `<rom-slug>` derived from the manifest name so repeated runs
+are easy to compare.
+
+## Acceptance Criteria
+
+- Each command exits with status 0.
+- `analysis.json` is written for each ROM output directory.
+- `analysis.json` includes uppercase `crc32` and `sha256` values matching
+  `roms/manifest.tsv`.
+- `analysis.json` records identity, tool metadata, input path, base address, and
+  disassembly mode.
+- Atlas TSV outputs are written when `--emit-atlas` is present.
+- Atlas TSV outputs include headers.
+- Generated `roms.tsv` hash values match the test-base manifest.
+
+## Follow-Up Validation
+
+Run the CTest suite after ROM behavior changes:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Run the strict warning pass before handing off C++ changes:
+
+```sh
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+## Last Local Run
+
+On 2026-05-27, validated ROM bytes from `roms/manifest.tsv` were copied into
+`~/d/hype-import-tests/roms/` and ignored by Git.
+
+## Handoff
+
+Report the manifest entries tested, output directories, atlas directories, hash
+comparisons, exit statuses, and any missing ROM files that blocked a scenario.

@@ -1,0 +1,98 @@
+---
+title: CLI Test Acceptance Scenarios
+description: Acceptance workflow for stackimport import, scan, and ROM CLI modes.
+---
+
+Use these workflows when changing CLI argument parsing, mode dispatch, generated
+outputs, or test fixtures. Each acceptance workflow is split into its own page so
+it can be run, reported, and debugged independently.
+
+## Fixture Sources
+
+Stack import fixtures come from the public test-base checkout:
+
+```text
+~/d/hype-import-tests
+```
+
+Use `~/d/hype-import-tests/manifest.tsv` as the source of expected stack
+coverage and `~/d/hype-import-tests/canaries/` as the archive source.
+
+ROM fixture metadata comes from:
+
+```text
+~/d/hype-import-tests/roms/manifest.tsv
+~/d/mac-rom-atlas/atlas/maps/supermario-rom-analysis/roms.tsv
+```
+
+The upstream ROM reference archive is:
+
+```text
+https://www.macintoshrepository.org/7038-all-macintosh-roms-68k-ppc-
+```
+
+Do not commit ROM bytes. The ROM manifest should only include Old World ROMs
+already validated by mac-rom-atlas, with size, CRC32, SHA-256, and atlas path.
+
+## Shared Setup
+
+Build the CLI first:
+
+```sh
+cmake -S . -B build
+cmake --build build --target stackimport
+```
+
+Refresh extracted canary stacks when the local `uncompressed/` tree is missing
+or stale:
+
+```sh
+cd ~/d/hype-import-tests
+scripts/extract-canaries.sh --clean
+```
+
+## Scenario Workflows
+
+- [CLI Help Acceptance](./cli-help-acceptance/) validates generated help and
+  version output.
+- [CLI Import Acceptance](./cli-import-acceptance/) validates preferred and
+  legacy stack import spellings against public stack canaries.
+- [CLI Scan Acceptance](./cli-scan-acceptance/) validates preferred and legacy
+  scan spellings against public stack canaries.
+- [CLI ROM Acceptance](./cli-rom-acceptance/) validates ROM mode against
+  manifest-verified Old World ROMs.
+
+## Required Follow-Up Validation
+
+After CLI behavior changes, run the repository checks:
+
+```sh
+ctest --test-dir build --output-on-failure
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+When docs changed:
+
+```sh
+cd website
+pnpm lint
+pnpm build
+```
+
+## Last Local Run
+
+On 2026-05-27:
+
+- `scripts/extract-canaries.sh --clean` extracted all 8 canary archives.
+- `build/stackimport scan` succeeded on auto-painter and reported 44 blocks.
+- `build/stackimport import --nodumprawblocks` succeeded on auto-painter.
+- `build/stackimport --scan` succeeded on Squirt and reported 1664 blocks.
+- Validated ROM bytes from `roms/manifest.tsv` were later copied into
+  `~/d/hype-import-tests/roms/` and ignored by Git.

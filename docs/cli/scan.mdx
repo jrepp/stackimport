@@ -7,8 +7,10 @@ Scan mode reads the block stream and prints offsets, sizes, types, IDs, and
 payload sizes. It does not create an output package.
 
 ```sh
-build/stackimport --scan /path/to/Stack
+build/stackimport scan /path/to/Stack
 ```
+
+The legacy `--scan` flag is still accepted.
 
 Use scan mode before deeper reverse-engineering work. It gives a quick inventory
 of stack structure and helps choose representative stacks for `--dumprawblocks`

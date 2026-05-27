@@ -1,0 +1,92 @@
+---
+title: CLI Scan Acceptance
+description: Workflow for stackimport scan mode acceptance checks.
+---
+
+Use this workflow when changing block scanning, scan mode dispatch, or legacy
+`--scan` compatibility.
+
+## Fixture Sources
+
+Scan fixtures come from the public test-base checkout:
+
+```text
+~/d/hype-import-tests
+```
+
+Use `~/d/hype-import-tests/manifest.tsv` as the source of expected stack
+coverage and `~/d/hype-import-tests/canaries/` as the archive source.
+
+## Prerequisites
+
+Build the CLI from the repository root:
+
+```sh
+cmake -S . -B build
+cmake --build build --target stackimport
+```
+
+Refresh extracted canary stacks when the local `uncompressed/` tree is missing
+or stale:
+
+```sh
+cd ~/d/hype-import-tests
+scripts/extract-canaries.sh --clean
+```
+
+## Commands
+
+Run the preferred subcommand spelling against auto-painter:
+
+```sh
+build/stackimport scan \
+  ~/d/hype-import-tests/uncompressed/graphics/autoPainter/autoPainter/auto•painter\ ƒ/auto•painter.hc
+```
+
+Run the legacy `--scan` spelling against Squirt:
+
+```sh
+build/stackimport --scan \
+  ~/d/hype-import-tests/uncompressed/games/squirt/squirt/Squirt\ 3.1
+```
+
+## Acceptance Criteria
+
+- Both commands exit with status 0.
+- Scan output includes the block table header.
+- The auto-painter canary reports a nonzero block count.
+- The Squirt canary reports the expected high block count range and does not fail
+  during argument parsing.
+- The preferred subcommand and legacy spelling both route through scan behavior.
+
+## Follow-Up Validation
+
+Run the CTest suite after scan behavior changes:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Run the strict warning pass before handing off C++ changes:
+
+```sh
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+## Last Local Run
+
+On 2026-05-27, `build/stackimport scan` succeeded on auto-painter and reported
+44 blocks. `build/stackimport --scan` succeeded on Squirt and reported 1664
+blocks.
+
+## Handoff
+
+Report the stack paths, exit statuses, observed block counts, and whether legacy
+`--scan` compatibility still works.

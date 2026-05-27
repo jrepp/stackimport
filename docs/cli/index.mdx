@@ -4,13 +4,14 @@ description: Major stackimport command line modes.
 ---
 
 The `stackimport` executable has three direct modes and one repository-level
-batch workflow:
+batch workflow. The preferred spelling uses subcommands; legacy `--scan` and
+`--rom` flags remain supported.
 
 | Mode   | Command shape                                                      | Purpose                                                    |
 | ------ | ------------------------------------------------------------------ | ---------------------------------------------------------- |
-| Import | `stackimport [options] <stack>`                                    | Convert a HyperCard stack to a `.xstk` package.            |
-| Scan   | `stackimport --scan <stack>`                                       | Inspect the block stream without importing.                |
-| ROM    | `stackimport --rom [--rom-base <address>] <rom>`                   | Run experimental ROM analysis.                             |
+| Import | `stackimport import [options] <stack>` or `stackimport <stack>`    | Convert a HyperCard stack to a `.xstk` package.            |
+| Scan   | `stackimport scan <stack>`                                         | Inspect the block stream without importing.                |
+| ROM    | `stackimport rom [--rom-base <address>] <rom>`                     | Run experimental ROM analysis.                             |
 | Corpus | `scripts/import_all_stacks.py --stackimport-bin build/stackimport` | Batch extract, classify, import, and index stack archives. |
 
 Build the CLI with:
@@ -19,3 +20,6 @@ Build the CLI with:
 cmake -S . -B build
 cmake --build build --target stackimport
 ```
+
+Use `stackimport --help` or `stackimport <mode> --help` for generated option
+help.

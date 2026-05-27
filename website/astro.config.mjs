@@ -116,6 +116,26 @@ export default defineConfig({
                   link: "/workflows/corpus-import-run/",
                 },
                 {
+                  label: "CLI Test Acceptance",
+                  link: "/workflows/cli-test-acceptance-scenarios/",
+                },
+                {
+                  label: "CLI Help Acceptance",
+                  link: "/workflows/cli-help-acceptance/",
+                },
+                {
+                  label: "CLI Import Acceptance",
+                  link: "/workflows/cli-import-acceptance/",
+                },
+                {
+                  label: "CLI Scan Acceptance",
+                  link: "/workflows/cli-scan-acceptance/",
+                },
+                {
+                  label: "CLI ROM Acceptance",
+                  link: "/workflows/cli-rom-acceptance/",
+                },
+                {
                   label: "Release And Version Update",
                   link: "/workflows/release-version-update/",
                 },

@@ -12,7 +12,7 @@ int main(int argc, char* const argv[])
 
 	stackimport::cli::Options options;
 	const int parseStatus = stackimport::cli::parse_arguments(argc, argv, options);
-	if(parseStatus != 0)
+	if(parseStatus != 0 || options.exit_after_parse)
 	{
 		stackimport_logging_shutdown();
 		return parseStatus;

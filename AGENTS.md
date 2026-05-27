@@ -81,6 +81,10 @@ canonical checklist for common tasks before making changes:
   investigation.
 - `docs/workflows/corpus-import-run.mdx` for batch importer runs and report
   review.
+- `docs/workflows/cli-test-acceptance-scenarios.mdx` for the CLI acceptance
+  overview, with mode-specific checks split into `cli-help-acceptance.mdx`,
+  `cli-import-acceptance.mdx`, `cli-scan-acceptance.mdx`, and
+  `cli-rom-acceptance.mdx`.
 - `docs/workflows/release-version-update.mdx` for SemVer and release-surface
   updates.
 

@@ -14,6 +14,7 @@ local integration targets, and modification status.
 | --- | --- | --- | --- |
 | `quill/` | Quill 11.1.0 | Header-only C++ logging library used by stackimport diagnostics | MIT, see `quill/LICENSE` |
 | `rang/` | rang 3.2 | Header-only terminal color support for log and dump formatting | Unlicense, see `rang/LICENSE` |
+| `cli11/` | CLI11 2.6.2 | Header-only command-line parser used by the `stackimport` executable | BSD-3-Clause, see `cli11/LICENSE` |
 | `resource_dasm/` | `resource_dasm` / `libresource_file` | Classic Mac resource fork parsing, PICT/image/audio/code resource conversion and disassembly helpers | MIT, see `resource_dasm/LICENSE` |
 | `phosg/` | `phosg` | Required dependency for `resource_dasm` | MIT, see `phosg/src/LICENSE` |
 | `deark/` | Deark 1.7.2 | Broad legacy file/container decoder, including MacBinary, resource forks, BinHex, StuffIt, and PICT coverage | MIT-style, see `deark/COPYING`; bundled third-party notices live in `deark/foreign/` |
@@ -35,7 +36,7 @@ That target builds:
 - `vendor_phosg`
 - `vendor_resource_dasm`
 - `vendor_ppcd`
-- header-only interface targets for `stb_image_write` and `dr_wav`
+- header-only interface targets for `stb_image_write`, `dr_wav`, and `cli11`
 
 The vendored tool path is optional and separate from the default `stackimport`
 library/executable build.

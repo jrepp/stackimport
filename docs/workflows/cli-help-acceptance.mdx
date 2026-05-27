@@ -1,0 +1,62 @@
+---
+title: CLI Help Acceptance
+description: Workflow for generated stackimport help and version output checks.
+---
+
+Use this workflow when changing CLI argument parsing, subcommands, option names,
+or version output.
+
+## Prerequisites
+
+- Build the CLI from the repository root:
+
+  ```sh
+  cmake -S . -B build
+  cmake --build build --target stackimport
+  ```
+
+- Keep `VERSION.txt` as the source of truth for expected version output.
+
+## Commands
+
+Run each generated help surface:
+
+```sh
+build/stackimport --help
+build/stackimport import --help
+build/stackimport scan --help
+build/stackimport rom --help
+build/stackimport --version
+```
+
+## Acceptance Criteria
+
+- Every command exits with status 0.
+- Root help lists the `import`, `scan`, and `rom` modes.
+- `import --help` shows stack import options and does not describe scan-only or
+  ROM-only options as primary mode flags.
+- `scan --help` shows scan input handling.
+- `rom --help` shows ROM analysis options such as base address, atlas output,
+  and atlas emission.
+- `--version` prints the version from `VERSION.txt`.
+
+## Follow-Up Validation
+
+After CLI behavior changes, run the full CLI acceptance overview:
+
+```text
+docs/workflows/cli-test-acceptance-scenarios.mdx
+```
+
+For docs changes, validate the site:
+
+```sh
+cd website
+pnpm lint
+pnpm build
+```
+
+## Handoff
+
+Report the commands run, whether help text changed, the observed version string,
+and any mismatch between generated help and the documented CLI pages.

@@ -1,129 +1,236 @@
 #include "StackImportCli.h"
 
 #include "stackimport_logging.h"
+#include "stackimport_version.h"
+
+#include <CLI/CLI.hpp>
 
 #include <climits>
 #include <cstdlib>
-#include <cstring>
+#include <string>
 
 namespace stackimport::cli {
 
 const char* syntax_string()
 {
-	return "[--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--scan] [--rom [--rom-base <address>] [--emit-atlas] [--emit-json] [--emit-assets] [--atlas-output <path>] [--source-root <path>]] [--output <packagePath>] <originalStackPath>";
+	return "[import|scan|rom] [options] <input>";
 }
 
 namespace {
 
-bool option_requires_value(int argc, int& index, const char* option)
+struct ParsedFlags {
+	bool dump_raw_blocks = false;
+	bool no_dump_raw_blocks = false;
+	bool no_status = false;
+	bool no_progress = false;
+	bool raw_graphics = false;
+	bool legacy_scan = false;
+	bool legacy_rom = false;
+	std::string input_path;
+	std::string output_path;
+	std::string atlas_output_path;
+	std::string source_root_path;
+	std::string rom_base;
+	bool emit_atlas = false;
+	bool emit_json = false;
+	bool emit_assets = false;
+};
+
+void add_stack_flags(CLI::App& app, ParsedFlags& flags)
 {
-	index++;
-	if(index < argc)
-		return true;
-	stackimport_quill_diagnosticf("Error: Missing value after %s, syntax is stackimport %s\n", option, syntax_string());
-	return false;
+	app.add_flag("--dumprawblocks", flags.dump_raw_blocks, "Dump raw stack blocks into the output package");
+	app.add_flag("--nodumprawblocks", flags.no_dump_raw_blocks, "Do not dump raw stack blocks");
+	app.add_flag("--nostatus", flags.no_status, "Suppress status messages");
+	app.add_flag("--noprogress", flags.no_progress, "Suppress progress messages");
+	app.add_flag("--rawgraphics", flags.raw_graphics, "Write raw graphic payloads where available");
 }
 
-bool parse_rom_base(const char* text, uint32_t& out)
+void add_output_option(CLI::App& app, ParsedFlags& flags)
 {
+	app.add_option("-o,--output", flags.output_path, "Output package or analysis directory");
+}
+
+void add_rom_options(CLI::App& app, ParsedFlags& flags)
+{
+	app.add_option("--rom-base", flags.rom_base, "Base address for ROM virtual addresses, such as 0x40800000");
+	app.add_option("--atlas-output", flags.atlas_output_path, "Directory for atlas TSV outputs");
+	app.add_option("--source-root", flags.source_root_path, "SuperMario source root used by correlation passes");
+	app.add_flag("--emit-atlas", flags.emit_atlas, "Emit atlas TSV interchange files");
+	app.add_flag("--emit-json", flags.emit_json, "Emit machine-readable JSON analysis output");
+	app.add_flag("--emit-assets", flags.emit_assets, "Emit converted or preserved asset outputs when supported");
+}
+
+bool parse_rom_base(const std::string& text, uint32_t& out)
+{
+	if(text.empty())
+		return true;
 	char* end = nullptr;
-	const unsigned long parsed = std::strtoul(text, &end, 0);
+	const unsigned long parsed = std::strtoul(text.c_str(), &end, 0);
 	if(!end || *end != '\0' || parsed > UINT32_MAX)
 		return false;
 	out = static_cast<uint32_t>(parsed);
 	return true;
 }
 
+void apply_shared_flags(const ParsedFlags& parsed, Options& options)
+{
+	if(parsed.dump_raw_blocks)
+		options.flags |= STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
+	if(parsed.no_dump_raw_blocks)
+		options.flags &= static_cast<uint32_t>(~STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS);
+	if(parsed.no_status)
+		options.flags |= STACKIMPORT_IMPORT_NO_STATUS;
+	if(parsed.no_progress)
+		options.flags |= STACKIMPORT_IMPORT_NO_PROGRESS;
+	if(parsed.raw_graphics)
+		options.flags |= STACKIMPORT_IMPORT_RAW_GRAPHICS;
+
+	if(!parsed.output_path.empty())
+		options.output_path = absolute_path(parsed.output_path.c_str());
+	if(!parsed.atlas_output_path.empty())
+		options.atlas_output_path = absolute_path(parsed.atlas_output_path.c_str());
+	if(!parsed.source_root_path.empty())
+		options.source_root_path = absolute_path(parsed.source_root_path.c_str());
+	options.emit_atlas = parsed.emit_atlas;
+	options.emit_json = parsed.emit_json;
+	options.emit_assets = parsed.emit_assets;
+}
+
+int finalize_options(
+	const char* executable,
+	const CLI::App& app,
+	const ParsedFlags& root,
+	const ParsedFlags& importFlags,
+	const ParsedFlags& scanFlags,
+	const ParsedFlags& romFlags,
+	const CLI::App* importCommand,
+	const CLI::App* scanCommand,
+	const CLI::App* romCommand,
+	Options& options)
+{
+	const ParsedFlags* selected = &root;
+	if(*importCommand)
+	{
+		options.mode = Mode::Import;
+		selected = &importFlags;
+	}
+	else if(*scanCommand)
+	{
+		options.mode = Mode::Scan;
+		selected = &scanFlags;
+	}
+	else if(*romCommand)
+	{
+		options.mode = Mode::Rom;
+		selected = &romFlags;
+	}
+	else if(root.legacy_scan)
+	{
+		options.mode = Mode::Scan;
+	}
+	else if(root.legacy_rom)
+	{
+		options.mode = Mode::Rom;
+	}
+
+	apply_shared_flags(root, options);
+	if(selected != &root)
+		apply_shared_flags(*selected, options);
+
+	const std::string inputPath = selected->input_path.empty() ? root.input_path : selected->input_path;
+	if(inputPath.empty())
+	{
+		stackimport_quill_diagnosticf("Error: Missing input path.\n%s\n", app.help().c_str());
+		return 4;
+	}
+
+	if(options.mode != Mode::Rom && (!root.rom_base.empty() || root.emit_atlas || root.emit_json || root.emit_assets ||
+		!root.atlas_output_path.empty() || !root.source_root_path.empty()))
+	{
+		stackimport_quill_diagnosticf("Error: ROM options require --rom or the rom subcommand.\n");
+		return 3;
+	}
+
+	const std::string romBaseText = selected->rom_base.empty() ? root.rom_base : selected->rom_base;
+	if(!parse_rom_base(romBaseText, options.rom_base_address))
+	{
+		stackimport_quill_diagnosticf("Error: Invalid --rom-base address '%s'.\n", romBaseText.c_str());
+		return 3;
+	}
+
+	options.input_path = absolute_path(inputPath.c_str());
+	if(options.input_path.empty())
+	{
+		stackimport_quill_diagnosticf("Error: Could not resolve current working directory for %s.\n", executable);
+		return 5;
+	}
+	return 0;
+}
+
 }
 
 int parse_arguments(int argc, char* const argv[], Options& options)
 {
-	if(argc < 2)
+	ParsedFlags root;
+	ParsedFlags importFlags;
+	ParsedFlags scanFlags;
+	ParsedFlags romFlags;
+
+	CLI::App app{"Read HyperCard stacks and analyze classic Mac ROM images."};
+	app.option_defaults()->always_capture_default();
+	app.set_version_flag("--version", STACKIMPORT_VERSION_STRING, "Print stackimport version and exit");
+	app.require_subcommand(0, 1);
+	app.footer(
+		"Examples:\n"
+		"  stackimport Resources.stak\n"
+		"  stackimport scan Resources.stak\n"
+		"  stackimport rom --rom-base 0x40800000 --emit-atlas --atlas-output atlas/maps/rom input.ROM\n"
+		"\n"
+		"Legacy --scan and --rom flags are still accepted.");
+
+	add_stack_flags(app, root);
+	add_output_option(app, root);
+	app.add_flag("--scan", root.legacy_scan, "Legacy spelling for the scan subcommand");
+	app.add_flag("--rom", root.legacy_rom, "Legacy spelling for the rom subcommand");
+	add_rom_options(app, root);
+	app.add_option("input", root.input_path, "Input stack or ROM path");
+
+	CLI::App* importCommand = app.add_subcommand("import", "Import a HyperCard stack into a .xstk package");
+	add_stack_flags(*importCommand, importFlags);
+	add_output_option(*importCommand, importFlags);
+	importCommand->add_option("input", importFlags.input_path, "Input HyperCard stack path")->required();
+
+	CLI::App* scanCommand = app.add_subcommand("scan", "Print the HyperCard block table without importing");
+	scanCommand->add_option("input", scanFlags.input_path, "Input HyperCard stack path")->required();
+
+	CLI::App* romCommand = app.add_subcommand("rom", "Analyze an Old World Macintosh ROM image");
+	add_output_option(*romCommand, romFlags);
+	add_rom_options(*romCommand, romFlags);
+	romCommand->add_option("input", romFlags.input_path, "Input ROM path")->required();
+
+	try
 	{
-		stackimport_quill_diagnosticf("Error: Syntax is %s %s\n", argv[0], syntax_string());
-		return 2;
+		app.parse(argc, argv);
+	}
+	catch(const CLI::ParseError& error)
+	{
+		const int exitCode = app.exit(error);
+		if(exitCode == 0)
+			options.exit_after_parse = true;
+		return exitCode;
 	}
 
-	const char* inputPathArgument = nullptr;
-	for(int index = 1; index < argc; index++)
-	{
-		if(strcmp(argv[index], "--dumprawblocks") == 0)
-			options.flags |= STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
-		else if(strcmp(argv[index], "--nodumprawblocks") == 0)
-			options.flags &= static_cast<uint32_t>(~STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS);
-		else if(strcmp(argv[index], "--nostatus") == 0)
-			options.flags |= STACKIMPORT_IMPORT_NO_STATUS;
-		else if(strcmp(argv[index], "--noprogress") == 0)
-			options.flags |= STACKIMPORT_IMPORT_NO_PROGRESS;
-		else if(strcmp(argv[index], "--rawgraphics") == 0)
-			options.flags |= STACKIMPORT_IMPORT_RAW_GRAPHICS;
-		else if(strcmp(argv[index], "--scan") == 0)
-			options.mode = Mode::Scan;
-		else if(strcmp(argv[index], "--rom") == 0)
-			options.mode = Mode::Rom;
-		else if(strcmp(argv[index], "--emit-atlas") == 0)
-			options.emit_atlas = true;
-		else if(strcmp(argv[index], "--emit-json") == 0)
-			options.emit_json = true;
-		else if(strcmp(argv[index], "--emit-assets") == 0)
-			options.emit_assets = true;
-		else if(strcmp(argv[index], "--rom-base") == 0)
-		{
-			if(!option_requires_value(argc, index, "--rom-base"))
-				return 3;
-			if(!parse_rom_base(argv[index], options.rom_base_address))
-			{
-				stackimport_quill_diagnosticf("Error: Invalid --rom-base address '%s'.\n", argv[index]);
-				return 3;
-			}
-		}
-		else if(strcmp(argv[index], "--atlas-output") == 0)
-		{
-			if(!option_requires_value(argc, index, "--atlas-output"))
-				return 3;
-			options.atlas_output_path = absolute_path(argv[index]);
-		}
-		else if(strcmp(argv[index], "--source-root") == 0)
-		{
-			if(!option_requires_value(argc, index, "--source-root"))
-				return 3;
-			options.source_root_path = absolute_path(argv[index]);
-		}
-		else if(strcmp(argv[index], "--output") == 0)
-		{
-			if(!option_requires_value(argc, index, "--output"))
-				return 3;
-			options.output_path = absolute_path(argv[index]);
-		}
-		else if(argv[index][0] == '-')
-		{
-			stackimport_quill_diagnosticf("Error: Unknown option %s, syntax is %s %s\n", argv[index], argv[0], syntax_string());
-			return 3;
-		}
-		else
-		{
-			if(inputPathArgument)
-			{
-				stackimport_quill_diagnosticf("Error: Multiple input paths supplied: '%s' and '%s'.\n", inputPathArgument, argv[index]);
-				return 3;
-			}
-			inputPathArgument = argv[index];
-		}
-	}
-
-	if(!inputPathArgument)
-	{
-		stackimport_quill_diagnosticf("Error: Syntax is %s %s\n", argv[0], syntax_string());
-		return 4;
-	}
-
-	options.input_path = absolute_path(inputPathArgument);
-	if(options.input_path.empty())
-	{
-		stackimport_quill_diagnosticf("Error: Could not resolve current working directory.\n");
-		return 5;
-	}
-	return 0;
+	return finalize_options(
+		argv[0],
+		app,
+		root,
+		importFlags,
+		scanFlags,
+		romFlags,
+		importCommand,
+		scanCommand,
+		romCommand,
+		options);
 }
 
 } // namespace stackimport::cli

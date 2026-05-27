@@ -183,11 +183,13 @@ threads without external synchronization.
 How to use this
 ---------------
 
-Once you have built the stackimport command line tool, just use it. Syntax is
+Once you have built the stackimport command line tool, just use it. Import mode
+is the default mode:
 
-    stackimport [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
+    stackimport import [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
 
 where originalStackPath is the HyperCard stack you want to convert.
+For compatibility, `stackimport <originalStackPath>` still imports directly.
 If `--output` is omitted, stackimport creates a sibling `.xstk` directory next
 to the input stack, replacing the input extension when one is present.
 
@@ -210,10 +212,18 @@ updating the progress bar in a progress UI.
 High-level CLI example:
 
     cmake --build build --target stackimport
-    build/stackimport --output /tmp/MyStack.xstk /path/to/MyStack
+    build/stackimport import --output /tmp/MyStack.xstk /path/to/MyStack
 
 The output package contains generated JSON metadata, decoded media, and raw block
 data by default.
+
+Other direct modes are available as subcommands:
+
+    build/stackimport scan /path/to/MyStack
+    build/stackimport rom --rom-base 0x40800000 /path/to/input.ROM
+
+Run `build/stackimport --help` or `build/stackimport <mode> --help` for generated
+option help.
 
 Installable build:
 

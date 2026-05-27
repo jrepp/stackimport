@@ -82,6 +82,10 @@ add_library(vendor_rapidjson INTERFACE)
 target_include_directories(vendor_rapidjson SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include")
 target_compile_features(vendor_rapidjson INTERFACE cxx_std_23)
 
+add_library(vendor_cli11 INTERFACE)
+target_include_directories(vendor_cli11 SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/cli11/include")
+target_compile_features(vendor_cli11 INTERFACE cxx_std_23)
+
 add_library(vendor_ppcd STATIC
     ppcd/ppcd.cpp
 )

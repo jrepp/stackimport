@@ -295,7 +295,12 @@ add_executable(stackimport
     StackImportCliRomMode.cpp
     StackImportCliScanMode.cpp
 )
-target_link_libraries(stackimport PRIVATE stackimport_static)
+target_link_libraries(stackimport PRIVATE stackimport_static vendor_cli11)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    set_source_files_properties(StackImportCliOptions.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
+elseif(MSVC)
+    set_source_files_properties(StackImportCliOptions.cpp PROPERTIES COMPILE_OPTIONS /EHsc)
+endif()
 set(STACKIMPORT_CORE_TARGETS stackimport_static stackimport_shared stackimport)
 if(TARGET stackimport_framework)
     list(APPEND STACKIMPORT_CORE_TARGETS stackimport_framework)
