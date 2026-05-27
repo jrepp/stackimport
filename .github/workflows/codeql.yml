@@ -38,6 +38,7 @@ jobs:
           -S .
           -B build-codeql
           -DCMAKE_BUILD_TYPE=Debug
+          -DSTACKIMPORT_BUILD_VENDOR_TOOLS=OFF
           -DSTACKIMPORT_WARNINGS_AS_ERRORS=OFF
 
       - name: Build
