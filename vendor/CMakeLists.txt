@@ -229,25 +229,9 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         )
     endif()
 
-    if(STACKIMPORT_ENABLE_CLANG_TIDY)
-        find_program(STACKIMPORT_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
-        set(VENDOR_CLANG_TIDY_COMMAND "${STACKIMPORT_CLANG_TIDY_EXE}|--quiet|--warnings-as-errors=")
-        if(STACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER)
-            string(APPEND VENDOR_CLANG_TIDY_COMMAND "|--checks=clang-analyzer-*,bugprone-*,performance-*,portability-*,readability-*")
-        endif()
-        list(APPEND VENDOR_CMAKE_ARGS
-            "-DCMAKE_C_CLANG_TIDY=${VENDOR_CLANG_TIDY_COMMAND}"
-            "-DCMAKE_CXX_CLANG_TIDY=${VENDOR_CLANG_TIDY_COMMAND}"
-        )
-    endif()
-
-    if(STACKIMPORT_ENABLE_CPPCHECK)
-        find_program(STACKIMPORT_CPPCHECK_EXE NAMES cppcheck REQUIRED)
-        list(APPEND VENDOR_CMAKE_ARGS
-            "-DCMAKE_C_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE}|--enable=warning,style,performance,portability|--inline-suppr|--quiet"
-            "-DCMAKE_CXX_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE}|--enable=warning,style,performance,portability|--inline-suppr|--quiet"
-        )
-    endif()
+    # Keep repository static-analysis hooks scoped to StackImport targets. These
+    # ExternalProject snapshots are third-party code and already have their own
+    # compiler warning policy when built as vendored tools.
 
     set(DEARK_CFLAGS "-std=c17 -g -O2 -Wall -Wextra -Wmissing-prototypes -Wformat-security -Wno-unused-parameter")
     set(DEARK_LDFLAGS "-Wall")
