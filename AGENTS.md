@@ -48,6 +48,15 @@ cmake --build build-analysis
 Do not treat missing analyzer tools as a reason to skip the compiler/CMake
 warning checks.
 
+## Versioning Discipline
+
+`VERSION.txt` is the source of truth for the library version. Keep it SemVer.
+The generated `stackimport_version.h` exposes the compile-time version macros,
+and the public C ABI exposes matching runtime version queries. While the library
+is pre-1.0, any breaking public API or ABI change must bump the minor version;
+major feature work must bump the major version; compatible additions and fixes
+may bump the patch version.
+
 ## Stack Import Workflow
 
 `stackimport` reads a HyperCard stack and emits a JSON/media package. Useful

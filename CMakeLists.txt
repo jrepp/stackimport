@@ -23,6 +23,17 @@ project(stackimport VERSION "${STACKIMPORT_VERSION_CORE}" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
+set(STACKIMPORT_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stackimport_version.h.in"
+    "${STACKIMPORT_GENERATED_INCLUDE_DIR}/stackimport_version.h"
+    @ONLY
+)
+set(STACKIMPORT_PUBLIC_HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+    "${STACKIMPORT_GENERATED_INCLUDE_DIR}/stackimport_version.h"
+)
+
 option(STACKIMPORT_STRICT_WARNINGS "Enable strict compiler warnings" ON)
 option(STACKIMPORT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(STACKIMPORT_ENABLE_VENDOR "Expose vendored conversion support targets" ON)
@@ -158,11 +169,12 @@ endif()
 target_compile_definitions(stackimport_static PUBLIC MAC_CODE=0)
 target_include_directories(stackimport_static
     PUBLIC
+        "$<BUILD_INTERFACE:${STACKIMPORT_GENERATED_INCLUDE_DIR}>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 set_target_properties(stackimport_static PROPERTIES
-    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+    PUBLIC_HEADER "${STACKIMPORT_PUBLIC_HEADERS}"
 )
 
 if(STACKIMPORT_ENABLE_VENDOR)
@@ -202,7 +214,7 @@ set_target_properties(stackimport_shared PROPERTIES
     SOVERSION "${PROJECT_VERSION_MAJOR}"
     MACOSX_RPATH ON
     INSTALL_NAME_DIR "@rpath"
-    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+    PUBLIC_HEADER "${STACKIMPORT_PUBLIC_HEADERS}"
 )
 target_compile_definitions(stackimport_shared
     PRIVATE STACKIMPORT_BUILD_SHARED=1 STACKIMPORT_SHARED=1
@@ -210,6 +222,7 @@ target_compile_definitions(stackimport_shared
 )
 target_include_directories(stackimport_shared
     PUBLIC
+        "$<BUILD_INTERFACE:${STACKIMPORT_GENERATED_INCLUDE_DIR}>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
@@ -229,7 +242,8 @@ endif()
 
 if(APPLE)
     set_source_files_properties(stackimport_c.h PROPERTIES MACOSX_PACKAGE_LOCATION Headers)
-    add_library(stackimport_framework SHARED ${STACKIMPORT_SOURCES} stackimport_c.h)
+    set_source_files_properties("${STACKIMPORT_GENERATED_INCLUDE_DIR}/stackimport_version.h" PROPERTIES MACOSX_PACKAGE_LOCATION Headers)
+    add_library(stackimport_framework SHARED ${STACKIMPORT_SOURCES} ${STACKIMPORT_PUBLIC_HEADERS})
     add_library(stackimport::framework ALIAS stackimport_framework)
     set_target_properties(stackimport_framework PROPERTIES
         FRAMEWORK TRUE
@@ -246,7 +260,7 @@ if(APPLE)
         MACOSX_FRAMEWORK_BUNDLE_VERSION "${STACKIMPORT_VERSION_FULL}"
         MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${STACKIMPORT_VERSION_CORE}"
         MACOSX_FRAMEWORK_ICON_FILE ""
-        PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/stackimport_c.h"
+        PUBLIC_HEADER "${STACKIMPORT_PUBLIC_HEADERS}"
     )
     target_compile_definitions(stackimport_framework
         PRIVATE STACKIMPORT_BUILD_SHARED=1 STACKIMPORT_SHARED=1
@@ -254,6 +268,7 @@ if(APPLE)
     )
     target_include_directories(stackimport_framework
         PUBLIC
+            "$<BUILD_INTERFACE:${STACKIMPORT_GENERATED_INCLUDE_DIR}>"
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
             "$<INSTALL_INTERFACE:${STACKIMPORT_INSTALL_FRAMEWORKDIR}/StackImport.framework/Headers>"
     )

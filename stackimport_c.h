@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "stackimport_version.h"
+
 #ifndef STACKIMPORT_API
 #if defined(_WIN32) && defined(STACKIMPORT_SHARED)
 #if defined(STACKIMPORT_BUILD_SHARED)
@@ -30,7 +32,7 @@
 extern "C" {
 #endif
 
-#define STACKIMPORT_API_VERSION 6u
+#define STACKIMPORT_API_VERSION 7u
 
 typedef struct stackimport_context stackimport_context;
 
@@ -39,7 +41,8 @@ typedef enum stackimport_status {
 	STACKIMPORT_STATUS_INVALID_ARGUMENT = 1,
 	STACKIMPORT_STATUS_ALLOCATION_FAILED = 2,
 	STACKIMPORT_STATUS_IMPORT_FAILED = 3,
-	STACKIMPORT_STATUS_UNSUPPORTED_OPTION = 4
+	STACKIMPORT_STATUS_UNSUPPORTED_OPTION = 4,
+	STACKIMPORT_STATUS_ABI_MISMATCH = 5
 } stackimport_status;
 
 typedef enum stackimport_import_flags {
@@ -117,12 +120,39 @@ typedef enum stackimport_message_severity {
 	STACKIMPORT_MESSAGE_FATAL = 3
 } stackimport_message_severity;
 
+typedef enum stackimport_log_category {
+	STACKIMPORT_LOG_GENERAL = 0,
+	STACKIMPORT_LOG_STATUS = 1,
+	STACKIMPORT_LOG_PROGRESS = 2,
+	STACKIMPORT_LOG_WARNING = 3,
+	STACKIMPORT_LOG_ERROR = 4,
+	STACKIMPORT_LOG_FATAL = 5
+} stackimport_log_category;
+
+typedef struct stackimport_log_record {
+	uint32_t struct_size;
+	uint32_t severity;
+	uint32_t category;
+	const char* message;
+	const char* detail;
+} stackimport_log_record;
+
+typedef void (STACKIMPORT_CALL *stackimport_log_fn)(const stackimport_log_record* record, void* user_data);
+
 typedef struct stackimport_allocator {
 	uint32_t struct_size;
 	stackimport_allocate_fn allocate;
 	stackimport_deallocate_fn deallocate;
 	void* user_data;
 } stackimport_allocator;
+
+typedef struct stackimport_log_handler {
+	uint32_t struct_size;
+	stackimport_log_fn log;
+	/* Optional fallback for callers that only need severity + message. */
+	stackimport_message_fn message;
+	void* user_data;
+} stackimport_log_handler;
 
 typedef struct stackimport_platform {
 	uint32_t struct_size;
@@ -152,15 +182,21 @@ typedef struct stackimport_import_options {
 
 STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_api_version(void);
 
+STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_version_string(void);
+
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_version_packed(void);
+
 STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_status_string(stackimport_status status);
 
 /* Initialize public structs before filling caller-owned fields. */
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_allocator_init(stackimport_allocator* allocator);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_log_handler_init(stackimport_log_handler* handler);
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_platform* platform);
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_import_options_init(stackimport_import_options* options);
 
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_size(void);
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_alignment(void);
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_context_abi_signature(void);
 
 STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init(
 	void* storage,
@@ -173,6 +209,12 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_wit
 	const stackimport_platform* platform,
 	stackimport_context** out_context);
 
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_with_log_handler(
+	void* storage,
+	size_t storage_size,
+	const stackimport_log_handler* handler,
+	stackimport_context** out_context);
+
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_deinit(stackimport_context* context);
 
 STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create(
@@ -181,6 +223,10 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create(
 
 STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_with_platform(
 	const stackimport_platform* platform,
+	stackimport_context** out_context);
+
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_with_log_handler(
+	const stackimport_log_handler* handler,
 	stackimport_context** out_context);
 
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_destroy(stackimport_context* context);

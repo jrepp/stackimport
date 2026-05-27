@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -73,12 +74,14 @@ int default_make_directory(const char* path, void*)
 const stackimport_internal_platform kDefaultPlatform = {
 	default_allocate,
 	default_deallocate,
+	nullptr,
 	default_message,
 	default_open_file,
 	default_read_file,
 	default_write_file,
 	default_close_file,
 	default_make_directory,
+	nullptr,
 	nullptr,
 };
 
@@ -104,6 +107,7 @@ stackimport_internal_platform stackimport_internal_platform_from_api(const stack
 	return {
 		platform->allocate,
 		platform->deallocate,
+		nullptr,
 		platform->message ? platform->message : default_message,
 		platform->open_file,
 		platform->read_file,
@@ -111,11 +115,57 @@ stackimport_internal_platform stackimport_internal_platform_from_api(const stack
 		platform->close_file,
 		platform->make_directory,
 		platform->user_data,
+		nullptr,
+	};
+}
+
+stackimport_log_record stackimport_internal_make_log_record(uint32_t severity, const char* message)
+{
+	const char* detail = message ? message : "";
+	uint32_t category = STACKIMPORT_LOG_GENERAL;
+	if(message)
+	{
+		struct Prefix {
+			const char* text;
+			size_t length;
+			uint32_t category;
+		};
+		const Prefix prefixes[] = {
+			{"Progress:", 9, STACKIMPORT_LOG_PROGRESS},
+			{"Status:", 7, STACKIMPORT_LOG_STATUS},
+			{"Warning:", 8, STACKIMPORT_LOG_WARNING},
+			{"Error:", 6, STACKIMPORT_LOG_ERROR},
+			{"Fatal:", 6, STACKIMPORT_LOG_FATAL},
+		};
+		for(const Prefix& prefix : prefixes)
+		{
+			if(std::strncmp(message, prefix.text, prefix.length) == 0)
+			{
+				category = prefix.category;
+				detail = message + prefix.length;
+				if(detail[0] == ' ')
+					detail++;
+				break;
+			}
+		}
+	}
+	return stackimport_log_record{
+		sizeof(stackimport_log_record),
+		severity,
+		category,
+		message,
+		detail,
 	};
 }
 
 void stackimport_internal_message(uint32_t severity, const char* message)
 {
+	if(current_platform->log)
+	{
+		const stackimport_log_record record = stackimport_internal_make_log_record(severity, message);
+		current_platform->log(&record, current_platform->log_user_data);
+		return;
+	}
 	current_platform->message(severity, message, current_platform->user_data);
 }
 

@@ -19,6 +19,7 @@
 #endif
 
 struct stackimport_context {
+	uint32_t abi_signature;
 	CStackFile stack;
 	stackimport_platform platform;
 	stackimport_internal_platform internal_platform;
@@ -26,6 +27,34 @@ struct stackimport_context {
 };
 
 namespace {
+
+constexpr uint32_t fnv1a_byte(uint32_t hash, uint8_t value)
+{
+	return (hash ^ value) * 16777619u;
+}
+
+constexpr uint32_t fnv1a_word(uint32_t hash, uint64_t value)
+{
+	for(int shift = 0; shift < 64; shift += 8)
+		hash = fnv1a_byte(hash, static_cast<uint8_t>((value >> shift) & 0xFFu));
+	return hash;
+}
+
+constexpr uint32_t context_abi_signature()
+{
+	uint32_t hash = 2166136261u;
+	hash = fnv1a_word(hash, STACKIMPORT_API_VERSION);
+	hash = fnv1a_word(hash, STACKIMPORT_VERSION_PACKED);
+	hash = fnv1a_word(hash, sizeof(stackimport_context));
+	hash = fnv1a_word(hash, alignof(stackimport_context));
+	hash = fnv1a_word(hash, sizeof(CStackFile));
+	hash = fnv1a_word(hash, sizeof(stackimport_platform));
+	hash = fnv1a_word(hash, sizeof(stackimport_internal_platform));
+	hash = fnv1a_word(hash, sizeof(bool));
+	return hash;
+}
+
+constexpr uint32_t kContextAbiSignature = context_abi_signature();
 
 constexpr uint32_t kKnownImportFlags =
 	STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS |
@@ -39,6 +68,18 @@ bool valid_allocator(const stackimport_allocator* allocator)
 		allocator->struct_size >= sizeof(stackimport_allocator) &&
 		allocator->allocate &&
 		allocator->deallocate;
+}
+
+bool valid_log_handler(const stackimport_log_handler* handler)
+{
+	return handler &&
+		handler->struct_size >= sizeof(stackimport_log_handler) &&
+		(handler->log || handler->message);
+}
+
+bool valid_context(const stackimport_context* context)
+{
+	return context && context->abi_signature == kContextAbiSignature;
 }
 
 void* STACKIMPORT_CALL libc_allocate(size_t size, size_t alignment, void*)
@@ -112,11 +153,23 @@ bool valid_platform(const stackimport_platform* platform)
 		platform->make_directory;
 }
 
-stackimport_context make_context(const stackimport_platform& platform, bool allocator_owns_context)
+stackimport_context make_context(
+	const stackimport_platform& platform,
+	bool allocator_owns_context,
+	const stackimport_log_handler* handler = nullptr)
 {
 	stackimport_internal_platform internal_platform = stackimport_internal_platform_from_api(&platform);
+	if(handler)
+	{
+		internal_platform.log = handler->log;
+		if(handler->message)
+			internal_platform.message = handler->message;
+		internal_platform.log_user_data = handler->user_data;
+		if(!handler->log)
+			internal_platform.user_data = handler->user_data;
+	}
 	stackimport_platform_scope scope(internal_platform);
-	return stackimport_context{CStackFile(), platform, internal_platform, allocator_owns_context};
+	return stackimport_context{kContextAbiSignature, CStackFile(), platform, internal_platform, allocator_owns_context};
 }
 
 uint32_t api_resource_payload_format(stackimport::ResourcePayloadFormat format)
@@ -200,6 +253,16 @@ STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_api_version(void)
 	return STACKIMPORT_API_VERSION;
 }
 
+STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_version_string(void)
+{
+	return STACKIMPORT_VERSION_STRING;
+}
+
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_version_packed(void)
+{
+	return STACKIMPORT_VERSION_PACKED;
+}
+
 STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_status_string(stackimport_status status)
 {
 	switch(status)
@@ -214,6 +277,8 @@ STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_status_string(stackimpo
 			return "import failed";
 		case STACKIMPORT_STATUS_UNSUPPORTED_OPTION:
 			return "unsupported option";
+		case STACKIMPORT_STATUS_ABI_MISMATCH:
+			return "ABI mismatch";
 	}
 	return "unknown status";
 }
@@ -224,6 +289,14 @@ STACKIMPORT_API void STACKIMPORT_CALL stackimport_allocator_init(stackimport_all
 		return;
 	*allocator = {};
 	allocator->struct_size = sizeof(stackimport_allocator);
+}
+
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_log_handler_init(stackimport_log_handler* handler)
+{
+	if(!handler)
+		return;
+	*handler = {};
+	handler->struct_size = sizeof(stackimport_log_handler);
 }
 
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_platform* platform)
@@ -261,6 +334,11 @@ STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_alignment(void)
 	return alignof(stackimport_context);
 }
 
+STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_context_abi_signature(void)
+{
+	return kContextAbiSignature;
+}
+
 STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init(
 	void* storage,
 	size_t storage_size,
@@ -288,10 +366,34 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_wit
 	return STACKIMPORT_STATUS_OK;
 }
 
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_init_with_log_handler(
+	void* storage,
+	size_t storage_size,
+	const stackimport_log_handler* handler,
+	stackimport_context** out_context)
+{
+	if(!valid_log_handler(handler))
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	if(!storage || !out_context || storage_size < sizeof(stackimport_context))
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	const auto address = reinterpret_cast<uintptr_t>(storage);
+	if((address % alignof(stackimport_context)) != 0)
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	stackimport_platform platform = {};
+	stackimport_platform_init(&platform);
+	*out_context = new (storage) stackimport_context(make_context(platform, false, handler));
+	return STACKIMPORT_STATUS_OK;
+}
+
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_deinit(stackimport_context* context)
 {
 	if(!context)
 		return;
+	if(!valid_context(context))
+	{
+		stackimport_internal_message(STACKIMPORT_MESSAGE_ERROR, "Error: stackimport context ABI signature mismatch");
+		return;
+	}
 	stackimport_platform_scope scope(context->internal_platform);
 	context->~stackimport_context();
 }
@@ -324,10 +426,33 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_w
 	return STACKIMPORT_STATUS_OK;
 }
 
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_context_create_with_log_handler(
+	const stackimport_log_handler* handler,
+	stackimport_context** out_context)
+{
+	if(!valid_log_handler(handler))
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	if(!out_context)
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	stackimport_platform platform = {};
+	stackimport_platform_init(&platform);
+	void* storage = platform.allocate(sizeof(stackimport_context), alignof(stackimport_context), platform.user_data);
+	if(!storage)
+		return STACKIMPORT_STATUS_ALLOCATION_FAILED;
+	auto* context = new (storage) stackimport_context(make_context(platform, true, handler));
+	*out_context = context;
+	return STACKIMPORT_STATUS_OK;
+}
+
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_destroy(stackimport_context* context)
 {
 	if(!context)
 		return;
+	if(!valid_context(context))
+	{
+		stackimport_internal_message(STACKIMPORT_MESSAGE_ERROR, "Error: stackimport context ABI signature mismatch");
+		return;
+	}
 	const stackimport_platform platform = context->platform;
 	const bool allocator_owns_context = context->allocator_owns_context;
 	stackimport_platform_scope scope(context->internal_platform);
@@ -346,6 +471,8 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 		!options->input_path ||
 		!options->output_package_path)
 		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	if(!valid_context(context))
+		return STACKIMPORT_STATUS_ABI_MISMATCH;
 	if((options->flags & ~kKnownImportFlags) != 0)
 		return STACKIMPORT_STATUS_UNSUPPORTED_OPTION;
 

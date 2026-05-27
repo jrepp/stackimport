@@ -87,6 +87,15 @@ struct CountingPlatformState {
 	bool fail_closes = false;
 };
 
+struct LogHandlerState {
+	int messages = 0;
+	uint32_t last_severity = STACKIMPORT_MESSAGE_INFO;
+	uint32_t last_category = STACKIMPORT_LOG_GENERAL;
+	std::string last_message;
+	std::string last_detail;
+	bool saw_status_or_progress = false;
+};
+
 struct ResourceForkPlatformState : CountingPlatformState {
 	const uint8_t* resource_fork_data = nullptr;
 	size_t resource_fork_size = 0;
@@ -146,6 +155,33 @@ int STACKIMPORT_CALL counting_make_directory(const char* path, void*)
 	const int result = mkdir(path, 0777);
 #endif
 	return result == 0 || errno == EEXIST ? 0 : result;
+}
+
+void STACKIMPORT_CALL test_log_message(uint32_t severity, const char* message, void* user_data)
+{
+	auto* state = static_cast<LogHandlerState*>(user_data);
+	state->messages++;
+	state->last_severity = severity;
+	state->last_message = message ? message : "";
+	if(state->last_message.find("Status:") != std::string::npos ||
+		state->last_message.find("Progress:") != std::string::npos)
+		state->saw_status_or_progress = true;
+}
+
+void STACKIMPORT_CALL test_log_record(const stackimport_log_record* record, void* user_data)
+{
+	assert(record);
+	assert(record->struct_size >= sizeof(stackimport_log_record));
+	auto* state = static_cast<LogHandlerState*>(user_data);
+	state->messages++;
+	state->last_severity = record->severity;
+	state->last_category = record->category;
+	state->last_message = record->message ? record->message : "";
+	state->last_detail = record->detail ? record->detail : "";
+	if(record->category == STACKIMPORT_LOG_STATUS || record->category == STACKIMPORT_LOG_PROGRESS)
+		state->saw_status_or_progress = true;
+	if(record->category != STACKIMPORT_LOG_GENERAL)
+		assert(state->last_detail.size() < state->last_message.size());
 }
 
 bool has_resource_fork_suffix(const char* path)
@@ -1407,9 +1443,28 @@ void	RunTests()
 
 	assert(stackimport_context_size() <= 4096);
 	assert(stackimport_api_version() == STACKIMPORT_API_VERSION);
+	assert(std::strcmp(stackimport_version_string(), STACKIMPORT_VERSION_STRING) == 0);
+	assert(stackimport_version_packed() == STACKIMPORT_VERSION_PACKED);
+	assert(stackimport_version_packed() == 0x00000300u);
+	assert(STACKIMPORT_VERSION_MAJOR == 0);
+	assert(STACKIMPORT_VERSION_MINOR == 3);
+	assert(STACKIMPORT_VERSION_PATCH == 0);
+	assert(stackimport_context_abi_signature() != 0);
+	assert(std::strcmp(stackimport_status_string(STACKIMPORT_STATUS_ABI_MISMATCH), "ABI mismatch") == 0);
 	alignas(std::max_align_t) unsigned char storage[4096] = {};
 	stackimport_context* context = nullptr;
 	assert(stackimport_context_init(storage, sizeof(storage), &context) == STACKIMPORT_STATUS_OK);
+	stackimport_context_deinit(context);
+	assert(stackimport_context_init(storage, sizeof(storage), &context) == STACKIMPORT_STATUS_OK);
+	const uint32_t contextSignature = stackimport_context_abi_signature();
+	const uint32_t badContextSignature = contextSignature ^ 0xFFFFFFFFu;
+	std::memcpy(storage, &badContextSignature, sizeof(badContextSignature));
+	stackimport_import_options abiMismatchOptions = {};
+	stackimport_import_options_init(&abiMismatchOptions);
+	abiMismatchOptions.input_path = "/tmp/missing-stack";
+	abiMismatchOptions.output_package_path = "/tmp/missing-stack.xstk";
+	assert(stackimport_import(context, &abiMismatchOptions) == STACKIMPORT_STATUS_ABI_MISMATCH);
+	std::memcpy(storage, &contextSignature, sizeof(contextSignature));
 	stackimport_context_deinit(context);
 
 	stackimport_allocator allocator = {};
@@ -1597,6 +1652,66 @@ void	RunTests()
 	assert(platformState.opens > 0);
 	assert(platformState.reads > 0);
 	assert(platformState.writes > 0);
+
+	stackimport_log_handler invalidLogHandler = {};
+	stackimport_log_handler_init(&invalidLogHandler);
+	assert(stackimport_context_create_with_log_handler(&invalidLogHandler, &context) == STACKIMPORT_STATUS_INVALID_ARGUMENT);
+
+	LogHandlerState logHandlerState;
+	stackimport_log_handler logHandler = {};
+	stackimport_log_handler_init(&logHandler);
+	logHandler.log = test_log_record;
+	logHandler.user_data = &logHandlerState;
+	stackimport_context* logHandlerContext = nullptr;
+	assert(stackimport_context_create_with_log_handler(&logHandler, &logHandlerContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options logHandlerOptions = {};
+	stackimport_import_options_init(&logHandlerOptions);
+	const std::string logHandlerPackage = platformStackPath + ".log-handler.xstk";
+	logHandlerOptions.input_path = platformStackPath.c_str();
+	logHandlerOptions.output_package_path = logHandlerPackage.c_str();
+	assert(stackimport_import(logHandlerContext, &logHandlerOptions) == STACKIMPORT_STATUS_OK);
+	stackimport_context_destroy(logHandlerContext);
+	assert(logHandlerState.messages > 0);
+	assert(logHandlerState.saw_status_or_progress);
+
+	LogHandlerState storageLogHandlerState;
+	stackimport_log_handler storageLogHandler = {};
+	stackimport_log_handler_init(&storageLogHandler);
+	storageLogHandler.log = test_log_record;
+	storageLogHandler.user_data = &storageLogHandlerState;
+	alignas(std::max_align_t) unsigned char logHandlerStorage[4096] = {};
+	stackimport_context* storageLogHandlerContext = nullptr;
+	assert(stackimport_context_init_with_log_handler(
+		logHandlerStorage,
+		sizeof(logHandlerStorage),
+		&storageLogHandler,
+		&storageLogHandlerContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options storageLogHandlerOptions = {};
+	stackimport_import_options_init(&storageLogHandlerOptions);
+	const std::string storageLogHandlerPackage = platformStackPath + ".storage-log-handler.xstk";
+	storageLogHandlerOptions.input_path = platformStackPath.c_str();
+	storageLogHandlerOptions.output_package_path = storageLogHandlerPackage.c_str();
+	assert(stackimport_import(storageLogHandlerContext, &storageLogHandlerOptions) == STACKIMPORT_STATUS_OK);
+	stackimport_context_deinit(storageLogHandlerContext);
+	assert(storageLogHandlerState.messages > 0);
+	assert(storageLogHandlerState.saw_status_or_progress);
+
+	LogHandlerState legacyLogHandlerState;
+	stackimport_log_handler legacyLogHandler = {};
+	stackimport_log_handler_init(&legacyLogHandler);
+	legacyLogHandler.message = test_log_message;
+	legacyLogHandler.user_data = &legacyLogHandlerState;
+	stackimport_context* legacyLogHandlerContext = nullptr;
+	assert(stackimport_context_create_with_log_handler(&legacyLogHandler, &legacyLogHandlerContext) == STACKIMPORT_STATUS_OK);
+	stackimport_import_options legacyLogHandlerOptions = {};
+	stackimport_import_options_init(&legacyLogHandlerOptions);
+	const std::string legacyLogHandlerPackage = platformStackPath + ".legacy-log-handler.xstk";
+	legacyLogHandlerOptions.input_path = platformStackPath.c_str();
+	legacyLogHandlerOptions.output_package_path = legacyLogHandlerPackage.c_str();
+	assert(stackimport_import(legacyLogHandlerContext, &legacyLogHandlerOptions) == STACKIMPORT_STATUS_OK);
+	stackimport_context_destroy(legacyLogHandlerContext);
+	assert(legacyLogHandlerState.messages > 0);
+	assert(legacyLogHandlerState.saw_status_or_progress);
 
 	const std::string failingWritePackage = platformStackPath + ".write-failed.xstk";
 	CountingPlatformState failingWriteState;

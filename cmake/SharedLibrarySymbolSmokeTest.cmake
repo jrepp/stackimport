@@ -17,17 +17,23 @@ endif()
 
 set(required_symbols
     stackimport_api_version
+    stackimport_version_string
+    stackimport_version_packed
     stackimport_status_string
     stackimport_allocator_init
+    stackimport_log_handler_init
     stackimport_platform_init
     stackimport_import_options_init
     stackimport_context_size
     stackimport_context_alignment
+    stackimport_context_abi_signature
     stackimport_context_init
     stackimport_context_init_with_platform
+    stackimport_context_init_with_log_handler
     stackimport_context_deinit
     stackimport_context_create
     stackimport_context_create_with_platform
+    stackimport_context_create_with_log_handler
     stackimport_context_destroy
     stackimport_import
     stackimport_snd_to_wav

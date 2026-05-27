@@ -135,9 +135,23 @@ Callers that prefer heap allocation can provide `stackimport_allocator` callback
 to `stackimport_context_create`. Initialize public structs with
 `stackimport_allocator_init` and `stackimport_import_options_init` before setting
 fields; this keeps callers source-compatible as new optional fields are added.
+`stackimport_version.h` is generated from `VERSION.txt` at build time and
+provides `STACKIMPORT_VERSION_STRING` plus major/minor/patch macros; use
+`stackimport_version_string()` or `stackimport_version_packed()` to query the
+loaded library at runtime. The packed form is `0x00MMmmpp`, with major, minor,
+and patch in separate bytes. While StackImport remains pre-1.0, source or ABI
+breaking changes to the public library API must bump the minor version.
 Callers that need an explicit non-default calling convention can define
 `STACKIMPORT_CALL` before including `stackimport_c.h`; the macro is applied to
 both exported functions and callback typedefs.
+
+Embedders that only need log capture can initialize a `stackimport_log_handler`
+and pass it to `stackimport_context_init_with_log_handler` or
+`stackimport_context_create_with_log_handler`. The structured callback receives
+a `stackimport_log_record` with severity, category, full message text, and a
+trimmed detail pointer for status/progress/warning/error/fatal messages. The
+older severity-plus-message callback remains available as a lightweight
+fallback.
 
 For embedders that need full control over resource acquisition, use
 `stackimport_platform` and create contexts with
@@ -282,12 +296,25 @@ High-level C API example:
     #include <stddef.h>
     #include <stdio.h>
 
+    static void on_stackimport_log(const stackimport_log_record *record, void *user_data) {
+        (void)user_data;
+        fprintf(stderr, "[%u:%u] %s\n",
+                record->severity,
+                record->category,
+                record->detail ? record->detail : "");
+    }
+
     int main(void) {
         _Alignas(max_align_t) unsigned char storage[4096];
         stackimport_context *ctx = NULL;
 
+        stackimport_log_handler logs;
+        stackimport_log_handler_init(&logs);
+        logs.log = on_stackimport_log;
+
         stackimport_status status =
-            stackimport_context_init(storage, sizeof(storage), &ctx);
+            stackimport_context_init_with_log_handler(
+                    storage, sizeof(storage), &logs, &ctx);
         if (status != STACKIMPORT_STATUS_OK) {
             fprintf(stderr, "stackimport init failed: %s\n",
                     stackimport_status_string(status));

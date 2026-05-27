@@ -7,6 +7,7 @@
 struct stackimport_internal_platform {
 	stackimport_allocate_fn allocate;
 	stackimport_deallocate_fn deallocate;
+	stackimport_log_fn log;
 	stackimport_message_fn message;
 	stackimport_open_file_fn open_file;
 	stackimport_read_file_fn read_file;
@@ -14,11 +15,13 @@ struct stackimport_internal_platform {
 	stackimport_close_file_fn close_file;
 	stackimport_make_directory_fn make_directory;
 	void* user_data;
+	void* log_user_data;
 };
 
 const stackimport_internal_platform& stackimport_default_internal_platform();
 const stackimport_internal_platform& stackimport_current_internal_platform();
 stackimport_internal_platform stackimport_internal_platform_from_api(const stackimport_platform* platform);
+stackimport_log_record stackimport_internal_make_log_record(uint32_t severity, const char* message);
 void stackimport_internal_message(uint32_t severity, const char* message);
 void* stackimport_internal_allocate(size_t size, size_t alignment);
 void stackimport_internal_deallocate(void* ptr, stackimport_deallocate_fn deallocate, void* user_data);
