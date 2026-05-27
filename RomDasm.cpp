@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <map>
 #include <algorithm>
+#include <string>
 #include <set>
 #include <unordered_map>
 
@@ -123,15 +124,19 @@ uint32_t compute_crc32(std::span<const uint8_t> data) {
 }
 
 std::string compute_sha256(std::span<const uint8_t> data) {
+  std::string result;
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
-  return Sha256WithPhosg(data.data(), data.size());
+  result = Sha256WithPhosg(data.data(), data.size());
 #else
   char hex[65] = {0};
   for(size_t i = 0; i < data.size() && i < 32; i++) {
     snprintf(hex + i * 2, 3, "%02x", data[i]);
   }
-  return std::string(hex);
+  result = std::string(hex);
 #endif
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  return result;
 }
 
 struct RomHeader {

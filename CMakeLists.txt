@@ -198,7 +198,7 @@ if(STACKIMPORT_ENABLE_VENDOR)
     if(STACKIMPORT_BUILD_VENDOR_TOOLS)
         target_sources(stackimport_static PRIVATE $<TARGET_OBJECTS:stackimport_mace_resource_dasm_adapter>)
         target_link_libraries(stackimport_static PRIVATE vendor_resource_file_static)
-        target_compile_definitions(stackimport_static PRIVATE STACKIMPORT_HAS_RESOURCE_DASM=1)
+        target_compile_definitions(stackimport_static PUBLIC STACKIMPORT_HAS_RESOURCE_DASM=1)
         add_dependencies(stackimport_static vendor_resource_dasm)
     endif()
 endif()
@@ -287,7 +287,14 @@ if(APPLE)
     endif()
 endif()
 
-add_executable(stackimport main.cpp)
+add_executable(stackimport
+    main.cpp
+    StackImportCliCommon.cpp
+    StackImportCliImportMode.cpp
+    StackImportCliOptions.cpp
+    StackImportCliRomMode.cpp
+    StackImportCliScanMode.cpp
+)
 target_link_libraries(stackimport PRIVATE stackimport_static)
 set(STACKIMPORT_CORE_TARGETS stackimport_static stackimport_shared stackimport)
 if(TARGET stackimport_framework)

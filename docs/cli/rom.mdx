@@ -12,3 +12,23 @@ build/stackimport --rom --rom-base 0x40800000 --output /tmp/rom-analysis /path/t
 
 If `--output` is omitted, StackImport writes to `<input>.rom`. `--rom-base`
 accepts C-style integer syntax such as `0x40800000`.
+
+Atlas interchange files can be emitted alongside the disassembly output:
+
+```sh
+build/stackimport \
+  --rom /path/to/ROM \
+  --rom-base 0x40800000 \
+  --output data/disassembly/example-rom \
+  --atlas-output atlas/maps/example \
+  --emit-atlas \
+  --emit-json \
+  --emit-assets
+```
+
+When `--emit-atlas` or `--atlas-output` is used, StackImport writes the atlas TSV
+contract with headers even for phases that do not yet have rows:
+`roms.tsv`, `inventory.tsv`, `regions.tsv`, `functions.tsv`, `xrefs.tsv`,
+`pointer-tables.tsv`, `data-regions.tsv`, `resources.tsv`, `labels.tsv`,
+`strings.tsv`, `traps.tsv`, `source-overlays.tsv`, and `source-gaps.tsv`.
+Address columns are uppercase eight-digit hex without a `0x` prefix.
