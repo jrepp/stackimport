@@ -1,0 +1,57 @@
+---
+title: Resource Conversions
+description: Resource-fork conversion index by resource type.
+---
+
+Resource conversion is driven by `StackImportResourceTransforms.cpp` and exposed
+through generated package artifacts plus optional C API resource payload
+callbacks. Native resource metadata is recorded in `source-manifest.json`.
+
+## Image And Cursor Resources
+
+| Type                                           | Conversion                                                                  | Internal path                                               |
+| ---------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `ICON`                                         | 32x32 monochrome icon to RGBA32 payload when size is 128 bytes.             | `emit_builtin_resource_transforms`, `decode_icon_bw`        |
+| `ICN#`                                         | 32x32 monochrome icon/mask pair to RGBA32 payload.                          | `decode_icn_bw`                                             |
+| `SICN`                                         | 16x16 small icon list entries to RGBA32 payload variants.                   | `decode_icon_1bit_list_image`                               |
+| `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8` | Indexed color icons to RGBA32 payloads.                                     | `indexed_icon_spec`, `decode_icon_4bit`, `decode_icon_8bit` |
+| `icm#`, `ics#`                                 | Monochrome icon lists to RGBA32 payload variants.                           | `monochrome_icon_list_spec`, `decode_icon_1bit_masked_pair` |
+| `CURS`                                         | Cursor image to RGBA32 plus JSON hotspot metadata.                          | `emit_curs_transform`                                       |
+| `crsr`                                         | Color cursor to RGBA32 plus JSON metadata.                                  | `emit_crsr_transform`                                       |
+| `PICT`                                         | PICT to PNG binary payload when resource_dasm-backed decoding is available. | `emit_pict_transform`, `DecodePictWithResourceDasmToPng`    |
+| `cicn`                                         | Color icon to RGBA32 plus JSON metadata.                                    | `emit_cicn_transform`                                       |
+| `PAT `                                         | Single QuickDraw pattern to RGBA32.                                         | `decode_pat`                                                |
+| `PAT#`                                         | Pattern list to RGBA32 payload variants.                                    | `patlist::pattern_at`, `decode_pat`                         |
+| `ppat`                                         | Pixel pattern to RGBA32 plus JSON metadata.                                 | `emit_ppat_transform`                                       |
+| `ppt#`                                         | Pixel pattern list to RGBA32 payload variants.                              | `emit_ppt_list_transform`                                   |
+
+## Audio And Code Resources
+
+| Type           | Conversion                                                      | Internal path                                                    |
+| -------------- | --------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `snd `         | Converted to WAV binary payload.                                | `emit_snd_transform`, `ConvertSndResourceToWav`                  |
+| `XCMD`, `XFCN` | 68K code resource disassembly as UTF-8 text payload.            | `emit_code_resource_transform`, `DisassembleMac68kCodeResource`  |
+| `xcmd`, `xfcn` | PowerPC code resource disassembly as UTF-8 text payload.        | `emit_code_resource_transform`, `DisassemblePowerPCCodeResource` |
+| `CODE`         | Segment metadata as JSON.                                       | `emit_code_transform`                                            |
+| `DRVR`         | Driver metadata/disassembly as converted resource output.       | `emit_drvr_transform`                                            |
+| `dcmp`         | Decompressor metadata/disassembly as converted resource output. | `emit_dcmp_transform`                                            |
+
+## Text, Color, And Structured Metadata
+
+| Type                                                                                                   | Conversion                                         | Internal path                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STR `, `TEXT`                                                                                         | Mac text to UTF-8 text payload.                    | `emit_text_transform`                                                                                                                                           |
+| `STR#`, `TwCS`                                                                                         | String list to UTF-8/JSON payload.                 | `emit_string_list_transform`                                                                                                                                    |
+| `vers`                                                                                                 | Version resource to JSON.                          | `emit_vers_transform`                                                                                                                                           |
+| `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, `wctb`                                                 | Color table to JSON.                               | `emit_color_table_transform`                                                                                                                                    |
+| `pltt`, `PLTE`                                                                                         | Palette metadata to JSON.                          | `emit_pltt_transform`, `emit_plte_transform`                                                                                                                    |
+| `HCbg`, `HCcd`                                                                                         | AddColor background/card data to JSON.             | `emit_addcolor_transform`                                                                                                                                       |
+| `cfrg`                                                                                                 | Code Fragment Manager metadata to JSON.            | `emit_cfrg_transform`                                                                                                                                           |
+| `MBAR`, `MENU`, `DITL`, `DLOG`, `WIND`, `CNTL`, `ALRT`                                                 | Classic UI resource metadata to JSON.              | `emit_mbar_transform`, `emit_menu_transform`, `emit_ditl_transform`, `emit_dlog_transform`, `emit_wind_transform`, `emit_cntl_transform`, `emit_alrt_transform` |
+| `FREF`, `BNDL`                                                                                         | Finder file-reference and bundle metadata to JSON. | `emit_fref_transform`, `emit_bndl_transform`                                                                                                                    |
+| `ROv#`, `RSSC`, `TxSt`, `styl`, `KCHR`, `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, `LAYO`, `SIZE`, `finf` | Parsed structured metadata to JSON.                | Type-specific `emit_*_transform` functions                                                                                                                      |
+
+Unsupported resource types are still preserved in native resource metadata and
+raw package artifacts when resource-fork extraction sees them. New conversions
+should be added through the transform layer so package output and C API payload
+callbacks stay aligned.

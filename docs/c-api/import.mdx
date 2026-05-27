@@ -1,0 +1,17 @@
+---
+title: Import Operation
+description: Configure and run stackimport_import.
+---
+
+`stackimport_import` converts one stack into one explicit output package path.
+The call is synchronous.
+
+| Flag                                 | CLI equivalent    | Behavior                                               |
+| ------------------------------------ | ----------------- | ------------------------------------------------------ |
+| `STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS` | `--dumprawblocks` | Write raw `.data` files for stack blocks.              |
+| `STACKIMPORT_IMPORT_NO_STATUS`       | `--nostatus`      | Suppress status diagnostics.                           |
+| `STACKIMPORT_IMPORT_NO_PROGRESS`     | `--noprogress`    | Suppress progress diagnostics.                         |
+| `STACKIMPORT_IMPORT_RAW_GRAPHICS`    | `--rawgraphics`   | Preserve raw bitmap data instead of decoding graphics. |
+
+Unknown flags return `STACKIMPORT_STATUS_UNSUPPORTED_OPTION`. Use
+`stackimport_status_string(status)` for diagnostic text.

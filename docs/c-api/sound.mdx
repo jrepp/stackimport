@@ -1,0 +1,12 @@
+---
+title: Sound Conversion
+description: Convert standalone Classic Mac snd resources to WAV.
+---
+
+`stackimport_snd_to_wav` converts Classic Mac `snd ` data to WAV without a
+context. Pass `wav_buffer = NULL` and `wav_capacity = 0` to query the required
+size, then call again with a buffer.
+
+The function returns the WAV byte size on success and `0` on failure. On
+failure, `*out_error` points to a string that remains valid until the next call
+on the same thread.

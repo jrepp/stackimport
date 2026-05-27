@@ -1,0 +1,33 @@
+@layer base, starlight, theme, components, utilities;
+
+@import "@astrojs/starlight-tailwind";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+
+  --color-accent-200: #9fd4ff;
+  --color-accent-600: #006fb5;
+  --color-accent-700: #00568c;
+  --color-accent-900: #08334f;
+  --color-accent-950: #061f30;
+
+  --color-gray-100: #f5f6f7;
+  --color-gray-200: #e6e8eb;
+  --color-gray-300: #c9ced6;
+  --color-gray-400: #8f98a6;
+  --color-gray-500: #687282;
+  --color-gray-600: #4f5968;
+  --color-gray-700: #384252;
+  --color-gray-800: #232b36;
+  --color-gray-900: #151b23;
+}
+
+.sl-markdown-content table code {
+  white-space: nowrap;
+}

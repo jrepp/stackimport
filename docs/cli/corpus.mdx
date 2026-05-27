@@ -1,0 +1,18 @@
+---
+title: Corpus Mode
+description: Batch import and index stack collections.
+---
+
+Corpus runs use the repository script:
+
+```sh
+scripts/import_all_stacks.py --stackimport-bin build/stackimport
+```
+
+The script extracts `.sit` and `.hqx` archives, fingerprints files, imports only
+files classified as HyperCard stacks, and writes logs, reports, output packages,
+and a SQLite index under `import-runs/`.
+
+Use corpus runs for contrastive analysis: compare successful and failing stacks,
+inspect report tables, dump representative raw blocks, and update parser behavior
+and format documentation together.

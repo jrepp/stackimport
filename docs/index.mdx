@@ -1,0 +1,59 @@
+---
+title: StackImport
+description: Convert HyperCard stacks into readable JSON and media packages.
+---
+
+StackImport reads HyperCard stack files and writes a `.xstk` package containing
+structured JSON, decoded media, and raw evidence for parts of the file format
+that are still being reverse engineered.
+
+The project has three public surfaces:
+
+- `stackimport`, the command line importer. See the [CLI overview](./cli/).
+- `stackimport_c.h`, a stable C ABI for embedders. See the [C API design](./c-api/).
+- Homebrew-distributed libraries and `StackImport.framework`. See
+  [Framework Integration](./install/framework/).
+- The format notes under `Stack File Format/`, which track current parser
+  coverage and open questions. See [Format Understanding](./format/).
+
+## Build
+
+StackImport uses CMake and requires C17 and C++23-capable compilers.
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The compatibility Makefile wraps the same flow:
+
+```sh
+make stackimport
+make test
+```
+
+Strict warnings are enabled by default. To fail the build on warnings, configure
+with `STACKIMPORT_WARNINGS_AS_ERRORS=ON`.
+
+## Install
+
+Stable releases are available from the Homebrew tap:
+
+```sh
+brew tap jrepp/stackimport
+brew install stackimport
+pkg-config --cflags --libs stackimport
+```
+
+The formula installs the CLI, public C headers, shared C ABI library, static
+archive, `pkg-config` metadata, and the macOS `StackImport.framework` bundle.
+
+## Output Model
+
+By default, an import writes a sibling `.xstk` directory next to the source stack.
+The package contains generated JSON metadata, decoded media where supported, and
+raw block data so uncertain structures remain available for later analysis.
+
+For unknown stacks, start with a normal import or `--dumprawblocks`, then compare
+the raw `.data` files with the format notes before changing parser behavior.

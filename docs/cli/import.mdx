@@ -1,0 +1,26 @@
+---
+title: Import Mode
+description: Convert a stack to a .xstk package.
+---
+
+Import mode is the default mode:
+
+```sh
+stackimport [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] <originalStackPath>
+```
+
+If `--output` is omitted, StackImport writes a sibling `.xstk` directory next to
+the input stack.
+
+| Option                   | Behavior                                                      |
+| ------------------------ | ------------------------------------------------------------- |
+| `--output <packagePath>` | Write the generated package to an explicit directory.         |
+| `--dumprawblocks`        | Write raw `.data` files for stack blocks. Enabled by default. |
+| `--nodumprawblocks`      | Skip raw block exports for smaller packages.                  |
+| `--nostatus`             | Suppress status messages.                                     |
+| `--noprogress`           | Suppress progress messages.                                   |
+| `--rawgraphics`          | Export raw bitmap data instead of decoded graphics.           |
+
+The package contains JSON metadata, decoded media where supported, raw resource
+data where preservation is safer than conversion, and raw block evidence by
+default.

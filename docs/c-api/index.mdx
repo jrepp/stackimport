@@ -1,0 +1,28 @@
+---
+title: C API Design
+description: How the StackImport C ABI is structured.
+---
+
+The public C ABI is defined in `stackimport_c.h`. It is explicit about ownership,
+paths, callbacks, and versioning.
+
+The usual flow is:
+
+1. Create or initialize one `stackimport_context`.
+2. Initialize `stackimport_import_options`.
+3. Set `input_path` and `output_package_path`.
+4. Call `stackimport_import`.
+5. Destroy or deinitialize the context.
+
+```c
+stackimport_import_options options;
+stackimport_import_options_init(&options);
+options.input_path = "/path/to/MyStack";
+options.output_package_path = "/tmp/MyStack.xstk";
+options.flags = STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
+
+stackimport_status status = stackimport_import(ctx, &options);
+```
+
+Contexts are independent. Use one context per concurrent import and do not share
+a context across threads without external synchronization.

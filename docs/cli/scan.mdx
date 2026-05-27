@@ -1,0 +1,15 @@
+---
+title: Scan Mode
+description: Print the block table for a stack.
+---
+
+Scan mode reads the block stream and prints offsets, sizes, types, IDs, and
+payload sizes. It does not create an output package.
+
+```sh
+build/stackimport --scan /path/to/Stack
+```
+
+Use scan mode before deeper reverse-engineering work. It gives a quick inventory
+of stack structure and helps choose representative stacks for `--dumprawblocks`
+or corpus comparison.

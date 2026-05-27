@@ -1,0 +1,66 @@
+---
+title: C API Reference
+description: Every public type and function in stackimport_c.h.
+---
+
+## Functions
+
+| API                                                | Description                                          |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| `stackimport_api_version()`                        | Loaded C ABI version.                                |
+| `stackimport_version_string()`                     | Loaded library version string.                       |
+| `stackimport_version_packed()`                     | Loaded version as `0x00MMmmpp`.                      |
+| `stackimport_status_string(status)`                | Stable text for a status code.                       |
+| `stackimport_allocator_init(allocator)`            | Initializes allocator struct.                        |
+| `stackimport_log_handler_init(handler)`            | Initializes log handler struct.                      |
+| `stackimport_platform_init(platform)`              | Initializes platform struct with libc defaults.      |
+| `stackimport_import_options_init(options)`         | Initializes import options.                          |
+| `stackimport_context_size()`                       | Required context storage size.                       |
+| `stackimport_context_alignment()`                  | Required context alignment.                          |
+| `stackimport_context_abi_signature()`              | Context ABI signature.                               |
+| `stackimport_context_init(...)`                    | Initializes caller-owned context storage.            |
+| `stackimport_context_init_with_platform(...)`      | Initializes caller-owned storage with a platform.    |
+| `stackimport_context_init_with_log_handler(...)`   | Initializes caller-owned storage with a log handler. |
+| `stackimport_context_deinit(context)`              | Destroys caller-owned context storage.               |
+| `stackimport_context_create(...)`                  | Allocates a context with allocator callbacks.        |
+| `stackimport_context_create_with_platform(...)`    | Allocates a context through a platform.              |
+| `stackimport_context_create_with_log_handler(...)` | Allocates a context with custom diagnostics.         |
+| `stackimport_context_destroy(context)`             | Destroys a heap-owned context.                       |
+| `stackimport_import(context, options)`             | Converts one stack to one output package.            |
+| `stackimport_snd_to_wav(...)`                      | Converts standalone `snd ` data to WAV.              |
+
+## Public Types
+
+`stackimport_context`, `stackimport_status`, `stackimport_import_flags`,
+`stackimport_resource_payload_format`, `stackimport_resource_payload_flags`,
+`stackimport_message_severity`, `stackimport_log_category`,
+`stackimport_resource_payload`, `stackimport_log_record`,
+`stackimport_allocator`, `stackimport_log_handler`, `stackimport_platform`, and
+`stackimport_import_options` are public ABI types.
+
+## Callback Types
+
+| Callback                          | Description                                          |
+| --------------------------------- | ---------------------------------------------------- |
+| `stackimport_allocate_fn`         | Allocates aligned memory.                            |
+| `stackimport_deallocate_fn`       | Releases memory allocated by the matching allocator. |
+| `stackimport_message_fn`          | Receives severity plus message diagnostics.          |
+| `stackimport_open_file_fn`        | Opens a file and returns an opaque handle.           |
+| `stackimport_read_file_fn`        | Reads bytes from a file handle.                      |
+| `stackimport_write_file_fn`       | Writes bytes to a file handle.                       |
+| `stackimport_close_file_fn`       | Closes a file handle.                                |
+| `stackimport_make_directory_fn`   | Creates a directory.                                 |
+| `stackimport_resource_wants_fn`   | Filters resource payload delivery.                   |
+| `stackimport_resource_payload_fn` | Receives resource payload bytes.                     |
+| `stackimport_log_fn`              | Receives structured diagnostics.                     |
+
+## Enum Groups
+
+| Enum                                  | Values                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `stackimport_status`                  | `OK`, `INVALID_ARGUMENT`, `ALLOCATION_FAILED`, `IMPORT_FAILED`, `UNSUPPORTED_OPTION`, `ABI_MISMATCH` |
+| `stackimport_import_flags`            | `DUMP_RAW_BLOCKS`, `NO_STATUS`, `NO_PROGRESS`, `RAW_GRAPHICS`                                        |
+| `stackimport_resource_payload_format` | `NATIVE`, `RGBA32`, `JSON_UTF8`, `TEXT_UTF8`, `BINARY`                                               |
+| `stackimport_resource_payload_flags`  | `NONE`, `NATIVE`, `CONVERTED`, `ALL`                                                                 |
+| `stackimport_message_severity`        | `INFO`, `WARNING`, `ERROR`, `FATAL`                                                                  |
+| `stackimport_log_category`            | `GENERAL`, `STATUS`, `PROGRESS`, `WARNING`, `ERROR`, `FATAL`                                         |

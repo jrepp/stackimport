@@ -1,0 +1,20 @@
+---
+title: Resource Payloads
+description: Stream native and converted resource payloads during import.
+---
+
+Resource callbacks let embedders receive native or converted resource payloads
+during `stackimport_import`.
+
+```c
+options.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+options.resource_wants = my_resource_wants;
+options.resource_payload = my_resource_payload;
+options.resource_user_data = user_data;
+```
+
+`resource_wants` filters delivery. `resource_payload` receives bytes and returns
+non-zero on success. Pointers inside `stackimport_resource_payload` are valid
+only for the callback invocation.
+
+Payload formats are `NATIVE`, `RGBA32`, `JSON_UTF8`, `TEXT_UTF8`, and `BINARY`.

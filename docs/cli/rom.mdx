@@ -1,0 +1,14 @@
+---
+title: ROM Mode
+description: Experimental ROM analysis mode.
+---
+
+ROM mode is separate from HyperCard stack importing. It analyzes a ROM image and
+writes `disassembly.s` plus `analysis.json`.
+
+```sh
+build/stackimport --rom --rom-base 0x40800000 --output /tmp/rom-analysis /path/to/ROM
+```
+
+If `--output` is omitted, StackImport writes to `<input>.rom`. `--rom-base`
+accepts C-style integer syntax such as `0x40800000`.

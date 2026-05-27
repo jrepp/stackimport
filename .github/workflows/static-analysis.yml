@@ -1,0 +1,54 @@
+name: Static Analysis
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+  schedule:
+    - cron: "19 10 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cmake-analysis:
+    name: CMake static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang clang-tidy cppcheck iwyu
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake
+          -S .
+          -B build-analysis
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSTACKIMPORT_STRICT_WARNINGS=ON
+          -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON
+          -DSTACKIMPORT_ENABLE_CLANG_TIDY=ON
+          -DSTACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER=ON
+          -DSTACKIMPORT_ENABLE_CPPCHECK=ON
+          -DSTACKIMPORT_ENABLE_INCLUDE_WHAT_YOU_USE=ON
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -Wdev
+          --warn-uninitialized
+
+      - name: Build with static analysis
+        run: cmake --build build-analysis --target stackimport-tests --parallel
+
+      - name: Test analyzed build
+        run: ctest --test-dir build-analysis --output-on-failure

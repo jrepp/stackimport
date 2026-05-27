@@ -1,0 +1,33 @@
+---
+title: Context Lifecycle
+description: Create, initialize, destroy, and validate StackImport contexts.
+---
+
+Caller-owned storage avoids heap allocation at the ABI boundary:
+
+```c
+_Alignas(max_align_t) unsigned char storage[4096];
+stackimport_context *ctx = NULL;
+stackimport_context_init(storage, sizeof(storage), &ctx);
+stackimport_context_deinit(ctx);
+```
+
+Heap-owned contexts use allocator callbacks:
+
+```c
+stackimport_allocator allocator;
+stackimport_allocator_init(&allocator);
+allocator.allocate = my_allocate;
+allocator.deallocate = my_deallocate;
+
+stackimport_context *ctx = NULL;
+stackimport_context_create(&allocator, &ctx);
+stackimport_context_destroy(ctx);
+```
+
+Related public APIs: `stackimport_context_size`,
+`stackimport_context_alignment`, `stackimport_context_abi_signature`,
+`stackimport_context_init`, `stackimport_context_init_with_platform`,
+`stackimport_context_init_with_log_handler`, `stackimport_context_deinit`,
+`stackimport_context_create`, `stackimport_context_create_with_platform`,
+`stackimport_context_create_with_log_handler`, and `stackimport_context_destroy`.

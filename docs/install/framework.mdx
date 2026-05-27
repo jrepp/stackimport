@@ -1,0 +1,58 @@
+---
+title: Framework Integration
+description: Install and load StackImport.framework from Homebrew.
+---
+
+The Homebrew formula installs the CLI, C header, shared C ABI library, static
+archive, `pkg-config` metadata, and the macOS framework bundle.
+
+```sh
+brew tap jrepp/stackimport
+brew install stackimport
+```
+
+Apple Silicon Homebrew installs the framework here:
+
+```text
+/opt/homebrew/opt/stackimport/Frameworks/StackImport.framework
+```
+
+On Intel Homebrew installations, use `/usr/local/opt/stackimport/Frameworks/StackImport.framework`.
+
+## SwiftPM Pattern
+
+A SwiftPM integration can expose the framework through a system-library target.
+The module map exposes the framework header as a Clang module:
+
+```text
+module CStackImport [system] {
+    header "/opt/homebrew/opt/stackimport/Frameworks/StackImport.framework/Headers/stackimport_c.h"
+    export *
+}
+```
+
+`Package.swift` then makes the module available to Swift targets:
+
+```swift
+.target(
+    name: "MyImporter",
+    dependencies: ["CStackImport"]
+),
+.systemLibrary(
+    name: "CStackImport",
+    path: "Sources/CStackImport"
+)
+```
+
+Swift code imports `CStackImport` and calls the C ABI. Apps that want optional
+runtime availability can load the framework executable with `dlopen`, resolve
+the required symbols with `dlsym`, check `stackimport_api_version()`, and report
+`brew install stackimport` when the framework is missing.
+
+## pkg-config Alternative
+
+Command-line embedders that do not need the framework bundle can use:
+
+```sh
+pkg-config --cflags --libs stackimport
+```

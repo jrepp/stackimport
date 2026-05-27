@@ -1,0 +1,23 @@
+---
+title: Platform And Logs
+description: Inject allocation, filesystem, directory, and diagnostic behavior.
+---
+
+`stackimport_platform` lets embedders inject allocation, diagnostics, file I/O,
+file close, and directory creation.
+
+```c
+stackimport_platform platform;
+stackimport_platform_init(&platform);
+platform.open_file = my_open;
+platform.read_file = my_read;
+platform.write_file = my_write;
+platform.close_file = my_close;
+platform.make_directory = my_mkdir;
+
+stackimport_context_create_with_platform(&platform, &ctx);
+```
+
+Callbacks are synchronous and must not unwind across the C ABI boundary. If you
+only need diagnostics, use `stackimport_log_handler` with
+`stackimport_context_create_with_log_handler`.

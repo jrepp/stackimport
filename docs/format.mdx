@@ -1,0 +1,57 @@
+---
+title: Format Understanding
+description: Current HyperCard stack format coverage and reverse-engineering status.
+---
+
+HyperCard stack files are reverse engineered here from local xtalk notes,
+current parser behavior, Creysoft's write-up, Rebecca Bettencourt's 2011 guide,
+and corpus runs. The maintained source notes live under `Stack File Format/`.
+
+## File Conventions
+
+Stack file data is big-endian, text is MacRoman, and the block stream terminates
+with `TAIL`.
+
+Each block has this outer layout:
+
+| Offset | Size | Meaning                                     |
+| ------ | ---: | ------------------------------------------- |
+| 0      |    4 | Block size, including the full block header |
+| 4      |    4 | Four-character block type                   |
+| 8      |    4 | Signed block ID                             |
+| 12     |    4 | Filler, always zero                         |
+| 16     |    n | Type-specific data                          |
+
+`CStackFile.cpp` reads from offset 12 into `blockData`, so parser offsets include
+the filler word as the first four bytes of `blockData`.
+
+## Published Indexes
+
+- [Block Types](./blocks/) maps every currently documented block type to parser
+  behavior and internal implementation entry points.
+- [Resource Conversions](../resources/conversions/) indexes resource-fork
+  conversions by resource type and grounds them in the transform functions that
+  emit package artifacts and C API payloads.
+
+## Known Limits
+
+- Some `PRNT` internal fields remain unknown.
+- `PRST` output is a selected semantic model of QuickDraw page setup fields, not
+  a byte-for-byte interpretation of every reserved byte.
+- AddColor supports documented object types `0x01` through `0x05`; unknown
+  object types stop AddColor parsing for that resource.
+- External command and function resources are preserved as code-resource output
+  and metadata, but they are not executed.
+
+## Evidence Workflow
+
+Prefer contrastive analysis across stacks instead of single-file guesses:
+
+1. Run a focused subset through `scripts/import_all_stacks.py`.
+2. Review report tables and logs in the run directory.
+3. Separate extraction and classification issues from parser issues.
+4. Compare successful and failing stacks with similar layouts.
+5. Use `--dumprawblocks` on representative inputs.
+6. Reconcile byte offsets against `Stack File Format/README.md` and topic notes.
+7. Update parser behavior and format documentation together.
+8. Re-run the same subset before broadening the corpus.

@@ -1,0 +1,28 @@
+---
+title: Block Types
+description: Published coverage for HyperCard stack block types.
+---
+
+This index follows the block coverage table in `Stack File Format/README.md` and
+points each block type at the importer behavior.
+
+| Type   | Parser behavior                                                                                              | Primary internals                                                         |
+| ------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `STAK` | Reads stack metadata, dimensions, patterns, scripts, and referenced table IDs.                               | `CStackFile::LoadStackBlock`                                              |
+| `STBL` | Reads styled-text style table entries used by field content.                                                 | `CStackFile::LoadStyleTable`                                              |
+| `FTBL` | Reads font IDs and MacRoman font names.                                                                      | `CStackFile::LoadFontTable`                                               |
+| `LIST` | Reads page-table references and per-page card entry counts.                                                  | `CStackFile::LoadListBlock`                                               |
+| `PAGE` | Reads ordered card IDs and flags.                                                                            | `CStackFile::LoadPageTable`                                               |
+| `BKGD` | Reads background layer parts, contents, name, and script.                                                    | `CStackFile::LoadLayerBlock`                                              |
+| `CARD` | Reads card owner background, parts, contents, name, script, and marked flag.                                 | `CStackFile::LoadLayerBlock`                                              |
+| `BMAP` | Decodes WOBA bitmap data to PBM, or writes raw bitmap data when requested or when the header is unsupported. | `woba_decode`, `picture::writebitmapandmasktopbm`, `CStackFile::LoadFile` |
+| `PRFT` | Reads report templates and report items.                                                                     | `CStackFile::LoadReportTemplateBlock`                                     |
+| `PRST` | Emits selected QuickDraw page setup fields.                                                                  | `CStackFile::LoadPageSetupBlock`                                          |
+| `PRNT` | Emits page setup ID and report-template index.                                                               | `CStackFile::LoadPrintBlock`                                              |
+| `MAST` | Emits master reference metadata.                                                                             | `CStackFile::LoadMasterBlock`                                             |
+| `FREE` | Skipped as free block-stream space.                                                                          | `BlockParser`, `CStackFile::LoadFile`                                     |
+| `TAIL` | Terminates the block stream.                                                                                 | `BlockParser`                                                             |
+
+Unknown block types are retained in the source block index and produce a
+diagnostic when skipped. Raw block output remains the evidence path for newly
+observed or partially understood structures.
