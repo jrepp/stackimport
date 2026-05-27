@@ -1,0 +1,57 @@
+---
+title: Format Reverse Engineering
+description: Workflow for evidence-driven HyperCard format updates.
+---
+
+Use this workflow when investigating unknown stack structures, changing parser
+coverage, documenting block or resource semantics, or interpreting corpus
+failures.
+
+## Prerequisites
+
+- Start from a specific question, stack, failing import, unknown block field, or
+  report pattern.
+- Read the relevant notes in `Stack File Format/README.md` and the topic files
+  under `Stack File Format/`.
+- Keep legacy Mac encoding in mind. Treat undecodable bytes as evidence, not as
+  disposable text.
+
+## Steps
+
+1. Run a focused corpus subset through `scripts/import_all_stacks.py`.
+2. Review the run database tables, especially report summary and diagnostic
+   tables, plus captured logs in the run directory.
+3. Separate extraction and classification issues from parser issues.
+4. Compare successful and failing stacks with similar block or resource layouts.
+5. Use `build/stackimport --dumprawblocks /path/to/Stack` on representative
+   inputs.
+6. Reconcile byte offsets against `Stack File Format/README.md` and topic notes.
+7. Update parser behavior and format documentation together.
+8. Re-run the same focused subset before broadening the corpus.
+
+## Validation
+
+Run the C++ validation workflow when parser code changes. For documentation-only
+changes, run the documentation site workflow.
+
+For importer behavior changes, include at least one manual stack run when a
+representative input is available:
+
+```sh
+build/stackimport /path/to/Stack
+build/stackimport --dumprawblocks /path/to/Stack
+```
+
+## Documentation Requirements
+
+Record corpus evidence when a conclusion comes from observed stacks. Include
+stack paths, archive names, run directories, logs, SQLite/report locations, byte
+offsets, and known uncertainty where practical.
+
+Do not silently skip unknown or reserved bytes. Document whether understanding is
+high, medium, or low.
+
+## Handoff
+
+Report the evidence used, the stacks or corpus run inspected, parser and docs
+changes made, validation results, and remaining unknown fields.

@@ -1,0 +1,50 @@
+---
+title: Documentation Site Change
+description: Workflow for docs and Astro/Starlight site updates.
+---
+
+Use this workflow when changing documentation under `docs/`, site configuration
+under `website/`, navigation, MDX content, or generated documentation pages.
+
+## Prerequisites
+
+- Check `git status --short` and preserve unrelated local changes.
+- Inspect `website/package.json` for the current scripts.
+- Use `.mdx` for pages that should be included in the documentation site.
+- Keep pages self-contained: describe the audience, purpose, commands, and
+  validation path without assuming prior conversation context.
+
+## Steps
+
+1. Place new documentation in the most specific existing section, or create a new
+   section with an `index.mdx` when the topic is cross-cutting.
+2. Include front matter with `title` and `description`.
+3. Link new pages from a nearby index page.
+4. Add Starlight sidebar entries in `website/astro.config.mjs` when the pages
+   should be discoverable in site navigation.
+5. Prefer relative links between documentation pages.
+6. Keep command examples runnable from the stated directory.
+
+## Validation
+
+Run formatting and the site build from `website/`:
+
+```sh
+cd website
+pnpm lint
+pnpm build
+```
+
+The site requires Node 24 or newer. If `pnpm` is unavailable but dependencies are
+already installed, use local binaries:
+
+```sh
+cd website
+./node_modules/.bin/prettier --check . ../docs
+./node_modules/.bin/astro build
+```
+
+## Handoff
+
+Report added, moved, or removed pages; navigation changes; validation commands;
+and any package-manager fallback used.

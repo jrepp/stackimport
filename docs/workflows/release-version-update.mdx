@@ -1,0 +1,47 @@
+---
+title: Release And Version Update
+description: Workflow for SemVer and version-surface changes.
+---
+
+Use this workflow when preparing a release, changing public API or ABI behavior,
+or touching the compile-time or runtime version surfaces.
+
+## Prerequisites
+
+- Read `VERSION.txt`; it is the source of truth.
+- Identify whether the change is a compatible fix, compatible addition,
+  breaking public API or ABI change, or major feature.
+- Check public surfaces: CLI behavior, `stackimport_c.h`, generated
+  `stackimport_version.h`, runtime version queries, package metadata, and
+  installation docs.
+
+## Version Rules
+
+- Keep `VERSION.txt` SemVer.
+- While the library is pre-1.0, bump the minor version for breaking public API or
+  ABI changes.
+- Bump the major version for major feature work.
+- Bump the patch version for compatible additions and fixes.
+
+## Steps
+
+1. Update `VERSION.txt` when the change requires a version bump.
+2. Verify generated compile-time version macros match the source version.
+3. Verify public C ABI runtime version queries report the same version.
+4. Update release-facing documentation when install, packaging, or compatibility
+   behavior changes.
+5. Avoid mixing unrelated parser or documentation cleanup into a release-only
+   version change.
+
+## Validation
+
+Run the C++ validation workflow. If release documentation or the docs site
+changes, also run the documentation site workflow.
+
+When package metadata changes, validate the relevant packaging path or document
+why it was not run.
+
+## Handoff
+
+Report the old and new versions, why the SemVer level was chosen, public
+surfaces checked, validation commands, and any release packaging steps not run.

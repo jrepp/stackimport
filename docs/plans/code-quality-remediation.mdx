@@ -1,4 +1,7 @@
-# Code Quality And Vendor Boundary Remediation Plan
+---
+title: Code Quality Remediation
+description: Parser correctness, C API behavior, and vendor-boundary remediation plan.
+---
 
 ## Purpose
 
@@ -619,14 +622,14 @@ all consumers listed in the lateral audit above have been updated and tested.
 
 - Default build and tests pass:
   `cmake -S . -B build && cmake --build build &&
-  ctest --test-dir build --output-on-failure`.
+ctest --test-dir build --output-on-failure`.
 - Warning-as-error pass succeeds:
   `cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Debug
-  -DSTACKIMPORT_STRICT_WARNINGS=ON
-  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -Wdev --warn-uninitialized &&
-  cmake --build build-cmake &&
-  ctest --test-dir build-cmake --output-on-failure`.
+-DSTACKIMPORT_STRICT_WARNINGS=ON
+-DSTACKIMPORT_WARNINGS_AS_ERRORS=ON
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -Wdev --warn-uninitialized &&
+cmake --build build-cmake &&
+ctest --test-dir build-cmake --output-on-failure`.
 - Vendor-tool on/off configurations build.
 - C API consumers can import without direct filesystem or allocation behavior
   escaping the configured platform callbacks.

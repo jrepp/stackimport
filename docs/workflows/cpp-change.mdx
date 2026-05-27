@@ -1,0 +1,71 @@
+---
+title: C++ Parser Or Library Change
+description: Workflow for scoped importer, parser, and C API code changes.
+---
+
+Use this workflow when changing C or C++ source, public headers, parser behavior,
+resource conversion, or command-line behavior.
+
+## Prerequisites
+
+- Read the files that own the behavior before editing. Common entry points are
+  `CStackFile.cpp`, `CStackFile.h`, `byteutils.cpp`, `byteutils.h`, `woba.cpp`,
+  and `picture.cpp`.
+- Check `git status --short` and preserve unrelated local changes.
+- Identify whether the change affects public CLI output, C ABI behavior, or
+  documented file-format understanding.
+
+## Steps
+
+1. Make the narrowest change that solves the issue.
+2. Prefer existing helpers and local parsing patterns over new ad hoc logic.
+3. Decode classic Mac text at explicit boundaries, usually as MacRoman, and keep
+   binary fields as bytes until a format rule identifies them as text.
+4. Preserve raw offsets, payloads, or checksums for uncertain structures.
+5. Add or update focused tests when behavior changes or a regression case is
+   available.
+6. Update relevant documentation when parser behavior or public output changes.
+7. If the public API or ABI changes, evaluate `VERSION.txt` against the
+   repository SemVer rules.
+
+## Validation
+
+Run the normal CMake build and tests:
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Before handoff, run a warning-as-error pass for C++ changes:
+
+```sh
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+If static-analysis tools are installed, also run the configured analyzer build:
+
+```sh
+cmake -S . -B build-analysis \
+  -DSTACKIMPORT_ENABLE_CLANG_TIDY=ON \
+  -DSTACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER=ON \
+  -DSTACKIMPORT_ENABLE_CPPCHECK=ON \
+  -DSTACKIMPORT_ENABLE_INCLUDE_WHAT_YOU_USE=ON
+cmake --build build-analysis
+```
+
+Do not skip the compiler warning checks just because optional analyzer tools are
+not installed.
+
+## Handoff
+
+Report the changed behavior, the files touched, the validation commands that
+passed, and any tests or corpus cases that were not run.

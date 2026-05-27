@@ -48,6 +48,42 @@ cmake --build build-analysis
 Do not treat missing analyzer tools as a reason to skip the compiler/CMake
 warning checks.
 
+## Documentation Site Workflow
+
+The documentation site lives under `website/` and is built with Astro/Starlight.
+When changing files under `docs/` or `website/`, validate both formatting and the
+site build from the `website/` directory:
+
+```sh
+cd website
+pnpm lint
+pnpm build
+```
+
+The site package requires Node 24 or newer and declares `pnpm` as its package
+manager. If `pnpm` is not available on `PATH` but dependencies are already
+installed, use the local binaries directly as a fallback:
+
+```sh
+cd website
+./node_modules/.bin/prettier --check . ../docs
+./node_modules/.bin/astro build
+```
+
+## Workflow References
+
+Repeatable project workflows live under `docs/workflows/`. Use them as the
+canonical checklist for common tasks before making changes:
+
+- `docs/workflows/cpp-change.mdx` for importer, parser, C API, and C++ changes.
+- `docs/workflows/docs-site-change.mdx` for `docs/` and `website/` changes.
+- `docs/workflows/format-reverse-engineering.mdx` for evidence-driven format
+  investigation.
+- `docs/workflows/corpus-import-run.mdx` for batch importer runs and report
+  review.
+- `docs/workflows/release-version-update.mdx` for SemVer and release-surface
+  updates.
+
 ## Versioning Discipline
 
 `VERSION.txt` is the source of truth for the library version. Keep it SemVer.

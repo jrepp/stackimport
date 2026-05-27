@@ -1,0 +1,56 @@
+---
+title: Corpus Import Run
+description: Workflow for batch imports and report review.
+---
+
+Use this workflow when running StackImport against a collection of stacks,
+checking parser coverage across many inputs, or generating evidence for a
+format-investigation task.
+
+## Prerequisites
+
+- Build `stackimport` first.
+- Confirm the input directory. The default local corpus is
+  `/Users/jrepp/d/pantechnicon/stacks`.
+- Ensure `uv` is available for the script shebang.
+- Ensure archive tooling such as `unar` is available when processing `.sit` or
+  `.hqx` inputs.
+
+## Steps
+
+1. Run the importer script from the repository root:
+
+   ```sh
+   scripts/import_all_stacks.py --stackimport-bin build/stackimport
+   ```
+
+2. For focused analysis, prefer a small input subset before running the full
+   corpus.
+3. Review the generated run directory under `import-runs/`.
+4. Inspect report tables in the run SQLite database, captured logs, output
+   packages, and aggregate stats.
+5. Identify whether failures come from extraction, file classification, parser
+   behavior, media conversion, or output indexing.
+6. Use `--dumprawblocks` on representative stacks before changing parser logic.
+
+## Embedded Conversion Follow-Up
+
+After a completed run, convert embedded PBM/P4 files when needed:
+
+```sh
+scripts/convert_embedded_files.py --run-db import-runs/<run-id>/run.db
+```
+
+Preserve generated `*.provenance.json` sidecars. They record source hashes,
+target hashes, conversion status, and stack/archive metadata.
+
+## Validation
+
+For corpus-driven parser changes, re-run the same focused subset after the fix.
+Use the full C++ validation workflow before handing off code changes.
+
+## Handoff
+
+Report the run directory, input scope, command used, key database/report tables
+reviewed, failure categories found, and any representative stacks selected for
+follow-up.

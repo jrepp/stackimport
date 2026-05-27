@@ -81,6 +81,46 @@ export default defineConfig({
                 },
               ],
             },
+            {
+              label: "Planning",
+              items: [
+                { label: "Overview", link: "/plans/" },
+                {
+                  label: "Code Quality Remediation",
+                  link: "/plans/code-quality-remediation/",
+                },
+                {
+                  label: "Disassembly Annotation",
+                  link: "/plans/disassembly-annotation/",
+                },
+              ],
+            },
+            {
+              label: "Workflows",
+              items: [
+                { label: "Overview", link: "/workflows/" },
+                {
+                  label: "C++ Parser Or Library Change",
+                  link: "/workflows/cpp-change/",
+                },
+                {
+                  label: "Documentation Site Change",
+                  link: "/workflows/docs-site-change/",
+                },
+                {
+                  label: "Format Reverse Engineering",
+                  link: "/workflows/format-reverse-engineering/",
+                },
+                {
+                  label: "Corpus Import Run",
+                  link: "/workflows/corpus-import-run/",
+                },
+                {
+                  label: "Release And Version Update",
+                  link: "/workflows/release-version-update/",
+                },
+              ],
+            },
           ],
         },
       ],

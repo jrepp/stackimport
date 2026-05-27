@@ -1,0 +1,24 @@
+---
+title: Workflows
+description: Repeatable project workflows for humans and agents.
+---
+
+These workflows describe how to make common StackImport changes in a way that is
+repeatable, reviewable, and grounded in the repository's validation tools. They
+are written for both humans and coding agents.
+
+Each workflow states when to use it, what to inspect first, the expected steps,
+the validation commands, and what to include in the handoff.
+
+## Available Workflows
+
+- [C++ Parser Or Library Change](./cpp-change/) covers scoped changes to the
+  importer, parser, C API, and supporting C++ code.
+- [Documentation Site Change](./docs-site-change/) covers edits to `docs/` and
+  the Astro/Starlight site under `website/`.
+- [Format Reverse Engineering](./format-reverse-engineering/) covers
+  evidence-driven updates to parser behavior and format notes.
+- [Corpus Import Run](./corpus-import-run/) covers batch imports with
+  `scripts/import_all_stacks.py` and report review.
+- [Release And Version Update](./release-version-update/) covers SemVer,
+  generated version surfaces, and release validation.
