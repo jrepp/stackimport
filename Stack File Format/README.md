@@ -164,6 +164,7 @@ those dumps against the offset notes in this directory, then add a parser in
 
 | Topic | Files |
 | --- | --- |
+| Annotated Creysoft format reference (all block types) | `CreysoftFormatAnnotated.md` |
 | Stack block dispatch and stream layout | `Stack/ReadStackFile.txt`, `Stack/ReadBlock.txt` |
 | Bettencourt 2011 guide summary | `DefinitiveGuide2011.md` |
 | Backgrounds and cards | `Background/ReadBKGDBlock.txt`, `Card/ReadCARDBlock.txt` |
