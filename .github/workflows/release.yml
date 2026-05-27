@@ -117,7 +117,7 @@ jobs:
             fi
           fi
 
-          cp stackimport_c.h "${package_dir}/include/"
+          cp stackimport_c.h build/generated/stackimport_version.h "${package_dir}/include/"
           cp VERSION.txt README.md "${package_dir}/"
           (cd artifacts && cmake -E tar cf "${package_name}.zip" --format=zip -- "${package_name}")
 
