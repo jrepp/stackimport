@@ -581,7 +581,7 @@ SoundEnvironment bx_decode(const void* vdata, size_t, const char* base_directory
       ibnk.chunk_id = x;
       ret.instrument_banks.emplace(x, std::move(ibnk));
     } else {
-      ret.instrument_banks.emplace(x, x);
+      ret.instrument_banks.emplace(x, InstrumentBank{static_cast<uint32_t>(x), static_cast<uint32_t>(x), {}});
     }
     entry++;
   }
@@ -640,10 +640,11 @@ SoundEnvironment create_midi_sound_environment(const unordered_map<int16_t, Inst
   SoundEnvironment env;
 
   // Create instrument bank 0
-  auto& inst_bank = env.instrument_banks.emplace(0, 0).first->second;
+  auto& inst_bank = env.instrument_banks.emplace(0, InstrumentBank{0, 0, {}}).first->second;
   for (const auto& it : instrument_metadata) {
     // TODO: do we need to pass in base_note for the vel region?
-    auto& inst = inst_bank.id_to_instrument.emplace(it.first, it.first).first->second;
+    auto inst_id = static_cast<uint32_t>(it.first);
+    auto& inst = inst_bank.id_to_instrument.emplace(inst_id, Instrument{inst_id, {}}).first->second;
     inst.key_regions.emplace_back(0, 0x7F);
     auto& key_region = inst.key_regions.back();
     key_region.vel_regions.emplace_back(VelocityRegion{0, 0x7F, 0, static_cast<uint16_t>(it.first)});
@@ -690,14 +691,15 @@ SoundEnvironment create_json_sound_environment(const phosg::JSON& instruments_js
   SoundEnvironment env;
 
   // Create instrument bank 0 and sample bank 0
-  auto& inst_bank = env.instrument_banks.emplace(0, 0).first->second;
+  auto& inst_bank = env.instrument_banks.emplace(0, InstrumentBank{0, 0, {}}).first->second;
   auto& sample_bank = env.sample_banks.emplace(0, 0).first->second;
 
   // Create instruments
   size_t sound_id = 1;
   for (const auto& inst_json : instruments_json.as_list()) {
     int64_t id = inst_json->at("id").as_int();
-    auto& inst = inst_bank.id_to_instrument.emplace(id, id).first->second;
+    auto inst_id = static_cast<uint32_t>(id);
+    auto& inst = inst_bank.id_to_instrument.emplace(inst_id, Instrument{inst_id, {}}).first->second;
 
     for (const auto& rgn_json : inst_json->at("regions").as_list()) {
       int64_t key_low = rgn_json->at("key_low").as_int();
