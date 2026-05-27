@@ -38,10 +38,16 @@ class Stackimport < Formula
   depends_on "cmake" => :build
 
   def install
+    cmake_args = std_cmake_args
+    if OS.mac?
+      cmake_args.reject! {{ |arg| arg.start_with?("-DCMAKE_OSX_ARCHITECTURES=") }}
+      cmake_args << "-DCMAKE_OSX_ARCHITECTURES=#{{Hardware::CPU.arch}}"
+    end
+
     system "cmake", "-S", ".", "-B", "build",
                     "-DSTACKIMPORT_BUILD_TESTS=OFF",
                     "-DSTACKIMPORT_BUILD_VENDOR_TESTS=OFF",
-                    *std_cmake_args
+                    *cmake_args
     system "cmake", "--build", "build", "--target", "install"
   end
 
