@@ -167,7 +167,7 @@ struct ibnk_chunk_header {
 Instrument ibnk_inst_decode(const void* vdata, size_t offset, size_t inst_id) {
   const uint8_t* data = reinterpret_cast<const uint8_t*>(vdata);
   const uint8_t* inst_data = data + offset;
-  Instrument result_inst(inst_id, {});
+  Instrument result_inst{static_cast<uint32_t>(inst_id), {}};
 
   // Old-style instrument (Luigi's Mansion / Pikmin era)
   if (!memcmp(inst_data, "INST", 4)) {
@@ -183,7 +183,7 @@ Instrument ibnk_inst_decode(const void* vdata, size_t offset, size_t inst_id) {
       const ibnk_inst_inst_key_region* key_region = reinterpret_cast<const ibnk_inst_inst_key_region*>(
           data + inst->key_region_offsets[x]);
 
-      result_inst.key_regions.emplace_back(key_low, key_region->key_high);
+      result_inst.key_regions.emplace_back(KeyRegion{key_low, key_region->key_high, {}});
       auto& result_key_region = result_inst.key_regions.back();
 
       uint8_t vel_low = 0;
@@ -216,7 +216,8 @@ Instrument ibnk_inst_decode(const void* vdata, size_t offset, size_t inst_id) {
       const ibnk_inst_pmap_header* pmap_header = reinterpret_cast<const ibnk_inst_pmap_header*>(
           data + percnew_header->pmap_offsets[z]);
 
-      result_inst.key_regions.emplace_back(z, z);
+      result_inst.key_regions.emplace_back(
+          KeyRegion{static_cast<uint8_t>(z), static_cast<uint8_t>(z), {}});
       auto& result_key_region = result_inst.key_regions.back();
 
       uint8_t vel_low = 0;
@@ -253,7 +254,7 @@ Instrument ibnk_inst_decode(const void* vdata, size_t offset, size_t inst_id) {
           data + offset);
       offset += sizeof(ibnk_inst_instnew_key_region);
 
-      result_inst.key_regions.emplace_back(key_low, key_region->key_high);
+      result_inst.key_regions.emplace_back(KeyRegion{key_low, key_region->key_high, {}});
       auto& result_key_region = result_inst.key_regions.back();
 
       uint8_t vel_low = 0;
@@ -311,7 +312,8 @@ Instrument ibnk_inst_decode(const void* vdata, size_t offset, size_t inst_id) {
     const ibnk_inst_per2_key_region* key_region = reinterpret_cast<const ibnk_inst_per2_key_region*>(
         data + offset_table[x]);
 
-    result_inst.key_regions.emplace_back(x, x);
+    result_inst.key_regions.emplace_back(
+        KeyRegion{static_cast<uint8_t>(x), static_cast<uint8_t>(x), {}});
     auto& result_key_region = result_inst.key_regions.back();
 
     uint8_t vel_low = 0;

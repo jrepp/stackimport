@@ -645,7 +645,7 @@ SoundEnvironment create_midi_sound_environment(const unordered_map<int16_t, Inst
     // TODO: do we need to pass in base_note for the vel region?
     auto inst_id = static_cast<uint32_t>(it.first);
     auto& inst = inst_bank.id_to_instrument.emplace(inst_id, Instrument{inst_id, {}}).first->second;
-    inst.key_regions.emplace_back(0, 0x7F);
+    inst.key_regions.emplace_back(KeyRegion{0, 0x7F, {}});
     auto& key_region = inst.key_regions.back();
     key_region.vel_regions.emplace_back(VelocityRegion{0, 0x7F, 0, static_cast<uint16_t>(it.first)});
   }
@@ -750,7 +750,8 @@ SoundEnvironment create_json_sound_environment(const phosg::JSON& instruments_js
       s.wave_table_index = 0;
 
       // Create the key region and vel region objects
-      inst.key_regions.emplace_back(key_low, key_high);
+      inst.key_regions.emplace_back(
+          KeyRegion{static_cast<uint8_t>(key_low), static_cast<uint8_t>(key_high), {}});
       auto& key_rgn = inst.key_regions.back();
       key_rgn.vel_regions.emplace_back(VelocityRegion{
           0, 0x7F, 0, static_cast<uint16_t>(sound_id), static_cast<float>(freq_mult), 1.0f, constant_pitch,

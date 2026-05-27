@@ -25,9 +25,9 @@ constexpr uint8_t SIZE_BYTE = 0;
 constexpr uint8_t SIZE_WORD = 1;
 constexpr uint8_t SIZE_LONG = 2;
 
-constexpr string char_for_size = "bwl?";
-constexpr string char_for_tsize = "wl";
-constexpr string char_for_dsize = "?blw";
+constexpr array<char, 4> char_for_size{'b', 'w', 'l', '?'};
+constexpr array<char, 2> char_for_tsize{'w', 'l'};
+constexpr array<char, 4> char_for_dsize{'?', 'b', 'l', 'w'};
 
 constexpr array<const char*, 7> name_for_value_type{
     "int32_t", "float", "extended", "packed_real", "int16_t", "double", "int8_t"};
