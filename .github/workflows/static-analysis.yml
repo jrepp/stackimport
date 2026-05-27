@@ -48,7 +48,7 @@ jobs:
           --warn-uninitialized
 
       - name: Build with static analysis
-        run: cmake --build build-analysis --target stackimport-tests --parallel
+        run: cmake --build build-analysis --parallel
 
       - name: Test analyzed build
         run: ctest --test-dir build-analysis --output-on-failure
