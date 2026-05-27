@@ -227,9 +227,9 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
 
     if(STACKIMPORT_ENABLE_CLANG_TIDY)
         find_program(STACKIMPORT_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
-        set(VENDOR_CLANG_TIDY_COMMAND "${STACKIMPORT_CLANG_TIDY_EXE};--quiet;--warnings-as-errors=")
+        set(VENDOR_CLANG_TIDY_COMMAND "${STACKIMPORT_CLANG_TIDY_EXE}|--quiet|--warnings-as-errors=")
         if(STACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER)
-            string(APPEND VENDOR_CLANG_TIDY_COMMAND ";--checks=clang-analyzer-*,bugprone-*,performance-*,portability-*,readability-*")
+            string(APPEND VENDOR_CLANG_TIDY_COMMAND "|--checks=clang-analyzer-*,bugprone-*,performance-*,portability-*,readability-*")
         endif()
         list(APPEND VENDOR_CMAKE_ARGS
             "-DCMAKE_C_CLANG_TIDY=${VENDOR_CLANG_TIDY_COMMAND}"
@@ -240,8 +240,8 @@ if(STACKIMPORT_BUILD_VENDOR_TOOLS)
     if(STACKIMPORT_ENABLE_CPPCHECK)
         find_program(STACKIMPORT_CPPCHECK_EXE NAMES cppcheck REQUIRED)
         list(APPEND VENDOR_CMAKE_ARGS
-            "-DCMAKE_C_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE};--enable=warning,style,performance,portability;--inline-suppr;--quiet"
-            "-DCMAKE_CXX_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE};--enable=warning,style,performance,portability;--inline-suppr;--quiet"
+            "-DCMAKE_C_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE}|--enable=warning,style,performance,portability|--inline-suppr|--quiet"
+            "-DCMAKE_CXX_CPPCHECK=${STACKIMPORT_CPPCHECK_EXE}|--enable=warning,style,performance,portability|--inline-suppr|--quiet"
         )
     endif()
 
