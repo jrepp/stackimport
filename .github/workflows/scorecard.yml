@@ -11,15 +11,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
-  id-token: write
-  security-events: write
 
 jobs:
   scorecard:
     name: Analyze supply-chain posture
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
