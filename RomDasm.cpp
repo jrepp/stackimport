@@ -49,6 +49,7 @@ std::string trim_text(std::string text) {
 bool parse_disassembly_text_line(
     const std::string& line,
     uint32_t& address,
+    std::string& opcode_bytes,
     std::string& mnemonic,
     std::string& operands) {
   if(!parse_address_prefix(line, address))
@@ -57,9 +58,32 @@ bool parse_disassembly_text_line(
   size_t pos = line.find_first_not_of(' ', 8);
   if(pos == std::string::npos)
     return false;
-  while(pos < line.size() && (std::isxdigit(static_cast<unsigned char>(line[pos])) || line[pos] == ' '))
-    pos++;
-  pos = line.find_first_not_of(' ', pos);
+  const size_t bytes_start = pos;
+  std::string parsed_opcode_bytes;
+  while(pos < line.size()) {
+    pos = line.find_first_not_of(' ', pos);
+    if(pos == std::string::npos)
+      return false;
+    const size_t token_start = pos;
+    while(pos < line.size() && !std::isspace(static_cast<unsigned char>(line[pos])))
+      pos++;
+    const std::string token = line.substr(token_start, pos - token_start);
+    bool is_opcode_token = !token.empty();
+    for(char ch : token) {
+      if(!std::isxdigit(static_cast<unsigned char>(ch))) {
+        is_opcode_token = false;
+        break;
+      }
+    }
+    if(!is_opcode_token) {
+      opcode_bytes = trim_text(parsed_opcode_bytes.empty() ? line.substr(bytes_start, token_start - bytes_start) : parsed_opcode_bytes);
+      pos = token_start;
+      break;
+    }
+    if(!parsed_opcode_bytes.empty())
+      parsed_opcode_bytes.push_back(' ');
+    parsed_opcode_bytes += token;
+  }
   if(pos == std::string::npos)
     return false;
   const size_t mnemonic_start = pos;
@@ -70,6 +94,20 @@ bool parse_disassembly_text_line(
   std::transform(mnemonic.begin(), mnemonic.end(), mnemonic.begin(),
                  [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return true;
+}
+
+uint16_t first_opcode_word_from_text(const std::string& opcode_bytes) {
+  std::string hex;
+  for(char ch : opcode_bytes) {
+    if(std::isxdigit(static_cast<unsigned char>(ch))) {
+      hex.push_back(ch);
+      if(hex.size() == 4)
+        break;
+    }
+  }
+  if(hex.size() != 4)
+    return 0;
+  return static_cast<uint16_t>(std::strtoul(hex.c_str(), nullptr, 16));
 }
 
 bool extract_comment_target(const std::string& operands, uint32_t& target) {
@@ -95,6 +133,32 @@ std::string printable_context(std::span<const uint8_t> data, size_t offset) {
     result.push_back((ch >= 32 && ch <= 126) ? static_cast<char>(ch) : '.');
   }
   return result;
+}
+
+std::string classify_xref_kind(const std::string& mnemonic) {
+  if(mnemonic == "bsr" || mnemonic == "jsr")
+    return "call";
+  if(mnemonic == "jmp")
+    return "jump";
+  if(mnemonic == "bra" || (mnemonic.size() >= 2 && mnemonic[0] == 'b'))
+    return "branch";
+  return "memory";
+}
+
+double xref_confidence_for_kind(const std::string& kind) {
+  if(kind == "call" || kind == "jump" || kind == "branch")
+    return 0.85;
+  if(kind == "table")
+    return 0.75;
+  return 0.60;
+}
+
+std::string lookup_trap_name(uint16_t trap_number, const std::string& operands) {
+#if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
+  if(const char* name = ResourceDasmTrapName(trap_number, 0))
+    return name;
+#endif
+  return operands;
 }
 
 }
@@ -424,10 +488,13 @@ void classify_rom_structure(
   std::unordered_map<uint32_t, size_t> jumps;
   std::unordered_map<uint32_t, std::set<uint32_t>> refs;
   std::map<uint32_t, std::string> nearest_labels;
+  std::vector<Xref> xrefs;
+  std::vector<TrapCall> traps;
 
   for(const auto& region : analysis.code_regions) {
     size_t pos = 0;
     std::string current_label;
+    size_t line_index = 0;
     while(pos < region.text.size()) {
       const size_t end = region.text.find('\n', pos);
       const std::string line = region.text.substr(pos, (end != std::string::npos) ? end - pos : region.text.size() - pos);
@@ -436,14 +503,44 @@ void classify_rom_structure(
       }
 
       uint32_t address = 0;
+      std::string opcode_bytes;
       std::string mnemonic;
       std::string operands;
-      if(parse_disassembly_text_line(line, address, mnemonic, operands)) {
+      if(parse_disassembly_text_line(line, address, opcode_bytes, mnemonic, operands)) {
+        line_index++;
         if(!current_label.empty())
           nearest_labels.emplace(address, current_label);
+        if(mnemonic == "syscall") {
+          const uint16_t opcode_word = first_opcode_word_from_text(opcode_bytes);
+          if((opcode_word & 0xF000u) == 0xA000u) {
+            uint16_t trap_number = 0;
+            if((opcode_word & 0x0800u) != 0)
+              trap_number = static_cast<uint16_t>(opcode_word & 0x0BFFu);
+            else
+              trap_number = static_cast<uint16_t>(opcode_word & 0x00FFu);
+            TrapCall trap;
+            trap.address = address;
+            trap.trap_number = trap_number;
+            trap.trap_name = lookup_trap_name(trap_number, operands);
+            trap.space = trap_number >= 0x0800u ? "Toolbox" : "OS";
+            trap.confidence = 0.90;
+            trap.source = "disassembly:a-line";
+            traps.push_back(std::move(trap));
+          }
+        }
         uint32_t target = 0;
         if(extract_comment_target(operands, target) && target >= base_address && target < end_address) {
           refs[target].emplace(address);
+          const std::string kind = classify_xref_kind(mnemonic);
+          Xref xref;
+          xref.from = address;
+          xref.to = target;
+          xref.kind = kind;
+          xref.mnemonic = mnemonic;
+          xref.line = line_index;
+          xref.confidence = xref_confidence_for_kind(kind);
+          xref.source = "disassembly-comment-target";
+          xrefs.push_back(std::move(xref));
           if(mnemonic == "bsr" || mnemonic == "jsr")
             calls[target]++;
           else if(mnemonic == "bra" || mnemonic == "jmp" || mnemonic.rfind("b", 0) == 0)
@@ -509,6 +606,17 @@ void classify_rom_structure(
       if(targets.size() > 64)
         targets.resize(64);
       region.targets = std::move(targets);
+      for(size_t i = 0; i < region.targets.size(); i++) {
+        Xref xref;
+        xref.from = region.address + static_cast<uint32_t>(i * 4u);
+        xref.to = region.targets[i];
+        xref.kind = "table";
+        xref.mnemonic = "dc.l";
+        xref.line = 0;
+        xref.confidence = xref_confidence_for_kind(xref.kind);
+        xref.source = "scanner:aligned-absolute-addresses";
+        xrefs.push_back(std::move(xref));
+      }
       analysis.pointer_table_regions.push_back(std::move(region));
       offset = cursor;
     } else {
@@ -565,6 +673,38 @@ void classify_rom_structure(
       }
     }
   }
+
+  std::sort(xrefs.begin(), xrefs.end(),
+            [](const Xref& a, const Xref& b) {
+              if(a.from != b.from)
+                return a.from < b.from;
+              if(a.to != b.to)
+                return a.to < b.to;
+              if(a.kind != b.kind)
+                return a.kind < b.kind;
+              return a.line < b.line;
+            });
+  xrefs.erase(std::unique(xrefs.begin(), xrefs.end(),
+                          [](const Xref& a, const Xref& b) {
+                            return a.from == b.from &&
+                                   a.to == b.to &&
+                                   a.kind == b.kind &&
+                                   a.line == b.line;
+                          }),
+              xrefs.end());
+  std::sort(traps.begin(), traps.end(),
+            [](const TrapCall& a, const TrapCall& b) {
+              if(a.address != b.address)
+                return a.address < b.address;
+              return a.trap_number < b.trap_number;
+            });
+  traps.erase(std::unique(traps.begin(), traps.end(),
+                          [](const TrapCall& a, const TrapCall& b) {
+                            return a.address == b.address && a.trap_number == b.trap_number;
+                          }),
+              traps.end());
+  analysis.xrefs = std::move(xrefs);
+  analysis.traps = std::move(traps);
 }
 
 RomAnalysis scan_rom(

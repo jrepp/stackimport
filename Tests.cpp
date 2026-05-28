@@ -1524,6 +1524,53 @@ void test_rom_analysis_contracts()
 			sawStringCluster = true;
 	}
 	assert(sawStringCluster);
+
+	stackimport::RomDasm::RomAnalysis controlFlow;
+	controlFlow.info = info;
+	stackimport::RomDasm::DisassemblyRegion codeRegion;
+	codeRegion.start_address = baseAddress;
+	codeRegion.end_address = baseAddress + 0x80;
+	codeRegion.is_code = true;
+	codeRegion.confidence = 0.95;
+	codeRegion.text =
+		"40800000  6100 001E                bsr        +0x20 /* 40800020 */\n"
+		"40800004  60FA                     bra        -0x4 /* 40800000 */\n"
+		"40800006  4EFA 0018                jmp        [PC + 0x18 /* 40800020 */]\n"
+		"4080000A  41FA 0020                lea.l      A0, [PC + 0x20 /* 4080002C */]\n"
+		"4080000E  A9F0                     syscall    SysBeep\n";
+	controlFlow.code_regions.push_back(codeRegion);
+	std::vector<uint8_t> controlFlowBytes(0x100, 0);
+	stackimport::RomDasm::classify_rom_structure(
+		controlFlow,
+		std::span<const uint8_t>(controlFlowBytes.data(), controlFlowBytes.size()),
+		baseAddress);
+	bool sawCallXref = false;
+	bool sawBranchXref = false;
+	bool sawJumpXref = false;
+	bool sawMemoryXref = false;
+	for(const auto& xref : controlFlow.xrefs) {
+		if(xref.from == baseAddress && xref.to == baseAddress + 0x20 && xref.kind == "call")
+			sawCallXref = true;
+		if(xref.from == baseAddress + 0x04 && xref.to == baseAddress && xref.kind == "branch")
+			sawBranchXref = true;
+		if(xref.from == baseAddress + 0x06 && xref.to == baseAddress + 0x20 && xref.kind == "jump")
+			sawJumpXref = true;
+		if(xref.from == baseAddress + 0x0A && xref.to == baseAddress + 0x2C && xref.kind == "memory")
+			sawMemoryXref = true;
+	}
+	assert(sawCallXref);
+	assert(sawBranchXref);
+	assert(sawJumpXref);
+	assert(sawMemoryXref);
+	assert(!controlFlow.traps.empty());
+	assert(controlFlow.traps[0].address == baseAddress + 0x0E);
+	assert(controlFlow.traps[0].trap_number == 0x09F0);
+	bool sawCallCandidate = false;
+	for(const auto& fn : controlFlow.function_candidates) {
+		if(fn.address == baseAddress + 0x20 && fn.calls == 1)
+			sawCallCandidate = true;
+	}
+	assert(sawCallCandidate);
 }
 
 }

@@ -126,7 +126,27 @@ bool write_atlas_outputs(
 	}
 
 	std::string xrefs = "id\tfrom\tto\tkind\tsource_node\ttarget_node\tline\tconfidence\tsource\n";
+	for(size_t i = 0; i < analysis.xrefs.size(); i++)
+	{
+		const auto& xref = analysis.xrefs[i];
+		const std::string from = RomDasm::format_address(xref.from);
+		const std::string to = RomDasm::format_address(xref.to);
+		xrefs += "xref-" + from + "-" + to + "-" + tsv_escape(xref.kind) + "-" + std::to_string(i) + "\t";
+		xrefs += from + "\t" + to + "\t" + tsv_escape(xref.kind) + "\t";
+		xrefs += "addr-" + from + "\taddr-" + to + "\t" + std::to_string(xref.line) + "\t";
+		xrefs += std::to_string(xref.confidence) + "\t" + tsv_escape(xref.source) + "\n";
+	}
 	std::string traps = "id\trom_id\taddress\ttrap_number\ttrap_name\tspace\tconfidence\tsource\n";
+	for(size_t i = 0; i < analysis.traps.size(); i++)
+	{
+		const auto& trap = analysis.traps[i];
+		const std::string address = RomDasm::format_address(trap.address);
+		char trapNumber[8] = {};
+		snprintf(trapNumber, sizeof(trapNumber), "A%03X", static_cast<unsigned>(trap.trap_number));
+		traps += "trap-" + address + "-" + trapNumber + "-" + std::to_string(i) + "\t" + romId + "\t";
+		traps += address + "\t" + trapNumber + "\t" + tsv_escape(trap.trap_name) + "\t";
+		traps += tsv_escape(trap.space) + "\t" + std::to_string(trap.confidence) + "\t" + tsv_escape(trap.source) + "\n";
+	}
 	std::string sourceOverlays = "id\trom_id\taddress\tsource_path\tsymbol\tconfidence\tevidence\n";
 	std::string sourceGaps = "id\trom_id\taddress\tkind\tpriority\tconfidence\tevidence\n";
 	for(const auto& fn : analysis.function_candidates)
@@ -200,14 +220,16 @@ bool write_analysis_json(
 		rom_disassembly_mode(),
 		analysis.total_instructions);
 	fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
-	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"xrefs\": 0, \"traps\": 0},\n",
+	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"xrefs\": %zu, \"traps\": %zu},\n",
 		analysis.code_regions.size(),
 		analysis.strings.size(),
 		analysis.pointer_tables.size(),
 		analysis.pointer_table_regions.size(),
 		analysis.function_candidates.size(),
 		analysis.data_regions.size(),
-		analysis.resource_markers.size());
+		analysis.resource_markers.size(),
+		analysis.xrefs.size(),
+		analysis.traps.size());
 	fprintf(jsonFile, "  \"total_instructions\": %zu,\n", analysis.total_instructions);
 	fprintf(jsonFile, "  \"regions\": [\n");
 	fprintf(jsonFile,
@@ -262,7 +284,30 @@ bool write_analysis_json(
 			(i + 1 < analysis.function_candidates.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"xrefs\": [],\n");
+	fprintf(jsonFile, "  \"xrefs\": [\n");
+	for(size_t i = 0; i < analysis.xrefs.size(); i++)
+	{
+		const auto& xref = analysis.xrefs[i];
+		const std::string from = RomDasm::format_address(xref.from);
+		const std::string to = RomDasm::format_address(xref.to);
+		fprintf(jsonFile,
+			"    {\"id\":\"xref-%s-%s-%s-%zu\",\"from\":\"%s\",\"to\":\"%s\",\"kind\":\"%s\",\"source_node\":\"addr-%s\",\"target_node\":\"addr-%s\",\"mnemonic\":\"%s\",\"line\":%zu,\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			from.c_str(),
+			to.c_str(),
+			json_escape(xref.kind).c_str(),
+			i,
+			from.c_str(),
+			to.c_str(),
+			json_escape(xref.kind).c_str(),
+			from.c_str(),
+			to.c_str(),
+			json_escape(xref.mnemonic).c_str(),
+			xref.line,
+			xref.confidence,
+			json_escape(xref.source).c_str(),
+			(i + 1 < analysis.xrefs.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
 	fprintf(jsonFile, "  \"pointer_tables\": [\n");
 	for(size_t i = 0; i < analysis.pointer_table_regions.size(); i++)
 	{
@@ -337,7 +382,26 @@ bool write_analysis_json(
 			(i + 1 < analysis.strings.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"traps\": [],\n");
+	fprintf(jsonFile, "  \"traps\": [\n");
+	for(size_t i = 0; i < analysis.traps.size(); i++)
+	{
+		const auto& trap = analysis.traps[i];
+		char trapNumber[8] = {};
+		snprintf(trapNumber, sizeof(trapNumber), "A%03X", static_cast<unsigned>(trap.trap_number));
+		fprintf(jsonFile,
+			"    {\"id\":\"trap-%08X-%s-%zu\",\"address\":\"%08X\",\"trap_number\":\"%s\",\"trap_name\":\"%s\",\"space\":\"%s\",\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			static_cast<unsigned>(trap.address),
+			trapNumber,
+			i,
+			static_cast<unsigned>(trap.address),
+			trapNumber,
+			json_escape(trap.trap_name).c_str(),
+			json_escape(trap.space).c_str(),
+			trap.confidence,
+			json_escape(trap.source).c_str(),
+			(i + 1 < analysis.traps.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
 	fprintf(jsonFile, "  \"source_overlays\": [],\n");
 	fprintf(jsonFile, "  \"source_gaps\": [\n");
 	size_t sourceGapIndex = 0;
