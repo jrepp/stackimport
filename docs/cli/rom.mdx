@@ -93,7 +93,8 @@ supports the resource. Converted outputs are preferred in `resources.tsv` and
 `analysis.json.output_file`, while `analysis.json.raw_output_file` keeps the
 preserved native byte path. `analysis.json.resources` also records converter,
 variant index, width, height, and row-byte metadata when a transform supplies
-those fields.
+those fields, plus an `output_artifacts` array listing each preserved or
+converted file emitted for the resource.
 
 ## Determinism
 

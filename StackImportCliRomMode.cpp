@@ -174,6 +174,20 @@ RomResourceAsset primary_resource_asset(
 	return asset;
 }
 
+void write_resource_asset_json(FILE* jsonFile, const RomResourceAsset& asset)
+{
+	fprintf(jsonFile,
+		"{\"path\":\"%s\",\"media_type\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u}",
+		json_escape(asset.relative_path).c_str(),
+		json_escape(asset.media_type).c_str(),
+		json_escape(asset.decode_status).c_str(),
+		json_escape(asset.converter).c_str(),
+		static_cast<unsigned>(asset.variant_index),
+		static_cast<unsigned>(asset.width),
+		static_cast<unsigned>(asset.height),
+		static_cast<unsigned>(asset.row_bytes));
+}
+
 bool write_resource_assets(
 	const std::string& outputDir,
 	const std::vector<uint8_t>& buf,
@@ -572,7 +586,7 @@ bool write_analysis_json(
 		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
 		const std::string rawOutputFile = emitAssets ? resource_asset_relative_path(resource) : "";
 		fprintf(jsonFile,
-			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u,\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u,\"output_artifacts\":[",
 			static_cast<unsigned>(resource.address),
 			json_escape(resource.type).c_str(),
 			resource.id,
@@ -593,7 +607,23 @@ bool write_analysis_json(
 			static_cast<unsigned>(asset.variant_index),
 			static_cast<unsigned>(asset.width),
 			static_cast<unsigned>(asset.height),
-			static_cast<unsigned>(asset.row_bytes),
+			static_cast<unsigned>(asset.row_bytes));
+		if(emitAssets)
+		{
+			RomResourceAsset rawAsset;
+			rawAsset.relative_path = rawOutputFile;
+			rawAsset.media_type = "application/octet-stream";
+			rawAsset.decode_status = "preserved";
+			rawAsset.converter = "";
+			write_resource_asset_json(jsonFile, rawAsset);
+			for(const RomResourceAsset& converted : converted_resource_assets(resource, buf, analysis))
+			{
+				fprintf(jsonFile, ",");
+				write_resource_asset_json(jsonFile, converted);
+			}
+		}
+		fprintf(jsonFile,
+			"],\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
 			resource.confidence,
 			json_escape(resource.source).c_str(),
 			(i + 1 < analysis.resources.size()) ? "," : "");
