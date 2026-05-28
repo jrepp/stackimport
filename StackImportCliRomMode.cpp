@@ -1,5 +1,6 @@
 #include "StackImportCli.h"
 
+#include "StackImportResourceTransforms.h"
 #include "stackimport_logging.h"
 #include "stackimport_version.h"
 
@@ -12,6 +13,45 @@ namespace stackimport::cli {
 
 namespace {
 
+struct RomResourceAsset {
+	std::string relative_path;
+	std::string media_type;
+	std::string decode_status;
+	std::string converter;
+	ResourcePayloadFormat format = ResourcePayloadFormat::Native;
+	std::vector<uint8_t> data;
+};
+
+class RomResourceTransformOutput final : public IResourceOutput {
+public:
+	auto wants_resource_payload(const ResourcePayload& payload) -> bool override
+	{
+		return payload.format != ResourcePayloadFormat::Native;
+	}
+
+	auto on_resource_payload(const ResourcePayload& payload) -> bool override
+	{
+		RomResourceAsset asset;
+		asset.media_type = payload.media_type != nullptr ? payload.media_type : "application/octet-stream";
+		asset.decode_status = "converted";
+		asset.converter = "builtin-resource-transform";
+		asset.format = payload.format;
+		if(payload.data.data != nullptr && payload.data.size != 0)
+			asset.data.assign(payload.data.data, payload.data.data + payload.data.size);
+		assets.push_back(std::move(asset));
+		return true;
+	}
+
+	auto on_resource_error(const ResourceRef&, const char*) -> bool override
+	{
+		had_error = true;
+		return true;
+	}
+
+	std::vector<RomResourceAsset> assets;
+	bool had_error = false;
+};
+
 std::string resource_asset_relative_path(const RomDasm::ResourceRecord& resource)
 {
 	std::string type = resource.type;
@@ -22,6 +62,80 @@ std::string resource_asset_relative_path(const RomDasm::ResourceRecord& resource
 			ch = '_';
 	}
 	return path_join("assets/resources", type + "_" + std::to_string(resource.id) + "_" + RomDasm::format_address(resource.address) + ".bin");
+}
+
+std::string resource_converted_asset_relative_path(const RomDasm::ResourceRecord& resource, ResourcePayloadFormat format, size_t variant)
+{
+	std::string type = resource.type;
+	for(char& ch : type)
+	{
+		const unsigned char byte = static_cast<unsigned char>(ch);
+		if(!std::isalnum(byte))
+			ch = '_';
+	}
+	const char* extension = ".bin";
+	if(format == ResourcePayloadFormat::TextUtf8)
+		extension = ".txt";
+	else if(format == ResourcePayloadFormat::JsonUtf8)
+		extension = ".json";
+	else if(format == ResourcePayloadFormat::Rgba32)
+		extension = ".rgba";
+	std::string suffix;
+	if(variant != 0)
+		suffix = "_" + std::to_string(variant);
+	return path_join("assets/resources", type + "_" + std::to_string(resource.id) + "_" + RomDasm::format_address(resource.address) + suffix + extension);
+}
+
+std::vector<RomResourceAsset> converted_resource_assets(
+	const RomDasm::ResourceRecord& resource,
+	const std::vector<uint8_t>& buf,
+	const RomDasm::RomAnalysis& analysis)
+{
+	if(resource.address < analysis.info.base_address)
+		return {};
+	const size_t offset = static_cast<size_t>(resource.address - analysis.info.base_address);
+	if(offset > buf.size() || resource.length > buf.size() - offset)
+		return {};
+
+	rsrcd::ResRef res{};
+	res.type = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(resource.type.data()), resource.type.size()};
+	res.id = resource.id;
+	res.data = rsrcd::Bytes{buf.data() + offset, resource.length};
+	res.flags = resource.flags;
+	res.order = static_cast<uint32_t>(resource.order);
+	res.name = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(resource.name.data()), resource.name.size()};
+
+	ResourceRef ref = resource_ref_from_resref(res);
+	RomResourceTransformOutput output;
+	if(!emit_builtin_resource_transforms(res, ref, output))
+		return {};
+	for(size_t i = 0; i < output.assets.size(); i++)
+		output.assets[i].relative_path = resource_converted_asset_relative_path(resource, output.assets[i].format, i);
+	return output.assets;
+}
+
+RomResourceAsset primary_resource_asset(
+	const RomDasm::ResourceRecord& resource,
+	const std::vector<uint8_t>& buf,
+	const RomDasm::RomAnalysis& analysis,
+	bool emitAssets)
+{
+	RomResourceAsset asset;
+	if(!emitAssets)
+	{
+		asset.media_type = "application/octet-stream";
+		asset.decode_status = "metadata_only";
+		return asset;
+	}
+
+	std::vector<RomResourceAsset> converted = converted_resource_assets(resource, buf, analysis);
+	if(!converted.empty())
+		return converted.front();
+
+	asset.relative_path = resource_asset_relative_path(resource);
+	asset.media_type = "application/octet-stream";
+	asset.decode_status = "preserved";
+	return asset;
 }
 
 bool write_resource_assets(
@@ -46,6 +160,15 @@ bool write_resource_assets(
 		const std::string bytes(reinterpret_cast<const char*>(buf.data() + offset), resource.length);
 		if(!write_text_file(path, bytes))
 			return false;
+		for(const RomResourceAsset& asset : converted_resource_assets(resource, buf, analysis))
+		{
+			const std::string convertedPath = path_join(outputDir, asset.relative_path);
+			const std::string convertedBytes(
+				asset.data.empty() ? "" : reinterpret_cast<const char*>(asset.data.data()),
+				asset.data.size());
+			if(!write_text_file(convertedPath, convertedBytes))
+				return false;
+		}
 	}
 	return true;
 }
@@ -150,10 +273,10 @@ bool write_atlas_outputs(
 	{
 		const auto& resource = analysis.resources[i];
 		const std::string address = RomDasm::format_address(resource.address);
-		const std::string outputFile = emitAssets ? resource_asset_relative_path(resource) : "";
+		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
 		resources += "res-" + address + "-" + tsv_escape(resource.type) + "-" + std::to_string(resource.id) + "-" + std::to_string(i) + "\t";
 		resources += address + "\tparsed\t" + tsv_escape(resource.type) + "\t" + std::to_string(resource.id) + "\t";
-		resources += tsv_escape(resource.name) + "\tapplication/octet-stream\t" + tsv_escape(outputFile) + "\t";
+		resources += tsv_escape(resource.name) + "\t" + tsv_escape(asset.media_type) + "\t" + tsv_escape(asset.relative_path) + "\t";
 		resources += std::to_string(resource.confidence) + "\t" + tsv_escape(resource.source) + "\n";
 	}
 
@@ -410,9 +533,10 @@ bool write_analysis_json(
 	for(size_t i = 0; i < analysis.resources.size(); i++)
 	{
 		const auto& resource = analysis.resources[i];
-		const std::string outputFile = emitAssets ? resource_asset_relative_path(resource) : "";
+		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
+		const std::string rawOutputFile = emitAssets ? resource_asset_relative_path(resource) : "";
 		fprintf(jsonFile,
-			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"application/octet-stream\",\"output_file\":\"%s\",\"decode_status\":\"%s\",\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
 			static_cast<unsigned>(resource.address),
 			json_escape(resource.type).c_str(),
 			resource.id,
@@ -425,8 +549,11 @@ bool write_analysis_json(
 			json_escape(resource.name).c_str(),
 			static_cast<unsigned>(resource.flags),
 			resource.length,
-			json_escape(outputFile).c_str(),
-			emitAssets ? "preserved" : "metadata_only",
+			json_escape(asset.media_type).c_str(),
+			json_escape(asset.relative_path).c_str(),
+			json_escape(rawOutputFile).c_str(),
+			json_escape(asset.decode_status).c_str(),
+			json_escape(asset.converter).c_str(),
 			resource.confidence,
 			json_escape(resource.source).c_str(),
 			(i + 1 < analysis.resources.size()) ? "," : "");
