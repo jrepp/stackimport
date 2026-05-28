@@ -11,7 +11,7 @@ batch workflow. The preferred spelling uses subcommands; legacy `--scan` and
 | ------ | ------------------------------------------------------------------ | ---------------------------------------------------------- |
 | Import | `stackimport import [options] <stack>` or `stackimport <stack>`    | Convert a HyperCard stack to a `.xstk` package.            |
 | Scan   | `stackimport scan <stack>`                                         | Inspect the block stream without importing.                |
-| ROM    | `stackimport rom [--rom-base <address>] <rom>`                     | Run experimental ROM analysis.                             |
+| ROM    | `stackimport rom [--rom-base <address>] [--emit-atlas] <rom>`      | Analyze classic Mac ROMs and optionally emit atlas TSVs.   |
 | Corpus | `scripts/import_all_stacks.py --stackimport-bin build/stackimport` | Batch extract, classify, import, and index stack archives. |
 
 Build the CLI with:

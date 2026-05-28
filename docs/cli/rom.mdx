@@ -4,7 +4,8 @@ description: Experimental ROM analysis mode.
 ---
 
 ROM mode is separate from HyperCard stack importing. It analyzes a ROM image and
-writes `disassembly.s` plus `analysis.json`.
+writes `disassembly.s` plus `analysis.json`. It can also emit the atlas TSV
+interchange files consumed by Mac ROM Atlas.
 
 ```sh
 build/stackimport rom --rom-base 0x40800000 --output /tmp/rom-analysis /path/to/ROM
@@ -14,6 +15,25 @@ The legacy `--rom` flag is still accepted.
 
 If `--output` is omitted, StackImport writes to `<input>.rom`. `--rom-base`
 accepts C-style integer syntax such as `0x40800000`.
+
+## Primary Outputs
+
+Every successful ROM run writes:
+
+| Path            | Purpose                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `analysis.json` | Machine-readable ROM identity, inventory counts, regions, functions, xrefs, traps, resources, strings, source gaps, and provenance. |
+| `disassembly.s` | Annotated linear 68K disassembly when `resource_dasm` is available, or word fallback output otherwise.                              |
+
+`analysis.json` includes `schema_version`, `tool`, `input`, `generated_at`,
+`identity`, `disassembly`, `counts`, and the atlas-shaped arrays used by
+downstream tools. CRC32 values are unsigned uppercase eight-digit hex, and
+SHA-256 values are uppercase hex.
+
+When vendored `resource_dasm` is available in the build, `analysis.json` records
+`disassembly.mode` as `m68k`. Fallback builds record `fallback_words`.
+
+## Atlas Outputs
 
 Atlas interchange files can be emitted alongside the disassembly output:
 
@@ -34,3 +54,61 @@ contract with headers even for phases that do not yet have rows:
 `pointer-tables.tsv`, `data-regions.tsv`, `resources.tsv`, `labels.tsv`,
 `strings.tsv`, `traps.tsv`, `source-overlays.tsv`, and `source-gaps.tsv`.
 Address columns are uppercase eight-digit hex without a `0x` prefix.
+
+All atlas TSVs are UTF-8 text. Legacy high-bit bytes found in ROM-derived names
+or strings are escaped before they reach TSV/JSON output.
+
+## Analysis Coverage
+
+Current ROM mode emits deterministic rows for these analysis areas:
+
+| Area                | Outputs                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| Identity            | `analysis.json.identity`, `roms.tsv`, `inventory.tsv`, first-byte `regions.tsv` row. |
+| Disassembly         | `disassembly.s`, `analysis.json.disassembly`, code rows in `regions.tsv`.            |
+| References          | `analysis.json.xrefs`, `xrefs.tsv`, inbound counts in `functions.tsv`.               |
+| Traps               | `analysis.json.traps`, `traps.tsv` with decoded A-line trap names when known.        |
+| Function candidates | `analysis.json.functions`, `functions.tsv`, `labels.tsv`, `source-gaps.tsv`.         |
+| Data classification | `analysis.json.regions`, `data-regions.tsv`, `pointer-tables.tsv`.                   |
+| Resource markers    | `analysis.json.resources`, `resources.tsv` marker rows.                              |
+| Strings             | `analysis.json.strings`, `strings.tsv` with ASCII and Pascal string candidates.      |
+
+Xrefs are derived from direct disassembly comment targets and scanner-detected
+pointer tables. Xref `kind` values include `call`, `jump`, `branch`, `memory`,
+and `table`. Function rows remain hypotheses unless another tool supplies a
+confirmed overlay.
+
+Resource support currently distinguishes marker-only hits from parsed resource
+records. Full ROM-resident resource-map extraction and asset emission are still
+future work.
+
+## Determinism
+
+For the same input bytes, current working directory, CLI options, and tool
+version, atlas TSV output is expected to be byte-identical across repeated runs.
+`analysis.json` includes `generated_at`, so JSON files are not byte-identical
+across runs unless that field is ignored.
+
+Input paths are emitted relative to the current working directory when possible.
+Running the same absolute ROM path from a different working directory can change
+path provenance fields while leaving hashes, addresses, and analysis rows
+unchanged.
+
+## Local Acceptance Fixtures
+
+Private ROM bytes are not committed to this repository. Local acceptance testing
+uses manifest-verified ROMs in the public fixture checkout:
+
+```text
+~/d/hype-import-tests/roms/manifest.tsv
+```
+
+Run the documented workflow after ROM-mode changes:
+
+```sh
+docs/workflows/cli-rom-acceptance.mdx
+```
+
+That workflow verifies local ROM size, CRC32, and SHA-256 before running ROM
+mode, then checks `analysis.json`, atlas TSV presence, UTF-8 text output, hash
+agreement, and real-disassembly mode.
