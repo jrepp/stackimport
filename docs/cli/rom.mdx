@@ -70,7 +70,7 @@ Current ROM mode emits deterministic rows for these analysis areas:
 | Traps               | `analysis.json.traps`, `traps.tsv` with decoded A-line trap names when known.        |
 | Function candidates | `analysis.json.functions`, `functions.tsv`, `labels.tsv`, `source-gaps.tsv`.         |
 | Data classification | `analysis.json.regions`, `data-regions.tsv`, `pointer-tables.tsv`.                   |
-| Resource markers    | `analysis.json.resources`, `resources.tsv` marker rows.                              |
+| Resources           | `analysis.json.resources`, `resources.tsv`, `data-regions.tsv` resource-map rows.    |
 | Strings             | `analysis.json.strings`, `strings.tsv` with ASCII and Pascal string candidates.      |
 
 Xrefs are derived from direct disassembly comment targets and scanner-detected
@@ -78,9 +78,16 @@ pointer tables. Xref `kind` values include `call`, `jump`, `branch`, `memory`,
 and `table`. Function rows remain hypotheses unless another tool supplies a
 confirmed overlay.
 
-Resource support currently distinguishes marker-only hits from parsed resource
-records. Full ROM-resident resource-map extraction and asset emission are still
-future work.
+Resource support distinguishes marker-only hits from parsed resource-map records.
+When a standard Classic Mac resource fork is found inside the ROM, StackImport
+emits `parsed` resource rows with type, ID, name, flags, data address, byte
+length, decode status, confidence, and source. `data-regions.tsv` also receives
+`resource_fork_header`, `resource_data`, and `resource_map` rows.
+
+When `--emit-assets` is set, parsed resource payload bytes are preserved under
+`assets/resources/` and referenced from `resources.tsv` and `analysis.json`.
+Converted image/audio/text derivatives are still future work for ROM-resident
+resources.
 
 ## Determinism
 

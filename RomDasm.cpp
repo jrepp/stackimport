@@ -135,6 +135,22 @@ std::string printable_context(std::span<const uint8_t> data, size_t offset) {
   return result;
 }
 
+std::string safe_ascii_bytes(const uint8_t* data, size_t size) {
+  std::string result;
+  result.reserve(size);
+  for(size_t i = 0; i < size; i++) {
+    const uint8_t ch = data[i];
+    if(ch >= 32 && ch <= 126) {
+      result.push_back(static_cast<char>(ch));
+    } else {
+      char escaped[8] = {};
+      snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(ch));
+      result += escaped;
+    }
+  }
+  return result;
+}
+
 std::string classify_xref_kind(const std::string& mnemonic) {
   if(mnemonic == "bsr" || mnemonic == "jsr")
     return "call";
@@ -159,6 +175,151 @@ std::string lookup_trap_name(uint16_t trap_number, const std::string& operands) 
     return name;
 #endif
   return operands;
+}
+
+bool resource_type_is_plausible(const uint8_t* data) {
+  for(size_t i = 0; i < 4; i++) {
+    const uint8_t ch = data[i];
+    if(ch < 32 || ch > 126)
+      return false;
+  }
+  return true;
+}
+
+bool parse_resource_map_at(
+    RomAnalysis& analysis,
+    std::span<const uint8_t> data,
+    uint32_t base_address,
+    size_t fork_offset) {
+  if(fork_offset + 32 > data.size())
+    return false;
+  const uint8_t* fork = data.data() + fork_offset;
+  const size_t remaining = data.size() - fork_offset;
+  const uint32_t data_off =
+      (static_cast<uint32_t>(fork[0]) << 24u) |
+      (static_cast<uint32_t>(fork[1]) << 16u) |
+      (static_cast<uint32_t>(fork[2]) << 8u) |
+      static_cast<uint32_t>(fork[3]);
+  const uint32_t map_off =
+      (static_cast<uint32_t>(fork[4]) << 24u) |
+      (static_cast<uint32_t>(fork[5]) << 16u) |
+      (static_cast<uint32_t>(fork[6]) << 8u) |
+      static_cast<uint32_t>(fork[7]);
+  const uint32_t data_len =
+      (static_cast<uint32_t>(fork[8]) << 24u) |
+      (static_cast<uint32_t>(fork[9]) << 16u) |
+      (static_cast<uint32_t>(fork[10]) << 8u) |
+      static_cast<uint32_t>(fork[11]);
+  const uint32_t map_len =
+      (static_cast<uint32_t>(fork[12]) << 24u) |
+      (static_cast<uint32_t>(fork[13]) << 16u) |
+      (static_cast<uint32_t>(fork[14]) << 8u) |
+      static_cast<uint32_t>(fork[15]);
+  if(data_off < 16 || map_off < 16 || data_len == 0 || map_len < 30)
+    return false;
+  if(static_cast<uint64_t>(data_off) + data_len > remaining ||
+     static_cast<uint64_t>(map_off) + map_len > remaining)
+    return false;
+
+  const uint8_t* map = fork + map_off;
+  const uint16_t type_list_off = static_cast<uint16_t>((static_cast<uint16_t>(map[24]) << 8u) | map[25]);
+  const uint16_t name_list_off = static_cast<uint16_t>((static_cast<uint16_t>(map[26]) << 8u) | map[27]);
+  if(type_list_off + 2 > map_len || name_list_off > map_len)
+    return false;
+  const uint16_t raw_type_count = static_cast<uint16_t>((static_cast<uint16_t>(map[type_list_off]) << 8u) | map[type_list_off + 1]);
+  const size_t type_count = static_cast<size_t>(raw_type_count) + 1u;
+  if(type_count == 0 || type_count > 64 || type_list_off + 2u + type_count * 8u > map_len)
+    return false;
+
+  struct ParsedType {
+    std::string type;
+    size_t count;
+    uint16_t offset;
+  };
+  std::vector<ParsedType> types;
+  types.reserve(type_count);
+  size_t resource_count = 0;
+  for(size_t i = 0; i < type_count; i++) {
+    const size_t type_off = type_list_off + 2u + i * 8u;
+    if(!resource_type_is_plausible(map + type_off))
+      return false;
+    const size_t count = static_cast<size_t>((static_cast<uint16_t>(map[type_off + 4]) << 8u) | map[type_off + 5]) + 1u;
+    const uint16_t ref_offset = static_cast<uint16_t>((static_cast<uint16_t>(map[type_off + 6]) << 8u) | map[type_off + 7]);
+    const size_t ref_start = type_list_off + ref_offset;
+    if(count == 0 || ref_start > map_len || count > (map_len - ref_start) / 12u)
+      return false;
+    resource_count += count;
+    if(resource_count > 4096)
+      return false;
+    types.push_back({safe_ascii_bytes(map + type_off, 4), count, ref_offset});
+  }
+  if(resource_count == 0)
+    return false;
+
+  const uint32_t fork_address = base_address + static_cast<uint32_t>(fork_offset);
+  ResourceMapRegion map_region;
+  map_region.address = fork_address;
+  map_region.data_address = fork_address + data_off;
+  map_region.map_address = fork_address + map_off;
+  map_region.data_length = data_len;
+  map_region.map_length = map_len;
+  map_region.type_count = type_count;
+  map_region.resource_count = resource_count;
+  map_region.confidence = 0.90;
+
+  std::vector<ResourceRecord> records;
+  records.reserve(resource_count);
+  size_t order = 0;
+  for(const auto& type : types) {
+    size_t ref_off = type_list_off + type.offset;
+    for(size_t i = 0; i < type.count; i++, ref_off += 12u) {
+      const int16_t id = static_cast<int16_t>((static_cast<uint16_t>(map[ref_off]) << 8u) | map[ref_off + 1]);
+      const uint16_t name_off = static_cast<uint16_t>((static_cast<uint16_t>(map[ref_off + 2]) << 8u) | map[ref_off + 3]);
+      const uint32_t packed =
+          (static_cast<uint32_t>(map[ref_off + 4]) << 24u) |
+          (static_cast<uint32_t>(map[ref_off + 5]) << 16u) |
+          (static_cast<uint32_t>(map[ref_off + 6]) << 8u) |
+          static_cast<uint32_t>(map[ref_off + 7]);
+      const uint8_t flags = static_cast<uint8_t>(packed >> 24u);
+      const uint32_t data_offset = packed & 0x00FFFFFFu;
+      if(static_cast<uint64_t>(data_offset) + 4u > data_len)
+        return false;
+      const uint8_t* data_size_ptr = fork + data_off + data_offset;
+      const uint32_t resource_size =
+          (static_cast<uint32_t>(data_size_ptr[0]) << 24u) |
+          (static_cast<uint32_t>(data_size_ptr[1]) << 16u) |
+          (static_cast<uint32_t>(data_size_ptr[2]) << 8u) |
+          static_cast<uint32_t>(data_size_ptr[3]);
+      if(resource_size > 0x7FFFFFFFu || static_cast<uint64_t>(data_offset) + 4u + resource_size > data_len)
+        return false;
+
+      ResourceRecord record;
+      record.address = fork_address + data_off + data_offset + 4u;
+      record.map_address = map_region.map_address;
+      record.data_address = fork_address + data_off + data_offset;
+      record.type = type.type;
+      record.id = id;
+      record.flags = flags;
+      record.length = resource_size;
+      record.order = order++;
+      record.confidence = 0.90;
+      record.source = "resource-map";
+      if(name_off != 0xFFFFu) {
+        const size_t name_pos = name_list_off + name_off;
+        if(name_pos < map_len) {
+          const uint8_t name_len = map[name_pos];
+          if(name_pos + 1u + name_len <= map_len)
+            record.name = safe_ascii_bytes(map + name_pos + 1u, name_len);
+        }
+      }
+      records.push_back(std::move(record));
+    }
+  }
+
+  analysis.resource_maps.push_back(map_region);
+  for(auto& record : records)
+    analysis.resources.push_back(std::move(record));
+  return true;
 }
 
 }
@@ -671,6 +832,16 @@ void classify_rom_structure(
         if(analysis.resource_markers.size() >= 1000)
           return;
       }
+    }
+  }
+
+  for(size_t offset = 0; offset + 32 <= data.size(); offset += 2) {
+    if(parse_resource_map_at(analysis, data, base_address, offset)) {
+      const ResourceMapRegion& map = analysis.resource_maps.back();
+      analysis.data_regions.push_back({map.address, map.address + 16u, "resource_fork_header", 1, map.confidence});
+      analysis.data_regions.push_back({map.data_address, map.data_address + static_cast<uint32_t>(map.data_length), "resource_data", map.resource_count, map.confidence});
+      analysis.data_regions.push_back({map.map_address, map.map_address + static_cast<uint32_t>(map.map_length), "resource_map", map.resource_count, map.confidence});
+      offset += std::max<size_t>(32, map.map_address - base_address - offset);
     }
   }
 

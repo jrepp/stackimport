@@ -542,7 +542,10 @@ std::vector<uint8_t> make_synthetic_rom_fixture()
 		rom.push_back(0);
 	rom.insert(rom.end(), {'D', 'R', 'V', 'R'});
 	rom.insert(rom.end(), {'C', 'O', 'D', 'E'});
-	rom.resize(0x100, 0);
+	while(rom.size() < 0xC0)
+		rom.push_back(0);
+	const std::vector<uint8_t> resourceFork = make_single_resource_fork("STR ", 128, {5, 'W', 'o', 'r', 'l', 'd'});
+	rom.insert(rom.end(), resourceFork.begin(), resourceFork.end());
 	return rom;
 }
 
@@ -1517,13 +1520,30 @@ void test_rom_analysis_contracts()
 	}
 	assert(sawDriverMarker);
 	assert(sawCodeMarker);
+	assert(analysis.resource_maps.size() == 1);
+	assert(analysis.resource_maps[0].address == baseAddress + 0xC0);
+	assert(analysis.resource_maps[0].resource_count == 1);
+	assert(analysis.resources.size() == 1);
+	assert(analysis.resources[0].address == baseAddress + 0xC0 + 20);
+	assert(analysis.resources[0].map_address == baseAddress + 0xC0 + 26);
+	assert(analysis.resources[0].type == "STR ");
+	assert(analysis.resources[0].id == 128);
+	assert(analysis.resources[0].length == 6);
 
 	bool sawStringCluster = false;
+	bool sawResourceMapRegion = false;
+	bool sawResourceDataRegion = false;
 	for(const auto& region : analysis.data_regions) {
 		if(region.kind == "string_cluster" && region.item_count >= 3)
 			sawStringCluster = true;
+		if(region.kind == "resource_map" && region.item_count == 1)
+			sawResourceMapRegion = true;
+		if(region.kind == "resource_data" && region.item_count == 1)
+			sawResourceDataRegion = true;
 	}
 	assert(sawStringCluster);
+	assert(sawResourceMapRegion);
+	assert(sawResourceDataRegion);
 
 	stackimport::RomDasm::RomAnalysis controlFlow;
 	controlFlow.info = info;

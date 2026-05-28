@@ -79,6 +79,31 @@ struct ResourceMarker {
   std::string context;
 };
 
+struct ResourceMapRegion {
+  uint32_t address;
+  uint32_t data_address;
+  uint32_t map_address;
+  size_t data_length;
+  size_t map_length;
+  size_t type_count;
+  size_t resource_count;
+  double confidence;
+};
+
+struct ResourceRecord {
+  uint32_t address;
+  uint32_t map_address;
+  uint32_t data_address;
+  std::string type;
+  int32_t id;
+  std::string name;
+  uint8_t flags;
+  size_t length;
+  size_t order;
+  double confidence;
+  std::string source;
+};
+
 struct Xref {
   uint32_t from;
   uint32_t to;
@@ -107,6 +132,8 @@ struct RomAnalysis {
   std::vector<FunctionCandidate> function_candidates;
   std::vector<DataRegion> data_regions;
   std::vector<ResourceMarker> resource_markers;
+  std::vector<ResourceMapRegion> resource_maps;
+  std::vector<ResourceRecord> resources;
   std::vector<Xref> xrefs;
   std::vector<TrapCall> traps;
   std::map<uint32_t, std::string> labels;

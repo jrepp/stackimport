@@ -4,6 +4,7 @@
 #include "stackimport_version.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <span>
 
@@ -11,12 +12,51 @@ namespace stackimport::cli {
 
 namespace {
 
+std::string resource_asset_relative_path(const RomDasm::ResourceRecord& resource)
+{
+	std::string type = resource.type;
+	for(char& ch : type)
+	{
+		const unsigned char byte = static_cast<unsigned char>(ch);
+		if(!std::isalnum(byte))
+			ch = '_';
+	}
+	return path_join("assets/resources", type + "_" + std::to_string(resource.id) + "_" + RomDasm::format_address(resource.address) + ".bin");
+}
+
+bool write_resource_assets(
+	const std::string& outputDir,
+	const std::vector<uint8_t>& buf,
+	const RomDasm::RomAnalysis& analysis)
+{
+	if(analysis.resources.empty())
+		return true;
+	const std::string assetDir = path_join(outputDir, "assets/resources");
+	if(!make_directories_recursive(assetDir))
+		return false;
+	for(const auto& resource : analysis.resources)
+	{
+		if(resource.address < analysis.info.base_address)
+			return false;
+		const size_t offset = static_cast<size_t>(resource.address - analysis.info.base_address);
+		if(offset > buf.size() || resource.length > buf.size() - offset)
+			return false;
+		const std::string relPath = resource_asset_relative_path(resource);
+		const std::string path = path_join(outputDir, relPath);
+		const std::string bytes(reinterpret_cast<const char*>(buf.data() + offset), resource.length);
+		if(!write_text_file(path, bytes))
+			return false;
+	}
+	return true;
+}
+
 bool write_atlas_outputs(
 	const std::string& atlasDir,
 	const std::string& inputPath,
 	const std::string& outputDir,
 	const std::vector<uint8_t>& buf,
-	const RomDasm::RomAnalysis& analysis)
+	const RomDasm::RomAnalysis& analysis,
+	bool emitAssets)
 {
 	if(!make_directories_recursive(atlasDir))
 		return false;
@@ -41,11 +81,12 @@ bool write_atlas_outputs(
 	}
 	roms += "\n";
 
-	std::string inventory = "rom_id\tcode_regions\tstrings\tpointer_entries\tpointer_table_regions\tfunction_candidates\tdata_regions\tresource_markers\tdisassembly_mode\tsource_status\n";
+	std::string inventory = "rom_id\tcode_regions\tstrings\tpointer_entries\tpointer_table_regions\tfunction_candidates\tdata_regions\tresource_markers\tresource_maps\tresource_records\tdisassembly_mode\tsource_status\n";
 	inventory += romId + "\t" + std::to_string(analysis.code_regions.size()) + "\t";
 	inventory += std::to_string(analysis.strings.size()) + "\t" + std::to_string(analysis.pointer_tables.size()) + "\t";
 	inventory += std::to_string(analysis.pointer_table_regions.size()) + "\t" + std::to_string(analysis.function_candidates.size()) + "\t";
 	inventory += std::to_string(analysis.data_regions.size()) + "\t" + std::to_string(analysis.resource_markers.size()) + "\t";
+	inventory += std::to_string(analysis.resource_maps.size()) + "\t" + std::to_string(analysis.resources.size()) + "\t";
 	inventory += rom_disassembly_mode();
 	inventory += "\tunmatched\n";
 
@@ -104,6 +145,16 @@ bool write_atlas_outputs(
 		resources += "resmarker-" + RomDasm::format_address(marker.address) + "-" + std::to_string(i) + "\t";
 		resources += RomDasm::format_address(marker.address) + "\tmarker\t" + tsv_escape(marker.type);
 		resources += "\t\t\t\t\t0.40\tmarker-scan:" + tsv_escape(marker.context) + "\n";
+	}
+	for(size_t i = 0; i < analysis.resources.size(); i++)
+	{
+		const auto& resource = analysis.resources[i];
+		const std::string address = RomDasm::format_address(resource.address);
+		const std::string outputFile = emitAssets ? resource_asset_relative_path(resource) : "";
+		resources += "res-" + address + "-" + tsv_escape(resource.type) + "-" + std::to_string(resource.id) + "-" + std::to_string(i) + "\t";
+		resources += address + "\tparsed\t" + tsv_escape(resource.type) + "\t" + std::to_string(resource.id) + "\t";
+		resources += tsv_escape(resource.name) + "\tapplication/octet-stream\t" + tsv_escape(outputFile) + "\t";
+		resources += std::to_string(resource.confidence) + "\t" + tsv_escape(resource.source) + "\n";
 	}
 
 	std::string labels = "id\trom_id\taddress\tname\tkind\tconfidence\tsource\n";
@@ -180,7 +231,8 @@ bool write_analysis_json(
 	const std::string& inputPath,
 	const std::string& outputDir,
 	const std::vector<uint8_t>& buf,
-	const RomDasm::RomAnalysis& analysis)
+	const RomDasm::RomAnalysis& analysis,
+	bool emitAssets)
 {
 	FILE* jsonFile = fopen(jsonPath.c_str(), "w");
 	if(!jsonFile)
@@ -220,7 +272,7 @@ bool write_analysis_json(
 		rom_disassembly_mode(),
 		analysis.total_instructions);
 	fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
-	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"xrefs\": %zu, \"traps\": %zu},\n",
+	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"resource_maps\": %zu, \"resource_records\": %zu, \"xrefs\": %zu, \"traps\": %zu},\n",
 		analysis.code_regions.size(),
 		analysis.strings.size(),
 		analysis.pointer_tables.size(),
@@ -228,6 +280,8 @@ bool write_analysis_json(
 		analysis.function_candidates.size(),
 		analysis.data_regions.size(),
 		analysis.resource_markers.size(),
+		analysis.resource_maps.size(),
+		analysis.resources.size(),
 		analysis.xrefs.size(),
 		analysis.traps.size());
 	fprintf(jsonFile, "  \"total_instructions\": %zu,\n", analysis.total_instructions);
@@ -343,13 +397,39 @@ bool write_analysis_json(
 	{
 		const auto& marker = analysis.resource_markers[i];
 		fprintf(jsonFile,
-			"    {\"id\":\"resmarker-%08X-%zu\",\"address\":\"%08X\",\"kind\":\"marker\",\"resource_type\":\"%s\",\"resource_id\":null,\"name\":\"\",\"media_type\":\"\",\"output_file\":\"\",\"confidence\":0.40,\"source\":\"marker-scan\",\"context\":\"%s\"}%s\n",
+			"    {\"id\":\"resmarker-%08X-%zu\",\"address\":\"%08X\",\"kind\":\"marker\",\"resource_type\":\"%s\",\"resource_id\":null,\"name\":\"\",\"media_type\":\"\",\"output_file\":\"\",\"decode_status\":\"marker_only\",\"confidence\":0.40,\"source\":\"marker-scan\",\"context\":\"%s\"}",
 			static_cast<unsigned>(marker.address),
 			i,
 			static_cast<unsigned>(marker.address),
 			json_escape(marker.type).c_str(),
-			json_escape(marker.context).c_str(),
-			(i + 1 < analysis.resource_markers.size()) ? "," : "");
+			json_escape(marker.context).c_str());
+		if(i + 1 < analysis.resource_markers.size() || !analysis.resources.empty())
+			fprintf(jsonFile, ",");
+		fprintf(jsonFile, "\n");
+	}
+	for(size_t i = 0; i < analysis.resources.size(); i++)
+	{
+		const auto& resource = analysis.resources[i];
+		const std::string outputFile = emitAssets ? resource_asset_relative_path(resource) : "";
+		fprintf(jsonFile,
+			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"application/octet-stream\",\"output_file\":\"%s\",\"decode_status\":\"%s\",\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			static_cast<unsigned>(resource.address),
+			json_escape(resource.type).c_str(),
+			resource.id,
+			i,
+			static_cast<unsigned>(resource.address),
+			static_cast<unsigned>(resource.map_address),
+			static_cast<unsigned>(resource.data_address),
+			json_escape(resource.type).c_str(),
+			resource.id,
+			json_escape(resource.name).c_str(),
+			static_cast<unsigned>(resource.flags),
+			resource.length,
+			json_escape(outputFile).c_str(),
+			emitAssets ? "preserved" : "metadata_only",
+			resource.confidence,
+			json_escape(resource.source).c_str(),
+			(i + 1 < analysis.resources.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
 	fprintf(jsonFile, "  \"labels\": [\n");
@@ -476,8 +556,22 @@ int run_rom_mode(const Options& options)
 	}
 	stackimport_quill_diagnosticf("Wrote: %s\n", dasmPath.c_str());
 
+	if(options.emit_assets && !analysis.resources.empty())
+	{
+		if(!write_resource_assets(outputDir, buf, analysis))
+		{
+			stackimport_quill_diagnosticf("Error: Failed to write ROM resource assets under '%s'.\n", outputDir.c_str());
+			return 5;
+		}
+		stackimport_quill_diagnosticf("Wrote ROM resource assets: %s\n", path_join(outputDir, "assets/resources").c_str());
+	}
+	else if(options.emit_assets)
+	{
+		stackimport_quill_diagnosticf("No parsed ROM resource payloads to preserve.\n");
+	}
+
 	const std::string jsonPath = path_join(outputDir, "analysis.json");
-	if(!write_analysis_json(jsonPath, filename, options.input_path, outputDir, buf, analysis))
+	if(!write_analysis_json(jsonPath, filename, options.input_path, outputDir, buf, analysis, options.emit_assets))
 	{
 		stackimport_quill_diagnosticf("Error: Failed to write '%s'.\n", jsonPath.c_str());
 		return 5;
@@ -487,7 +581,7 @@ int run_rom_mode(const Options& options)
 	if(options.emit_atlas || !options.atlas_output_path.empty())
 	{
 		const std::string atlasDir = !options.atlas_output_path.empty() ? options.atlas_output_path : path_join(outputDir, "atlas");
-		if(!write_atlas_outputs(atlasDir, options.input_path, outputDir, buf, analysis))
+		if(!write_atlas_outputs(atlasDir, options.input_path, outputDir, buf, analysis, options.emit_assets))
 		{
 			stackimport_quill_diagnosticf("Error: Failed to write atlas outputs under '%s'.\n", atlasDir.c_str());
 			return 5;
@@ -497,7 +591,6 @@ int run_rom_mode(const Options& options)
 
 	(void)options.source_root_path;
 	(void)options.emit_json;
-	(void)options.emit_assets;
 	stackimport_quill_diagnosticf("ROM analysis complete. Output: %s\n", outputDir.c_str());
 	return 0;
 }
