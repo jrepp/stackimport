@@ -33,7 +33,7 @@ std::string json_escape(const std::string& text)
 			case '\r': result += "\\r"; break;
 			case '\t': result += "\\t"; break;
 			default:
-				if(static_cast<unsigned char>(ch) < 0x20)
+				if(static_cast<unsigned char>(ch) < 0x20 || static_cast<unsigned char>(ch) >= 0x7F)
 				{
 					char escaped[8] = {};
 					snprintf(escaped, sizeof(escaped), "\\u%04X", static_cast<unsigned>(static_cast<unsigned char>(ch)));
@@ -254,6 +254,12 @@ std::string tsv_escape(const std::string& text)
 	{
 		if(ch == '\t' || ch == '\r' || ch == '\n')
 			result.push_back(' ');
+		else if(static_cast<unsigned char>(ch) < 0x20 || static_cast<unsigned char>(ch) >= 0x7F)
+		{
+			char escaped[8] = {};
+			snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+			result += escaped;
+		}
 		else
 			result.push_back(ch);
 	}

@@ -191,7 +191,9 @@ RomInfo analyze_rom_header(std::span<const uint8_t> data, uint32_t base_address)
       static_cast<char>(data[3]),
       0};
     if(std::isprint(static_cast<unsigned char>(data[0])) &&
-       std::isprint(static_cast<unsigned char>(data[1])))
+       std::isprint(static_cast<unsigned char>(data[1])) &&
+       std::isprint(static_cast<unsigned char>(data[2])) &&
+       std::isprint(static_cast<unsigned char>(data[3])))
       info.model_names.push_back(sigstr);
   }
   return info;
