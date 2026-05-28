@@ -9,6 +9,7 @@
 
 #include "CStackFile.h"
 #include "Mac68kDisassembly.h"
+#include "RomDasm.h"
 #include "StackImportSoundConverter.h"
 #include "stackimport_c.h"
 #include "stackimport_platform_internal.h"
@@ -517,6 +518,32 @@ std::string read_text_file(const std::string& path)
 	std::ifstream file(path.c_str(), std::ios::binary);
 	assert(file.is_open());
 	return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+std::vector<uint8_t> make_synthetic_rom_fixture()
+{
+	std::vector<uint8_t> rom;
+	append_u16be(rom, 0x4E71); // nop: marks the fixture as 68K-like.
+	append_u16be(rom, 0xA9F0); // Toolbox trap-shaped word.
+	append_u16be(rom, 0x4E75); // rts.
+	while(rom.size() < 0x20)
+		rom.push_back(0);
+	append_u32be(rom, 0x40800040);
+	append_u32be(rom, 0x40800044);
+	append_u32be(rom, 0x40800048);
+	append_u32be(rom, 0x4080004C);
+	while(rom.size() < 0x60)
+		rom.push_back(0);
+	rom.insert(rom.end(), {'B', 'o', 'o', 't', 'R', 'O', 'M', 0});
+	rom.insert(rom.end(), {5, 'H', 'e', 'l', 'l', 'o'});
+	rom.push_back(0);
+	rom.insert(rom.end(), {'T', 'a', 'b', 'l', 'e', 'M', 'a', 'p', 0});
+	while(rom.size() < 0x90)
+		rom.push_back(0);
+	rom.insert(rom.end(), {'D', 'R', 'V', 'R'});
+	rom.insert(rom.end(), {'C', 'O', 'D', 'E'});
+	rom.resize(0x100, 0);
+	return rom;
 }
 
 std::vector<uint8_t> make_icon_payload()
@@ -1434,12 +1461,78 @@ void test_stack_block_identifier()
 	assert(wildcardNo > b);
 }
 
+void test_rom_analysis_contracts()
+{
+	const uint8_t crcFixture[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
+	const std::span<const uint8_t> crcSpan(crcFixture, sizeof(crcFixture));
+	assert(stackimport::RomDasm::compute_crc32(crcSpan) == 0xCBF43926u);
+	assert(stackimport::RomDasm::format_address(0xCBF43926u) == "CBF43926");
+	assert(stackimport::RomDasm::format_address(0x0000007Au) == "0000007A");
+
+	const uint32_t baseAddress = 0x40800000u;
+	const std::vector<uint8_t> rom = make_synthetic_rom_fixture();
+	const std::span<const uint8_t> romSpan(rom.data(), rom.size());
+	stackimport::RomDasm::RomInfo info = stackimport::RomDasm::analyze_rom_header(romSpan, baseAddress);
+	info.filename = "synthetic-old-world-rom.bin";
+	assert(info.size == static_cast<uint32_t>(rom.size()));
+	assert(info.crc32 == stackimport::RomDasm::compute_crc32(romSpan));
+	assert(info.base_address == baseAddress);
+	assert(info.sha256.size() == 64);
+	assert(info.machine_family == "68K");
+
+	stackimport::RomDasm::ScanOptions options;
+	options.start_address = baseAddress;
+	options.disassemble_code = false;
+	const stackimport::RomDasm::RomAnalysis analysis = stackimport::RomDasm::scan_rom(romSpan, info, options);
+	assert(analysis.info.filename == "synthetic-old-world-rom.bin");
+	assert(analysis.entry_point == baseAddress);
+	assert(analysis.pointer_tables.size() >= 4);
+	assert(!analysis.pointer_table_regions.empty());
+	assert(analysis.pointer_table_regions[0].address == baseAddress + 0x20);
+	assert(analysis.pointer_table_regions[0].entry_count == 4);
+	assert(analysis.pointer_table_regions[0].targets[0] == baseAddress + 0x40);
+
+	bool sawBootRom = false;
+	bool sawPascalHello = false;
+	bool sawTableMap = false;
+	for(const auto& stringRegion : analysis.strings) {
+		if(!stringRegion.is_pascal && stringRegion.value == "BootROM")
+			sawBootRom = true;
+		if(stringRegion.is_pascal && stringRegion.value == "Hello")
+			sawPascalHello = true;
+		if(!stringRegion.is_pascal && stringRegion.value == "TableMap")
+			sawTableMap = true;
+	}
+	assert(sawBootRom);
+	assert(sawPascalHello);
+	assert(sawTableMap);
+
+	bool sawDriverMarker = false;
+	bool sawCodeMarker = false;
+	for(const auto& marker : analysis.resource_markers) {
+		if(marker.type == "DRVR" && marker.address == baseAddress + 0x90)
+			sawDriverMarker = true;
+		if(marker.type == "CODE" && marker.address == baseAddress + 0x94)
+			sawCodeMarker = true;
+	}
+	assert(sawDriverMarker);
+	assert(sawCodeMarker);
+
+	bool sawStringCluster = false;
+	for(const auto& region : analysis.data_regions) {
+		if(region.kind == "string_cluster" && region.item_count >= 3)
+			sawStringCluster = true;
+	}
+	assert(sawStringCluster);
+}
+
 }
 
 
 void	RunTests()
 {
 	test_stack_block_identifier();
+	test_rom_analysis_contracts();
 
 	assert(stackimport_context_size() <= 4096);
 	assert(stackimport_api_version() == STACKIMPORT_API_VERSION);

@@ -173,6 +173,7 @@ bool write_analysis_json(
 	const std::string outputRel = relative_to_cwd(outputDir);
 
 	fprintf(jsonFile, "{\n");
+	fprintf(jsonFile, "  \"schema_version\": 1,\n");
 	fprintf(jsonFile, "  \"tool\": {\"name\": \"stackimport\", \"version\": \"%s\", \"commit\": \"unknown\"},\n", STACKIMPORT_VERSION_STRING);
 	fprintf(jsonFile, "  \"input\": {\"path\": \"%s\", \"size\": %u, \"crc32\": \"%08X\", \"sha256\": \"%s\"},\n",
 		json_escape(inputRel).c_str(),
@@ -199,68 +200,166 @@ bool write_analysis_json(
 		rom_disassembly_mode(),
 		analysis.total_instructions);
 	fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
-	fprintf(jsonFile, "  \"code_regions\": %zu,\n", analysis.code_regions.size());
-	fprintf(jsonFile, "  \"strings\": %zu,\n", analysis.strings.size());
-	fprintf(jsonFile, "  \"pointer_tables\": %zu,\n", analysis.pointer_tables.size());
-	fprintf(jsonFile, "  \"pointer_table_regions\": %zu,\n", analysis.pointer_table_regions.size());
-	fprintf(jsonFile, "  \"function_candidates\": %zu,\n", analysis.function_candidates.size());
-	fprintf(jsonFile, "  \"data_regions\": %zu,\n", analysis.data_regions.size());
-	fprintf(jsonFile, "  \"resource_markers\": %zu,\n", analysis.resource_markers.size());
+	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"xrefs\": 0, \"traps\": 0},\n",
+		analysis.code_regions.size(),
+		analysis.strings.size(),
+		analysis.pointer_tables.size(),
+		analysis.pointer_table_regions.size(),
+		analysis.function_candidates.size(),
+		analysis.data_regions.size(),
+		analysis.resource_markers.size());
 	fprintf(jsonFile, "  \"total_instructions\": %zu,\n", analysis.total_instructions);
-	fprintf(jsonFile, "  \"function_candidates_sample\": [\n");
-	for(size_t i = 0; i < analysis.function_candidates.size() && i < 200; i++)
+	fprintf(jsonFile, "  \"regions\": [\n");
+	fprintf(jsonFile,
+		"    {\"id\":\"region-%s-first-bytes\",\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":1,\"confidence\":%.2f,\"source\":\"identity:first-bytes\"}%s\n",
+		RomDasm::format_address(analysis.info.crc32).c_str(),
+		static_cast<unsigned>(analysis.info.base_address),
+		static_cast<unsigned>(analysis.info.base_address + static_cast<uint32_t>(std::min<size_t>(buf.size(), 32))),
+		firstBytesKind,
+		firstBytesConfidence,
+		(!analysis.code_regions.empty() || !analysis.data_regions.empty()) ? "," : "");
+	for(size_t i = 0; i < analysis.code_regions.size(); i++)
+	{
+		const auto& region = analysis.code_regions[i];
+		const bool hasMore = (i + 1 < analysis.code_regions.size()) || !analysis.data_regions.empty();
+		fprintf(jsonFile,
+			"    {\"id\":\"region-%08X\",\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":%zu,\"confidence\":%.2f,\"source\":\"disassembly\"}%s\n",
+			static_cast<unsigned>(region.start_address),
+			static_cast<unsigned>(region.start_address),
+			static_cast<unsigned>(region.end_address),
+			region.is_code ? "code" : "mixed",
+			analysis.total_instructions,
+			region.confidence,
+			hasMore ? "," : "");
+	}
+	for(size_t i = 0; i < analysis.data_regions.size(); i++)
+	{
+		const auto& region = analysis.data_regions[i];
+		fprintf(jsonFile,
+			"    {\"id\":\"data-%08X\",\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":%zu,\"confidence\":%.2f,\"source\":\"scanner\"}%s\n",
+			static_cast<unsigned>(region.start_address),
+			static_cast<unsigned>(region.start_address),
+			static_cast<unsigned>(region.end_address),
+			json_escape(region.kind).c_str(),
+			region.item_count,
+			region.confidence,
+			(i + 1 < analysis.data_regions.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
+	fprintf(jsonFile, "  \"functions\": [\n");
+	for(size_t i = 0; i < analysis.function_candidates.size(); i++)
 	{
 		const auto& fn = analysis.function_candidates[i];
 		fprintf(jsonFile,
-			"    {\"address\":\"%08X\",\"label\":\"%s\",\"calls\":%zu,\"jumps\":%zu,\"references\":%zu,\"confidence\":%.2f}%s\n",
+			"    {\"id\":\"fn-%08X\",\"start\":\"%08X\",\"end\":null,\"kind\":\"candidate\",\"label\":\"%s\",\"instruction_count\":0,\"inbound_calls\":%zu,\"outbound_calls\":%zu,\"references\":%zu,\"confidence\":%.2f,\"evidence\":\"inbound references from linear disassembly\"}%s\n",
+			static_cast<unsigned>(fn.address),
 			static_cast<unsigned>(fn.address),
 			json_escape(fn.label).c_str(),
 			fn.calls,
 			fn.jumps,
 			fn.references,
 			fn.confidence,
-			(i + 1 < analysis.function_candidates.size() && i + 1 < 200) ? "," : "");
+			(i + 1 < analysis.function_candidates.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"pointer_table_regions_sample\": [\n");
-	for(size_t i = 0; i < analysis.pointer_table_regions.size() && i < 120; i++)
+	fprintf(jsonFile, "  \"xrefs\": [],\n");
+	fprintf(jsonFile, "  \"pointer_tables\": [\n");
+	for(size_t i = 0; i < analysis.pointer_table_regions.size(); i++)
 	{
 		const auto& table = analysis.pointer_table_regions[i];
 		fprintf(jsonFile,
-			"    {\"address\":\"%08X\",\"entry_count\":%zu,\"targets\":[",
+			"    {\"id\":\"ptrtab-%08X\",\"address\":\"%08X\",\"entry_count\":%zu,\"decoded_target_count\":%zu,\"confidence\":0.75,\"source\":\"scanner:aligned-absolute-addresses\",\"targets\":[",
 			static_cast<unsigned>(table.address),
-			table.entry_count);
-		for(size_t j = 0; j < table.targets.size() && j < 16; j++)
+			static_cast<unsigned>(table.address),
+			table.entry_count,
+			table.targets.size());
+		for(size_t j = 0; j < table.targets.size(); j++)
 			fprintf(jsonFile, "%s\"%08X\"", j ? "," : "", static_cast<unsigned>(table.targets[j]));
-		fprintf(jsonFile, "]}%s\n", (i + 1 < analysis.pointer_table_regions.size() && i + 1 < 120) ? "," : "");
+		fprintf(jsonFile, "]}%s\n", (i + 1 < analysis.pointer_table_regions.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"data_regions_sample\": [\n");
-	for(size_t i = 0; i < analysis.data_regions.size() && i < 120; i++)
+	fprintf(jsonFile, "  \"data_regions\": [\n");
+	for(size_t i = 0; i < analysis.data_regions.size(); i++)
 	{
 		const auto& region = analysis.data_regions[i];
 		fprintf(jsonFile,
-			"    {\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":%zu,\"confidence\":%.2f}%s\n",
+			"    {\"id\":\"data-%08X\",\"start\":\"%08X\",\"end\":\"%08X\",\"kind\":\"%s\",\"item_count\":%zu,\"confidence\":%.2f,\"source\":\"scanner\"}%s\n",
+			static_cast<unsigned>(region.start_address),
 			static_cast<unsigned>(region.start_address),
 			static_cast<unsigned>(region.end_address),
 			json_escape(region.kind).c_str(),
 			region.item_count,
 			region.confidence,
-			(i + 1 < analysis.data_regions.size() && i + 1 < 120) ? "," : "");
+			(i + 1 < analysis.data_regions.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"resource_markers_sample\": [\n");
-	for(size_t i = 0; i < analysis.resource_markers.size() && i < 120; i++)
+	fprintf(jsonFile, "  \"resources\": [\n");
+	for(size_t i = 0; i < analysis.resource_markers.size(); i++)
 	{
 		const auto& marker = analysis.resource_markers[i];
 		fprintf(jsonFile,
-			"    {\"address\":\"%08X\",\"type\":\"%s\",\"context\":\"%s\"}%s\n",
+			"    {\"id\":\"resmarker-%08X-%zu\",\"address\":\"%08X\",\"kind\":\"marker\",\"resource_type\":\"%s\",\"resource_id\":null,\"name\":\"\",\"media_type\":\"\",\"output_file\":\"\",\"confidence\":0.40,\"source\":\"marker-scan\",\"context\":\"%s\"}%s\n",
+			static_cast<unsigned>(marker.address),
+			i,
 			static_cast<unsigned>(marker.address),
 			json_escape(marker.type).c_str(),
 			json_escape(marker.context).c_str(),
-			(i + 1 < analysis.resource_markers.size() && i + 1 < 120) ? "," : "");
+			(i + 1 < analysis.resource_markers.size()) ? "," : "");
 	}
-	fprintf(jsonFile, "  ]\n");
+	fprintf(jsonFile, "  ],\n");
+	fprintf(jsonFile, "  \"labels\": [\n");
+	for(size_t i = 0; i < analysis.function_candidates.size(); i++)
+	{
+		const auto& fn = analysis.function_candidates[i];
+		const std::string address = RomDasm::format_address(fn.address);
+		const std::string label = fn.label.empty() ? ("sub_" + address) : fn.label;
+		fprintf(jsonFile,
+			"    {\"id\":\"label-%s\",\"address\":\"%s\",\"name\":\"%s\",\"kind\":\"function_candidate\",\"confidence\":%.2f,\"source\":\"function-scanner\"}%s\n",
+			address.c_str(),
+			address.c_str(),
+			json_escape(label).c_str(),
+			fn.confidence,
+			(i + 1 < analysis.function_candidates.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
+	fprintf(jsonFile, "  \"strings\": [\n");
+	for(size_t i = 0; i < analysis.strings.size(); i++)
+	{
+		const auto& s = analysis.strings[i];
+		const uint32_t address = analysis.info.base_address + s.address;
+		fprintf(jsonFile,
+			"    {\"id\":\"str-%08X\",\"address\":\"%08X\",\"kind\":\"%s\",\"length\":%zu,\"text\":\"%s\",\"confidence\":0.65,\"source\":\"string-scanner\"}%s\n",
+			static_cast<unsigned>(address),
+			static_cast<unsigned>(address),
+			s.is_pascal ? "pascal" : "ascii",
+			s.length,
+			json_escape(s.value).c_str(),
+			(i + 1 < analysis.strings.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
+	fprintf(jsonFile, "  \"traps\": [],\n");
+	fprintf(jsonFile, "  \"source_overlays\": [],\n");
+	fprintf(jsonFile, "  \"source_gaps\": [\n");
+	size_t sourceGapIndex = 0;
+	for(const auto& fn : analysis.function_candidates)
+	{
+		if(fn.label.empty() && fn.confidence >= 0.50)
+		{
+			if(sourceGapIndex > 0)
+				fprintf(jsonFile, ",\n");
+			const std::string address = RomDasm::format_address(fn.address);
+			fprintf(jsonFile,
+				"    {\"id\":\"gap-%s\",\"address\":\"%s\",\"kind\":\"function_candidate\",\"priority\":\"medium\",\"confidence\":%.2f,\"evidence\":\"no source overlay supplied\"}",
+				address.c_str(),
+				address.c_str(),
+				fn.confidence);
+			sourceGapIndex++;
+		}
+	}
+	if(sourceGapIndex > 0)
+		fprintf(jsonFile, "\n");
+	fprintf(jsonFile, "  ],\n");
+	fprintf(jsonFile, "  \"warnings\": []\n");
 	fprintf(jsonFile, "}\n");
 	return fclose(jsonFile) == 0;
 }
