@@ -86,10 +86,14 @@ length, decode status, confidence, and source. `data-regions.tsv` also receives
 
 When `--emit-assets` is set, parsed resource payload bytes are preserved under
 `assets/resources/`. Supported built-in conversions are emitted next to the raw
-payload; `STR ` resources currently produce UTF-8 `.txt` derivatives. Converted
-outputs are preferred in `resources.tsv` and `analysis.json.output_file`, while
-`analysis.json.raw_output_file` keeps the preserved native byte path. Converted
-image/audio derivatives are still future work for ROM-resident resources.
+payload; `STR ` resources produce UTF-8 `.txt` derivatives, decoded RGBA
+resources such as `ICON`, `CURS`, and icon-family resources are written as PNG,
+and sampled `snd ` resources are written as WAV when the built-in converter
+supports the resource. Converted outputs are preferred in `resources.tsv` and
+`analysis.json.output_file`, while `analysis.json.raw_output_file` keeps the
+preserved native byte path. `analysis.json.resources` also records converter,
+variant index, width, height, and row-byte metadata when a transform supplies
+those fields.
 
 ## Determinism
 

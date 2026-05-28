@@ -1,5 +1,6 @@
 #include "StackImportCli.h"
 
+#include "StackImportPngWriter.h"
 #include "StackImportResourceTransforms.h"
 #include "stackimport_logging.h"
 #include "stackimport_version.h"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <limits>
 #include <span>
 
 namespace stackimport::cli {
@@ -19,6 +21,10 @@ struct RomResourceAsset {
 	std::string decode_status;
 	std::string converter;
 	ResourcePayloadFormat format = ResourcePayloadFormat::Native;
+	uint32_t variant_index = 0;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t row_bytes = 0;
 	std::vector<uint8_t> data;
 };
 
@@ -36,7 +42,30 @@ public:
 		asset.decode_status = "converted";
 		asset.converter = "builtin-resource-transform";
 		asset.format = payload.format;
-		if(payload.data.data != nullptr && payload.data.size != 0)
+		asset.variant_index = payload.variant_index;
+		asset.width = payload.width;
+		asset.height = payload.height;
+		asset.row_bytes = payload.row_bytes;
+		if(payload.format == ResourcePayloadFormat::Rgba32 &&
+			payload.data.data != nullptr &&
+			payload.width != 0 &&
+			payload.height != 0 &&
+			payload.row_bytes != 0 &&
+			payload.width <= static_cast<uint32_t>(std::numeric_limits<int>::max()) &&
+			payload.height <= static_cast<uint32_t>(std::numeric_limits<int>::max()) &&
+			payload.row_bytes <= static_cast<uint32_t>(std::numeric_limits<int>::max()) &&
+			WritePngToMemory(
+				asset.data,
+				static_cast<int>(payload.width),
+				static_cast<int>(payload.height),
+				4,
+				payload.data.data,
+				static_cast<int>(payload.row_bytes)))
+		{
+			asset.media_type = "image/png";
+			asset.format = ResourcePayloadFormat::Binary;
+		}
+		else if(payload.data.data != nullptr && payload.data.size != 0)
 			asset.data.assign(payload.data.data, payload.data.data + payload.data.size);
 		assets.push_back(std::move(asset));
 		return true;
@@ -64,7 +93,10 @@ std::string resource_asset_relative_path(const RomDasm::ResourceRecord& resource
 	return path_join("assets/resources", type + "_" + std::to_string(resource.id) + "_" + RomDasm::format_address(resource.address) + ".bin");
 }
 
-std::string resource_converted_asset_relative_path(const RomDasm::ResourceRecord& resource, ResourcePayloadFormat format, size_t variant)
+std::string resource_converted_asset_relative_path(
+	const RomDasm::ResourceRecord& resource,
+	const RomResourceAsset& asset,
+	size_t variant)
 {
 	std::string type = resource.type;
 	for(char& ch : type)
@@ -74,11 +106,15 @@ std::string resource_converted_asset_relative_path(const RomDasm::ResourceRecord
 			ch = '_';
 	}
 	const char* extension = ".bin";
-	if(format == ResourcePayloadFormat::TextUtf8)
+	if(asset.media_type == "image/png")
+		extension = ".png";
+	else if(asset.media_type == "audio/wav")
+		extension = ".wav";
+	else if(asset.format == ResourcePayloadFormat::TextUtf8)
 		extension = ".txt";
-	else if(format == ResourcePayloadFormat::JsonUtf8)
+	else if(asset.format == ResourcePayloadFormat::JsonUtf8)
 		extension = ".json";
-	else if(format == ResourcePayloadFormat::Rgba32)
+	else if(asset.format == ResourcePayloadFormat::Rgba32)
 		extension = ".rgba";
 	std::string suffix;
 	if(variant != 0)
@@ -110,7 +146,7 @@ std::vector<RomResourceAsset> converted_resource_assets(
 	if(!emit_builtin_resource_transforms(res, ref, output))
 		return {};
 	for(size_t i = 0; i < output.assets.size(); i++)
-		output.assets[i].relative_path = resource_converted_asset_relative_path(resource, output.assets[i].format, i);
+		output.assets[i].relative_path = resource_converted_asset_relative_path(resource, output.assets[i], i);
 	return output.assets;
 }
 
@@ -536,7 +572,7 @@ bool write_analysis_json(
 		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
 		const std::string rawOutputFile = emitAssets ? resource_asset_relative_path(resource) : "";
 		fprintf(jsonFile,
-			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
+			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u,\"confidence\":%.2f,\"source\":\"%s\"}%s\n",
 			static_cast<unsigned>(resource.address),
 			json_escape(resource.type).c_str(),
 			resource.id,
@@ -554,6 +590,10 @@ bool write_analysis_json(
 			json_escape(rawOutputFile).c_str(),
 			json_escape(asset.decode_status).c_str(),
 			json_escape(asset.converter).c_str(),
+			static_cast<unsigned>(asset.variant_index),
+			static_cast<unsigned>(asset.width),
+			static_cast<unsigned>(asset.height),
+			static_cast<unsigned>(asset.row_bytes),
 			resource.confidence,
 			json_escape(resource.source).c_str(),
 			(i + 1 < analysis.resources.size()) ? "," : "");
