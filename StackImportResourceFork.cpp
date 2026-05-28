@@ -604,11 +604,15 @@ private:
 			return;
 		const std::string text(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
 		std::string relativePath;
-		const bool isDisassembly = resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
-			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn");
+		const bool isDisassembly =
+			resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
+			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn") ||
+			resource_type_is(res_, "CODE") || resource_type_is(res_, "DRVR") ||
+			resource_type_is(res_, "dcmp");
 		if(isDisassembly)
 		{
-			const std::string typeAndArchitecture = summary_.type + "_" + summary_.architecture;
+			const std::string architecture = summary_.architecture.empty() ? "mac68k" : summary_.architecture;
+			const std::string typeAndArchitecture = summary_.type + "_" + architecture;
 			relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName_, typeAndArchitecture, summary_.id, summary_.name, ".s");
 		}
 		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "TEXT"))
@@ -631,7 +635,8 @@ private:
 				summary_.status = "disassembled";
 				summary_.disassemblyFile = relativePath;
 				record_output_artifact(relativePath, payload, false);
-				stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", summary_.architecture.c_str(), summary_.type.c_str(), summary_.id);
+				const std::string architecture = summary_.architecture.empty() ? "mac68k" : summary_.architecture;
+				stackimport_emit_infof("Status: Wrote %s disassembly for '%s' #%d.\n", architecture.c_str(), summary_.type.c_str(), summary_.id);
 			}
 			else
 			{

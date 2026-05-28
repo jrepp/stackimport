@@ -32,9 +32,9 @@ callbacks. Native resource metadata is recorded in `source-manifest.json`.
 | `snd `         | Converted to WAV binary payload.                                | `emit_snd_transform`, `ConvertSndResourceToWav`                  |
 | `XCMD`, `XFCN` | 68K code resource disassembly as UTF-8 text payload.            | `emit_code_resource_transform`, `DisassembleMac68kCodeResource`  |
 | `xcmd`, `xfcn` | PowerPC code resource disassembly as UTF-8 text payload.        | `emit_code_resource_transform`, `DisassemblePowerPCCodeResource` |
-| `CODE`         | Segment metadata as JSON.                                       | `emit_code_transform`                                            |
-| `DRVR`         | Driver metadata/disassembly as converted resource output.       | `emit_drvr_transform`                                            |
-| `dcmp`         | Decompressor metadata/disassembly as converted resource output. | `emit_dcmp_transform`                                            |
+| `CODE`         | Segment metadata as JSON plus 68K disassembly for segment code. | `emit_code_transform`                                            |
+| `DRVR`         | Driver metadata as JSON plus 68K disassembly for driver code.   | `emit_drvr_transform`                                            |
+| `dcmp`         | Decompressor metadata as JSON plus 68K disassembly for code.    | `emit_dcmp_transform`                                            |
 
 ## Text, Color, And Structured Metadata
 

@@ -110,6 +110,8 @@ std::string resource_converted_asset_relative_path(
 		extension = ".png";
 	else if(asset.media_type == "audio/wav")
 		extension = ".wav";
+	else if(asset.media_type == "text/x-asm; charset=utf-8")
+		extension = ".s";
 	else if(asset.format == ResourcePayloadFormat::TextUtf8)
 		extension = ".txt";
 	else if(asset.format == ResourcePayloadFormat::JsonUtf8)

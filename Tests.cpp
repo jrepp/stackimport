@@ -933,6 +933,13 @@ void test_resource_code_transforms()
 	append_u16be(codePayload, 3);
 	codePayload.insert(codePayload.end(), {0x4E, 0x75});
 	assert_json_resource_contains("CODE", 1, codePayload, {"\"kind\": \"nearSegment\"", "\"codeSize\": 2"});
+	{
+		CountingResourceOutput codeOutput = parse_single_resource("CODE", 1, codePayload);
+		assert(codeOutput.json_count == 1);
+		assert(codeOutput.text_count == 1);
+		assert(codeOutput.last_text.find("rts") != std::string::npos ||
+			codeOutput.last_text.find("dc.w $4E75") != std::string::npos);
+	}
 
 	std::vector<uint8_t> drvrPayload(26);
 	rsrcd::write_u16be(drvrPayload.data(), 0x0100);
@@ -952,6 +959,13 @@ void test_resource_code_transforms()
 		"\"codeStartOffset\": 24",
 		"\"codeSize\": 2",
 	});
+	{
+		CountingResourceOutput drvrOutput = parse_single_resource("DRVR", 1, drvrPayload);
+		assert(drvrOutput.json_count == 1);
+		assert(drvrOutput.text_count == 1);
+		assert(drvrOutput.last_text.find("rts") != std::string::npos ||
+			drvrOutput.last_text.find("dc.w $4E75") != std::string::npos);
+	}
 
 	std::vector<uint8_t> dcmpPayload;
 	append_u16be(dcmpPayload, 10);
@@ -963,6 +977,13 @@ void test_resource_code_transforms()
 		"\"pcOffset\": 6",
 		"\"codeSize\": 2",
 	});
+	{
+		CountingResourceOutput dcmpOutput = parse_single_resource("dcmp", 1, dcmpPayload);
+		assert(dcmpOutput.json_count == 1);
+		assert(dcmpOutput.text_count == 1);
+		assert(dcmpOutput.last_text.find("rts") != std::string::npos ||
+			dcmpOutput.last_text.find("dc.w $4E75") != std::string::npos);
+	}
 }
 
 void test_resource_color_and_ui_transforms()
@@ -1424,6 +1445,45 @@ void test_resource_package_writes()
 	assert(textSummaries[0].outputArtifacts[0].format == "text");
 	const std::string convertedText = read_text_file(textOutputPath + "/resource-text/Stack_STR%20_12.txt");
 	assert(convertedText == "H\xC3\xA9llo");
+
+	std::vector<uint8_t> packageCodePayload;
+	append_u16be(packageCodePayload, 2);
+	append_u16be(packageCodePayload, 3);
+	packageCodePayload.insert(packageCodePayload.end(), {0x4E, 0x75});
+	const std::vector<uint8_t> codeFork = make_single_resource_fork("CODE", 1, packageCodePayload);
+	const std::string codeOutputPath = std::string("/tmp/stackimport-code-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(codeOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState codePlatformState;
+	codePlatformState.resource_fork_data = codeFork.data();
+	codePlatformState.resource_fork_size = codeFork.size();
+	stackimport_platform codePlatform = resourceForkPlatform;
+	codePlatform.user_data = &codePlatformState;
+	const stackimport_internal_platform codeInternalPlatform = stackimport_internal_platform_from_api(&codePlatform);
+	CountingResourceOutput codeOutput;
+	std::vector<CResourceSummary> codeSummaries;
+	std::string codeStatus;
+	uint64_t codeBytes = 0;
+	{
+		stackimport_platform_scope codeScope(codeInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			codeOutputPath,
+			"Stack",
+			&codeOutput,
+			codeSummaries,
+			codeStatus,
+			codeBytes));
+	}
+	assert(codeStatus == "ok");
+	assert(codeSummaries.size() == 1);
+	assert(codeSummaries[0].type == "CODE");
+	assert(codeSummaries[0].status == "exported");
+	assert(codeSummaries[0].outputFile == "CODE_1.json");
+	assert(codeSummaries[0].disassemblyFile == "resource-disassembly/Stack_CODE_mac68k_1.s");
+	assert(codeSummaries[0].outputArtifacts.size() == 2);
+	assert(codeSummaries[0].outputArtifacts[0].path == "resource-disassembly/Stack_CODE_mac68k_1.s");
+	assert(codeSummaries[0].outputArtifacts[0].format == "text");
+	assert(codeSummaries[0].outputArtifacts[1].path == "CODE_1.json");
 }
 
 void test_stack_block_identifier()

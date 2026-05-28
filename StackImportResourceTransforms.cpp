@@ -44,6 +44,15 @@ auto resource_type_is(const rsrcd::ResRef& resource, const char* type) -> bool
 		std::memcmp(resource.type.data, type, 4) == 0;
 }
 
+auto emit_mac68k_disassembly_payload(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const rsrcd::Bytes& code,
+	uint32_t start_offset,
+	bool wants_payload,
+	const char* description) -> bool;
+
 struct IndexedIconSpec
 {
 	uint16_t width;
@@ -1031,7 +1040,14 @@ auto emit_code_transform(
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed CODE metadata");
-	if(!output.wants_resource_payload(descriptor))
+	const bool wants_json = output.wants_resource_payload(descriptor);
+	const bool wants_asm = resource.id != 0 && output.wants_resource_payload(make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/x-asm; charset=utf-8",
+		"Mac 68K CODE segment disassembly"));
+	if(!wants_json && !wants_asm)
 		return true;
 
 	StackImportRapidJsonAllocator base_alloc;
@@ -1086,8 +1102,19 @@ auto emit_code_transform(
 			doc.AddMember("loadAddress", segment.load_address, allocator);
 			doc.AddMember("reserved", segment.reserved, allocator);
 		}
+		if(wants_asm && !emit_mac68k_disassembly_payload(
+			resource,
+			ref,
+			output,
+			segment.code,
+			segment.code_start_offset,
+			wants_asm,
+			"Mac 68K CODE segment disassembly"))
+			return false;
 	}
 
+	if(!wants_json)
+		return true;
 	JsonStringBuffer json_buffer(&base_alloc);
 	JsonWriter writer(json_buffer, &base_alloc);
 	doc.Accept(writer);
@@ -1106,13 +1133,33 @@ auto emit_drvr_transform(
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed driver metadata");
-	if(!output.wants_resource_payload(descriptor))
+	const bool wants_json = output.wants_resource_payload(descriptor);
+	const bool wants_asm = output.wants_resource_payload(make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/x-asm; charset=utf-8",
+		"Mac 68K driver disassembly"));
+	if(!wants_json && !wants_asm)
 		return true;
 
 	rsrcd::drvr::Driver driver{};
 	auto parse_result = rsrcd::drvr::parse(resource.data, driver);
 	if(!parse_result)
 		return output.on_resource_error(ref, parse_result.message());
+
+	if(wants_asm && !emit_mac68k_disassembly_payload(
+		resource,
+		ref,
+		output,
+		driver.code,
+		driver.code_start_offset,
+		wants_asm,
+		"Mac 68K driver disassembly"))
+		return false;
+
+	if(!wants_json)
+		return true;
 
 	StackImportRapidJsonAllocator base_alloc;
 	JsonPoolAllocator pool(1024, &base_alloc);
@@ -1151,13 +1198,33 @@ auto emit_dcmp_transform(
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed decompressor metadata");
-	if(!output.wants_resource_payload(descriptor))
+	const bool wants_json = output.wants_resource_payload(descriptor);
+	const bool wants_asm = output.wants_resource_payload(make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/x-asm; charset=utf-8",
+		"Mac 68K decompressor disassembly"));
+	if(!wants_json && !wants_asm)
 		return true;
 
 	rsrcd::dcmp::Decompressor decompressor{};
 	auto parse_result = rsrcd::dcmp::parse(resource.data, decompressor);
 	if(!parse_result)
 		return output.on_resource_error(ref, parse_result.message());
+
+	if(wants_asm && !emit_mac68k_disassembly_payload(
+		resource,
+		ref,
+		output,
+		decompressor.code,
+		decompressor.pc_offset,
+		wants_asm,
+		"Mac 68K decompressor disassembly"))
+		return false;
+
+	if(!wants_json)
+		return true;
 
 	StackImportRapidJsonAllocator base_alloc;
 	JsonPoolAllocator pool(512, &base_alloc);
@@ -2349,6 +2416,36 @@ auto emit_code_resource_transform(
 	Mac68kDisassemblyResult disassembly = powerpc
 		? DisassemblePowerPCCodeResource(std::span<const uint8_t>(resource.data.data, resource.data.size), 0, resource.data.size, 0)
 		: DisassembleMac68kCodeResource(std::span<const uint8_t>(resource.data.data, resource.data.size), 0, resource.data.size, 0);
+	if(!disassembly.ok)
+		return output.on_resource_error(ref, disassembly.error.c_str());
+
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(disassembly.text.data()), disassembly.text.size()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_mac68k_disassembly_payload(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const rsrcd::Bytes& code,
+	uint32_t start_offset,
+	bool wants_payload,
+	const char* description) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::TextUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"text/x-asm; charset=utf-8",
+		description);
+	if(!wants_payload || code.empty())
+		return true;
+
+	Mac68kDisassemblyResult disassembly = DisassembleMac68kCodeResource(
+		std::span<const uint8_t>(resource.data.data, resource.data.size),
+		start_offset,
+		code.size,
+		start_offset);
 	if(!disassembly.ok)
 		return output.on_resource_error(ref, disassembly.error.c_str());
 
