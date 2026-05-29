@@ -113,12 +113,15 @@ std::string analysis_to_json(const Analysis& analysis, int indent = 0);
 bool sample_packet_bytes(std::span<const uint8_t> data, const SamplePacket& packet, std::span<const uint8_t>& bytes, std::string& error);
 bool decode_pcm_track_to_wav(std::span<const uint8_t> data, const Track& track, std::vector<uint8_t>& wav, std::string& error);
 
-struct CinepakFrame {
+struct RgbaFrame {
 	uint16_t width = 0;
 	uint16_t height = 0;
 	std::vector<uint8_t> rgba;
 };
 
-bool decode_cinepak_frame(std::span<const uint8_t> data, CinepakFrame& frame, std::string& error);
+using CinepakFrame = RgbaFrame;
+
+bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t height, RgbaFrame& frame, std::string& error, const RgbaFrame* previous = nullptr);
+bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error);
 
 } // namespace stackimport::mov2qt

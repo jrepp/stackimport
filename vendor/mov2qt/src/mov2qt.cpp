@@ -660,6 +660,109 @@ uint32_t read_be32(std::span<const uint8_t> data, size_t offset)
 		static_cast<uint32_t>(data[offset + 3]);
 }
 
+struct Rgb888 {
+	uint8_t r = 0;
+	uint8_t g = 0;
+	uint8_t b = 0;
+};
+
+Rgb888 rgb555_to_rgb888(uint16_t color)
+{
+	const uint8_t r5 = static_cast<uint8_t>((color >> 10u) & 0x1Fu);
+	const uint8_t g5 = static_cast<uint8_t>((color >> 5u) & 0x1Fu);
+	const uint8_t b5 = static_cast<uint8_t>(color & 0x1Fu);
+	return Rgb888{
+		static_cast<uint8_t>((r5 << 3u) | (r5 >> 2u)),
+		static_cast<uint8_t>((g5 << 3u) | (g5 >> 2u)),
+		static_cast<uint8_t>((b5 << 3u) | (b5 >> 2u)),
+	};
+}
+
+Rgb888 interpolate_rgb555(uint16_t color_a, uint16_t color_b, int weight_a, int weight_b)
+{
+	const int ar = static_cast<int>((color_a >> 10u) & 0x1Fu);
+	const int ag = static_cast<int>((color_a >> 5u) & 0x1Fu);
+	const int ab = static_cast<int>(color_a & 0x1Fu);
+	const int br = static_cast<int>((color_b >> 10u) & 0x1Fu);
+	const int bg = static_cast<int>((color_b >> 5u) & 0x1Fu);
+	const int bb = static_cast<int>(color_b & 0x1Fu);
+	const uint16_t mixed = static_cast<uint16_t>((((weight_a * ar + weight_b * br) >> 5) << 10) |
+		(((weight_a * ag + weight_b * bg) >> 5) << 5) |
+		((weight_a * ab + weight_b * bb) >> 5));
+	return rgb555_to_rgb888(mixed);
+}
+
+void write_rgba_pixel(RgbaFrame& frame, uint16_t x, uint16_t y, Rgb888 color)
+{
+	if(x >= frame.width || y >= frame.height)
+		return;
+	const size_t index = (static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)) * 4u;
+	if(index + 3 >= frame.rgba.size())
+		return;
+	frame.rgba[index + 0] = color.r;
+	frame.rgba[index + 1] = color.g;
+	frame.rgba[index + 2] = color.b;
+	frame.rgba[index + 3] = 255;
+}
+
+struct BlockCursor {
+	uint16_t x = 0;
+	uint16_t y = 0;
+	uint16_t width = 0;
+	uint16_t height = 0;
+
+	bool done() const
+	{
+		return y >= height;
+	}
+
+	void advance()
+	{
+		x = static_cast<uint16_t>(x + 4u);
+		if(x >= width)
+		{
+			x = 0;
+			y = static_cast<uint16_t>(y + 4u);
+		}
+	}
+};
+
+void copy_rpza_block_from_previous(RgbaFrame& frame, const RgbaFrame* previous, uint16_t x, uint16_t y)
+{
+	if(!previous || previous->width != frame.width || previous->height != frame.height || previous->rgba.size() != frame.rgba.size())
+		return;
+	for(uint16_t dy = 0; dy < 4; dy++)
+	{
+		for(uint16_t dx = 0; dx < 4; dx++)
+		{
+			if(x + dx >= frame.width || y + dy >= frame.height)
+				continue;
+			const size_t index = (static_cast<size_t>(y + dy) * static_cast<size_t>(frame.width) + static_cast<size_t>(x + dx)) * 4u;
+			std::copy_n(previous->rgba.data() + index, 4, frame.rgba.data() + index);
+		}
+	}
+}
+
+void fill_rpza_block(RgbaFrame& frame, uint16_t x, uint16_t y, Rgb888 color)
+{
+	for(uint16_t dy = 0; dy < 4; dy++)
+		for(uint16_t dx = 0; dx < 4; dx++)
+			write_rgba_pixel(frame, static_cast<uint16_t>(x + dx), static_cast<uint16_t>(y + dy), color);
+}
+
+void draw_rpza_indexed_block(RgbaFrame& frame, uint16_t x, uint16_t y, const std::array<Rgb888, 4>& colors, std::span<const uint8_t, 4> indices)
+{
+	for(uint16_t dy = 0; dy < 4; dy++)
+	{
+		const uint8_t row = indices[dy];
+		for(uint16_t dx = 0; dx < 4; dx++)
+		{
+			const uint8_t selector = static_cast<uint8_t>((row >> (6u - (dx * 2u))) & 0x03u);
+			write_rgba_pixel(frame, static_cast<uint16_t>(x + dx), static_cast<uint16_t>(y + dy), colors[selector]);
+		}
+	}
+}
+
 struct CinepakVector {
 	std::array<uint8_t, 4> y = {};
 	int8_t u = 0;
@@ -1207,10 +1310,155 @@ std::string analysis_to_json(const Analysis& analysis, int indent)
 	return out;
 }
 
-bool decode_cinepak_frame(std::span<const uint8_t> data, CinepakFrame& frame, std::string& error)
+bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t height, RgbaFrame& frame, std::string& error, const RgbaFrame* previous)
 {
 	error.clear();
-	frame = CinepakFrame{};
+	frame = RgbaFrame{};
+	if(width == 0 || height == 0)
+	{
+		error = "invalid rpza frame dimensions";
+		return false;
+	}
+	if(data.size() < 4)
+	{
+		error = "rpza frame too small";
+		return false;
+	}
+	const uint32_t declared_size = read_be24(data, 1);
+	const size_t frame_size = declared_size > 0 ? static_cast<size_t>(std::min<uint64_t>(declared_size, data.size())) : data.size();
+	frame.width = width;
+	frame.height = height;
+	frame.rgba.assign(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u, 255);
+	for(size_t index = 0; index + 3 < frame.rgba.size(); index += 4)
+	{
+		frame.rgba[index + 0] = 0;
+		frame.rgba[index + 1] = 0;
+		frame.rgba[index + 2] = 0;
+	}
+
+	BlockCursor cursor{0, 0, width, height};
+	size_t pos = 4;
+	while(pos < frame_size && !cursor.done())
+	{
+		const uint8_t opcode = data[pos++];
+		if((opcode & 0x80u) != 0)
+		{
+			const uint8_t kind = static_cast<uint8_t>(opcode & 0xE0u);
+			const uint8_t block_count = static_cast<uint8_t>((opcode & 0x1Fu) + 1u);
+			if(kind == 0x80u)
+			{
+				for(uint8_t block = 0; block < block_count && !cursor.done(); block++)
+				{
+					copy_rpza_block_from_previous(frame, previous, cursor.x, cursor.y);
+					cursor.advance();
+				}
+				continue;
+			}
+			if(kind == 0xA0u)
+			{
+				if(pos + 2 > frame_size)
+				{
+					error = "truncated rpza single-color block";
+					return false;
+				}
+				const Rgb888 color = rgb555_to_rgb888(read_be16(data, pos));
+				pos += 2;
+				for(uint8_t block = 0; block < block_count && !cursor.done(); block++)
+				{
+					fill_rpza_block(frame, cursor.x, cursor.y, color);
+					cursor.advance();
+				}
+				continue;
+			}
+			if(kind == 0xC0u)
+			{
+				if(pos + 4 > frame_size)
+				{
+					error = "truncated rpza four-color header";
+					return false;
+				}
+				const uint16_t color_a = read_be16(data, pos);
+				const uint16_t color_b = read_be16(data, pos + 2);
+				pos += 4;
+				const std::array<Rgb888, 4> colors = {
+					rgb555_to_rgb888(color_b),
+					interpolate_rgb555(color_a, color_b, 11, 21),
+					interpolate_rgb555(color_a, color_b, 21, 11),
+					rgb555_to_rgb888(color_a),
+				};
+				for(uint8_t block = 0; block < block_count && !cursor.done(); block++)
+				{
+					if(pos + 4 > frame_size)
+					{
+						error = "truncated rpza four-color indices";
+						return false;
+					}
+					draw_rpza_indexed_block(frame, cursor.x, cursor.y, colors, std::span<const uint8_t, 4>(data.data() + pos, 4));
+					pos += 4;
+					cursor.advance();
+				}
+				continue;
+			}
+			error = "unsupported rpza opcode";
+			return false;
+		}
+
+		if(pos >= frame_size)
+		{
+			error = "truncated rpza special opcode";
+			return false;
+		}
+		const uint16_t color_a = static_cast<uint16_t>((static_cast<uint16_t>(opcode) << 8u) | data[pos++]);
+		if(pos >= frame_size)
+		{
+			error = "truncated rpza special block";
+			return false;
+		}
+		if((data[pos] & 0x80u) != 0)
+		{
+			if(pos + 6 > frame_size)
+			{
+				error = "truncated rpza special four-color block";
+				return false;
+			}
+			const uint16_t color_b = read_be16(data, pos);
+			pos += 2;
+			const std::array<Rgb888, 4> colors = {
+				rgb555_to_rgb888(color_b),
+				interpolate_rgb555(color_a, color_b, 11, 21),
+				interpolate_rgb555(color_a, color_b, 21, 11),
+				rgb555_to_rgb888(color_a),
+			};
+			draw_rpza_indexed_block(frame, cursor.x, cursor.y, colors, std::span<const uint8_t, 4>(data.data() + pos, 4));
+			pos += 4;
+			cursor.advance();
+			continue;
+		}
+
+		std::array<Rgb888, 16> colors = {};
+		colors[0] = rgb555_to_rgb888(color_a);
+		for(size_t color_index = 1; color_index < colors.size(); color_index++)
+		{
+			if(pos + 2 > frame_size)
+			{
+				error = "truncated rpza literal-color block";
+				return false;
+			}
+			colors[color_index] = rgb555_to_rgb888(read_be16(data, pos));
+			pos += 2;
+		}
+		for(uint16_t dy = 0; dy < 4; dy++)
+			for(uint16_t dx = 0; dx < 4; dx++)
+				write_rgba_pixel(frame, static_cast<uint16_t>(cursor.x + dx), static_cast<uint16_t>(cursor.y + dy), colors[static_cast<size_t>(dy) * 4u + dx]);
+		cursor.advance();
+	}
+	return true;
+}
+
+bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error)
+{
+	error.clear();
+	frame = RgbaFrame{};
 	if(data.size() < 10)
 	{
 		error = "cinepak frame too small";

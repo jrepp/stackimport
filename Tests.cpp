@@ -553,6 +553,27 @@ std::vector<uint8_t> make_cinepak_fixture()
 	return frame;
 }
 
+std::vector<uint8_t> make_rpza_single_color_fixture()
+{
+	std::vector<uint8_t> frame;
+	frame.push_back(0xE1);
+	append_u24be(frame, 7);
+	frame.push_back(0xA0);
+	append_u16be(frame, 0x7C00);
+	return frame;
+}
+
+std::vector<uint8_t> make_rpza_literal_fixture()
+{
+	std::vector<uint8_t> frame;
+	frame.push_back(0xE1);
+	append_u24be(frame, 36);
+	append_u16be(frame, 0x001F);
+	for(uint16_t i = 1; i < 16; i++)
+		append_u16be(frame, static_cast<uint16_t>(i));
+	return frame;
+}
+
 std::vector<uint8_t> make_snd_format2_fixture(bool extraNullCommand, uint32_t commandOffset)
 {
 	std::vector<uint8_t> snd;
@@ -2134,6 +2155,21 @@ void	RunTests()
 	assert(stackimport::mov2qt::decode_pcm_track_to_wav(std::span<const uint8_t>(pcmMovFixture.data(), pcmMovFixture.size()), signed8Track, wavBytes, wavError));
 	assert(wavBytes[44] == 0x81);
 	assert(wavBytes[45] == 0x82);
+
+	const std::vector<uint8_t> rpzaFixture = make_rpza_single_color_fixture();
+	stackimport::mov2qt::RgbaFrame rpzaFrame;
+	std::string rpzaError;
+	assert(stackimport::mov2qt::decode_rpza_frame(std::span<const uint8_t>(rpzaFixture.data(), rpzaFixture.size()), 4, 4, rpzaFrame, rpzaError));
+	assert(rpzaFrame.width == 4);
+	assert(rpzaFrame.height == 4);
+	assert(rpzaFrame.rgba.size() == 64);
+	assert(rpzaFrame.rgba[0] == 255);
+	assert(rpzaFrame.rgba[1] == 0);
+	assert(rpzaFrame.rgba[2] == 0);
+	assert(rpzaFrame.rgba[3] == 255);
+	const std::vector<uint8_t> rpzaLiteralFixture = make_rpza_literal_fixture();
+	assert(stackimport::mov2qt::decode_rpza_frame(std::span<const uint8_t>(rpzaLiteralFixture.data(), rpzaLiteralFixture.size()), 4, 4, rpzaFrame, rpzaError));
+	assert(rpzaFrame.rgba[2] == 255);
 
 	const std::vector<uint8_t> cinepakFixture = make_cinepak_fixture();
 	stackimport::mov2qt::CinepakFrame cinepakFrame;

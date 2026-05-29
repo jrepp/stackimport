@@ -50,6 +50,11 @@ This plan covers the QuickTime sample formats found in the Myst import runs:
 
 ## `rpza` Apple Video
 
+Status: initial clean-room decoder landed for skip, single-color,
+four-color/indexed, special four-color, and literal 16-color blocks. Synthetic
+fixtures cover single-color and literal blocks, and a probe decoded 12 Myst
+`rpza` packets into nonblank RGBA frames.
+
 1. Implement a clean-room frame decoder from public format notes.
    - Chunk header: leading flag byte plus 24-bit size.
    - Decode 4x4 RGB555 blocks.
