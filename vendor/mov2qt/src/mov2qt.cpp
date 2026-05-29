@@ -1508,7 +1508,7 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 		}
 		const uint16_t strip_id = read_be16(data, pos);
 		const uint16_t strip_size = read_be16(data, pos + 2);
-		const uint16_t top_y = read_be16(data, pos + 4);
+		uint16_t top_y = read_be16(data, pos + 4);
 		const uint16_t left_x = read_be16(data, pos + 6);
 		uint16_t bottom_y = read_be16(data, pos + 8);
 		const uint16_t right_x = read_be16(data, pos + 10);
@@ -1523,7 +1523,10 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 			return false;
 		}
 		if(top_y == 0 && strip_index > 0)
+		{
+			top_y = previous_bottom_y;
 			bottom_y = static_cast<uint16_t>(previous_bottom_y + bottom_y);
+		}
 
 		const size_t strip_end = pos + strip_size;
 		size_t chunk_pos = pos + 12;

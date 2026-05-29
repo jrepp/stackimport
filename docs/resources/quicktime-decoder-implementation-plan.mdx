@@ -78,10 +78,10 @@ fixtures cover single-color and literal blocks, and a probe decoded 12 Myst
 ## `cvid` Cinepak
 
 Status: stateful decoder support now carries strip codebooks and previous RGBA
-frames across packets, with neutral U/V chroma handling. A probe decoded the
-first four packets from 12 representative Myst `cvid` tracks into nonblank RGBA
-frames. PNG export is still gated until broader corpus validation covers
-multi-strip movies and more inter-frame edge cases.
+frames across packets, with neutral U/V chroma handling and multi-strip
+coordinate handling. A probe decoded 2302 preview packets across all 151 Myst
+`cvid` tracks into nonblank RGBA frames. PNG export still needs a packaging pass
+and manifest validation before being enabled by default.
 
 1. Land the frame decoder in small pieces.
    - Frame header: flags, 24-bit frame length, coded width/height, strip count.
