@@ -67,13 +67,12 @@ fixtures cover single-color and literal blocks, and a probe decoded 12 Myst
 ## `rle ` QuickTime Animation
 
 Status: initial 8-bit indexed decoder support landed for the Myst corpus. The
-parser now records video sample-description depth and embedded color-table size,
-and the importer exports capped PNG previews for `rle ` tracks through
+parser now records video sample-description depth, embedded color-table size,
+and the default Macintosh 8-bit color table for nonzero QuickTime color-table
+IDs. The importer exports capped PNG previews for `rle ` tracks through
 `quicktimeFrames`. A Myst validation import wrote 21 RLE track manifests and 322
-RLE preview PNGs under `/tmp/Myst-mov2qt-rle-export-20260528.xstk`. Seventeen
-RLE tracks include embedded palettes; four use a default/external color-table ID
-and currently fall back to grayscale until the classic QuickTime default CLUT is
-implemented.
+RLE preview PNGs under `/tmp/Myst-mov2qt-default-palette-20260529.xstk`; all 21
+RLE sample descriptions report a 256-entry palette.
 
 1. Parse sample description bit depth and palette data.
 2. Implement clean-room frame decode for 1, 2, 4, 8, 16, 24, and 32 bpp packet
@@ -82,8 +81,8 @@ implemented.
 4. Convert indexed/RGB outputs to RGBA32.
 5. Acceptance: synthetic fixtures cover literal runs, repeated runs,
    line-skips, partial updates, and NOP frames; Myst frames export correctly
-   sized PNGs. Current acceptance is met for Myst 8-bit embedded-palette tracks;
-   default palette handling and non-8-bit variants remain open.
+   sized PNGs. Current acceptance is met for Myst 8-bit embedded-palette and
+   default-palette tracks; non-8-bit variants remain open.
 
 ## `cvid` Cinepak
 

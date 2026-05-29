@@ -16,6 +16,36 @@ constexpr size_t kSamplePacketPreviewLimit = 65536;
 
 void apply_codec_mapping(SampleDescription& description, const std::string& handler_type);
 
+std::vector<std::array<uint8_t, 4>> make_default_macintosh_8bit_palette()
+{
+	std::vector<std::array<uint8_t, 4>> palette;
+	palette.reserve(256);
+	palette.push_back({0x00, 0x00, 0x00, 0xFF});
+	const std::array<uint8_t, 10> ramps{0x0B, 0x22, 0x44, 0x55, 0x77, 0x88, 0xAA, 0xBB, 0xDD, 0xEE};
+	for(uint8_t value : ramps)
+		palette.push_back({value, value, value, 0xFF});
+	for(uint8_t value : ramps)
+		palette.push_back({0x00, 0x00, value, 0xFF});
+	for(uint8_t value : ramps)
+		palette.push_back({0x00, value, 0x00, 0xFF});
+	for(uint8_t value : ramps)
+		palette.push_back({value, 0x00, 0x00, 0xFF});
+	const std::array<uint8_t, 6> cube{0x00, 0x33, 0x66, 0x99, 0xCC, 0xFF};
+	for(uint8_t red : cube)
+	{
+		for(uint8_t green : cube)
+		{
+			for(uint8_t blue : cube)
+			{
+				if(red == 0x00 && green == 0x00 && blue == 0x00)
+					continue;
+				palette.push_back({red, green, blue, 0xFF});
+			}
+		}
+	}
+	return palette;
+}
+
 struct Parser {
 	std::span<const uint8_t> data;
 	Analysis analysis;
@@ -220,7 +250,11 @@ struct Parser {
 				{
 					description.sample_size_bits = u2(pos + 82);
 					description.compression_id = u2(pos + 84);
-					if(pos + 94 <= end && entry_size >= 94)
+					if(description.sample_size_bits == 8 && description.compression_id != 0)
+					{
+						description.palette_rgba = make_default_macintosh_8bit_palette();
+					}
+					else if(pos + 94 <= end && entry_size >= 94)
 					{
 						const uint32_t color_count = static_cast<uint32_t>(u2(pos + 92)) + 1u;
 						uint64_t color_pos = pos + 94;

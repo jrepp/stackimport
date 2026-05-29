@@ -9,6 +9,10 @@ the public Kaitai Struct `quicktime_mov` schema.
 - RPZA format notes: <https://wiki.multimedia.cx/index.php?title=Apple_RPZA>
 - Cinepak format notes: <https://multimedia.cx/mirror/cinepak.txt> and
   <https://wiki.multimedia.cx/index.php?title=Cinepak>
+- QuickTime indexed video color-table behavior: QuickTime File Format
+  Specification, video sample description color table ID.
+- Default Macintosh 8-bit palette ordering cross-check:
+  <https://lospec.com/palette-list/macintosh-8-bit-system-palette>
 - Local role: parse QuickTime/MOV atom structure, resource-fork `moov`
   metadata, sample tables, and clean-room legacy media decode experiments for
   Myst reverse-engineering reports.
