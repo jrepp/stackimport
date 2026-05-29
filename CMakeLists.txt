@@ -189,6 +189,7 @@ if(STACKIMPORT_ENABLE_VENDOR)
         vendor_rapidjson
         vendor_ppcd
         vendor_snd2wav
+        vendor_mov2qt
     )
 
     target_link_libraries(stackimport_static
@@ -296,6 +297,9 @@ add_executable(stackimport
     StackImportCliScanMode.cpp
 )
 target_link_libraries(stackimport PRIVATE stackimport_static vendor_cli11)
+if(STACKIMPORT_ENABLE_VENDOR)
+    target_link_libraries(stackimport PRIVATE vendor_mov2qt)
+endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
     set_source_files_properties(StackImportCliOptions.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
 elseif(MSVC)
@@ -309,6 +313,9 @@ endif()
 if(STACKIMPORT_BUILD_TESTS)
     add_executable(stackimport-tests TestsMain.cpp Tests.cpp)
     target_link_libraries(stackimport-tests PRIVATE stackimport_static)
+    if(STACKIMPORT_ENABLE_VENDOR)
+        target_link_libraries(stackimport-tests PRIVATE vendor_mov2qt)
+    endif()
     list(APPEND STACKIMPORT_CORE_TARGETS stackimport-tests)
 endif()
 

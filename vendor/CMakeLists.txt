@@ -140,6 +140,17 @@ target_compile_options(vendor_rsrcd INTERFACE
     ${STACKIMPORT_VENDOR_WARNING_ERROR_FLAGS}
 )
 
+add_library(vendor_mov2qt STATIC
+    mov2qt/src/mov2qt.cpp
+)
+target_include_directories(vendor_mov2qt PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/mov2qt/include")
+target_link_libraries(vendor_mov2qt PUBLIC vendor_rsrcd)
+stackimport_configure_vendor_cxx_target(vendor_mov2qt)
+target_compile_options(vendor_mov2qt PRIVATE
+    ${STACKIMPORT_VENDOR_CXX_WARNING_FLAGS}
+    ${STACKIMPORT_VENDOR_WARNING_ERROR_FLAGS}
+)
+
 if(STACKIMPORT_BUILD_VENDOR_TESTS)
     add_executable(stackimport-rsrcd-tests
         rsrcd/tests/test_main.cpp
@@ -154,12 +165,13 @@ if(STACKIMPORT_BUILD_VENDOR_TESTS)
 endif()
 
 add_custom_target(vendor-header-libraries
-    DEPENDS vendor_ppcd vendor_snd2wav
+    DEPENDS vendor_ppcd vendor_snd2wav vendor_mov2qt
     COMMENT "Header-only and local vendored conversion libraries are available"
 )
 set(STACKIMPORT_VENDOR_STATIC_LIBRARY_TARGETS
     vendor_ppcd
     vendor_snd2wav
+    vendor_mov2qt
     PARENT_SCOPE
 )
 

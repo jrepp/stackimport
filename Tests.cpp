@@ -14,6 +14,7 @@
 #include "stackimport_c.h"
 #include "stackimport_platform_internal.h"
 #include "stackimport_rapidjson_allocator.h"
+#include "stackimport/mov2qt.hpp"
 #include <assert.h>
 #include <cstdlib>
 #include <cstddef>
@@ -319,6 +320,134 @@ void append_u32be(std::vector<uint8_t>& data, uint32_t value)
 	data.push_back(static_cast<uint8_t>((value >> 16u) & 0xFFu));
 	data.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
 	data.push_back(static_cast<uint8_t>(value & 0xFFu));
+}
+
+void append_u24be(std::vector<uint8_t>& data, uint32_t value)
+{
+	data.push_back(static_cast<uint8_t>((value >> 16u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
+	data.push_back(static_cast<uint8_t>(value & 0xFFu));
+}
+
+void append_fourcc(std::vector<uint8_t>& data, const char type[4])
+{
+	data.insert(data.end(), type, type + 4);
+}
+
+void append_atom(std::vector<uint8_t>& data, const char type[4], const std::vector<uint8_t>& body)
+{
+	append_u32be(data, static_cast<uint32_t>(body.size() + 8));
+	append_fourcc(data, type);
+	data.insert(data.end(), body.begin(), body.end());
+}
+
+std::vector<uint8_t> make_quicktime_fixture()
+{
+	std::vector<uint8_t> ftyp;
+	append_fourcc(ftyp, "qt  ");
+	append_u32be(ftyp, 0);
+	append_fourcc(ftyp, "qt  ");
+
+	std::vector<uint8_t> mvhd(100, 0);
+	mvhd[0] = 0;
+	rsrcd::write_u32be(mvhd.data() + 12, 600);
+	rsrcd::write_u32be(mvhd.data() + 16, 1200);
+	rsrcd::write_u32be(mvhd.data() + 20, 0x00010000);
+	rsrcd::write_u16be(mvhd.data() + 24, 0x0100);
+	rsrcd::write_u32be(mvhd.data() + 96, 2);
+
+	std::vector<uint8_t> tkhd(84, 0);
+	tkhd[0] = 0;
+	rsrcd::write_u32be(tkhd.data() + 12, 1);
+	rsrcd::write_u32be(tkhd.data() + 20, 1200);
+	rsrcd::write_u32be(tkhd.data() + 76, 320u << 16u);
+	rsrcd::write_u32be(tkhd.data() + 80, 240u << 16u);
+
+	std::vector<uint8_t> mdhd(20, 0);
+	rsrcd::write_u32be(mdhd.data() + 12, 600);
+	rsrcd::write_u32be(mdhd.data() + 16, 1200);
+
+	std::vector<uint8_t> hdlr(24, 0);
+	std::memcpy(hdlr.data() + 8, "vide", 4);
+
+	std::vector<uint8_t> stsd;
+	append_u32be(stsd, 0);
+	append_u32be(stsd, 1);
+	append_u32be(stsd, 86);
+	append_fourcc(stsd, "rpza");
+	stsd.resize(stsd.size() + 24, 0);
+	append_u16be(stsd, 320);
+	append_u16be(stsd, 240);
+	stsd.resize(8 + 86, 0);
+
+	std::vector<uint8_t> stsz;
+	append_u32be(stsz, 0);
+	append_u32be(stsz, 0);
+	append_u32be(stsz, 3);
+
+	std::vector<uint8_t> stco;
+	append_u32be(stco, 0);
+	append_u32be(stco, 2);
+	append_u32be(stco, 128);
+	append_u32be(stco, 256);
+
+	std::vector<uint8_t> stbl;
+	append_atom(stbl, "stsd", stsd);
+	append_atom(stbl, "stsz", stsz);
+	append_atom(stbl, "stco", stco);
+
+	std::vector<uint8_t> minf;
+	append_atom(minf, "stbl", stbl);
+
+	std::vector<uint8_t> mdia;
+	append_atom(mdia, "mdhd", mdhd);
+	append_atom(mdia, "hdlr", hdlr);
+	append_atom(mdia, "minf", minf);
+
+	std::vector<uint8_t> trak;
+	append_atom(trak, "tkhd", tkhd);
+	append_atom(trak, "mdia", mdia);
+
+	std::vector<uint8_t> moov;
+	append_atom(moov, "mvhd", mvhd);
+	append_atom(moov, "trak", trak);
+
+	std::vector<uint8_t> mov;
+	append_atom(mov, "ftyp", ftyp);
+	append_atom(mov, "moov", moov);
+	return mov;
+}
+
+std::vector<uint8_t> make_cinepak_fixture()
+{
+	std::vector<uint8_t> codebook;
+	append_u16be(codebook, 0x2200);
+	append_u16be(codebook, 10);
+	codebook.insert(codebook.end(), {80, 80, 80, 80, 0, 0});
+
+	std::vector<uint8_t> vectors;
+	append_u16be(vectors, 0x3200);
+	append_u16be(vectors, 5);
+	vectors.push_back(0);
+
+	std::vector<uint8_t> strip;
+	append_u16be(strip, 0x1000);
+	append_u16be(strip, static_cast<uint16_t>(12 + codebook.size() + vectors.size()));
+	append_u16be(strip, 0);
+	append_u16be(strip, 0);
+	append_u16be(strip, 4);
+	append_u16be(strip, 4);
+	strip.insert(strip.end(), codebook.begin(), codebook.end());
+	strip.insert(strip.end(), vectors.begin(), vectors.end());
+
+	std::vector<uint8_t> frame;
+	frame.push_back(0);
+	append_u24be(frame, static_cast<uint32_t>(10 + strip.size()));
+	append_u16be(frame, 4);
+	append_u16be(frame, 4);
+	append_u16be(frame, 1);
+	frame.insert(frame.end(), strip.begin(), strip.end());
+	return frame;
 }
 
 std::vector<uint8_t> make_snd_format2_fixture(bool extraNullCommand, uint32_t commandOffset)
@@ -984,6 +1113,70 @@ void test_resource_code_transforms()
 		assert(dcmpOutput.last_text.find("rts") != std::string::npos ||
 			dcmpOutput.last_text.find("dc.w $4E75") != std::string::npos);
 	}
+
+	const std::vector<uint8_t> inlineCodePayload = {0x4E, 0x75};
+	for(const char* type : {"PACK", "boot", "ptch"})
+	{
+		CountingResourceOutput inlineOutput = parse_single_resource(type, 1, inlineCodePayload);
+		assert(inlineOutput.text_count == 1);
+		assert(inlineOutput.last_text.find("rts") != std::string::npos ||
+			inlineOutput.last_text.find("dc.w $4E75") != std::string::npos);
+	}
+
+	std::vector<uint8_t> fontPayload(26);
+	rsrcd::write_u16be(fontPayload.data() + 0, 0x2000);
+	rsrcd::write_u16be(fontPayload.data() + 2, 32);
+	rsrcd::write_u16be(fontPayload.data() + 4, 33);
+	rsrcd::write_u16be(fontPayload.data() + 6, 8);
+	rsrcd::write_u16be(fontPayload.data() + 8, 0xFFFF);
+	rsrcd::write_u16be(fontPayload.data() + 10, 2);
+	rsrcd::write_u16be(fontPayload.data() + 12, 16);
+	rsrcd::write_u16be(fontPayload.data() + 14, 12);
+	rsrcd::write_u16be(fontPayload.data() + 16, 64);
+	rsrcd::write_u16be(fontPayload.data() + 18, 9);
+	rsrcd::write_u16be(fontPayload.data() + 20, 3);
+	rsrcd::write_u16be(fontPayload.data() + 22, 1);
+	rsrcd::write_u16be(fontPayload.data() + 24, 2);
+	fontPayload.insert(fontPayload.end(), 48, 0x80);
+	assert_json_resource_contains("FONT", 128, fontPayload, {
+		"\"bitDepth\": \"1\"",
+		"\"fixedWidth\": true",
+		"\"glyphCountIncludingMissing\": 3",
+		"\"bitmapByteCount\": 48",
+	});
+	assert_json_resource_contains("NFNT", 128, fontPayload, {"\"rectHeight\": 12", "\"bitmapFitsResource\": true"});
+	{
+		CountingResourceOutput fontOutput = parse_single_resource("FONT", 128, fontPayload);
+		assert(fontOutput.json_count == 1);
+		assert(fontOutput.rgba_count == 1);
+		assert(fontOutput.last_width == 32);
+		assert(fontOutput.last_height == 12);
+	}
+
+	std::vector<uint8_t> fondPayload(30);
+	rsrcd::write_u16be(fondPayload.data() + 0, 0x1234);
+	rsrcd::write_u16be(fondPayload.data() + 2, 128);
+	rsrcd::write_u16be(fondPayload.data() + 4, 32);
+	rsrcd::write_u16be(fondPayload.data() + 6, 126);
+	rsrcd::write_u16be(fondPayload.data() + 8, 10);
+	rsrcd::write_u16be(fondPayload.data() + 10, 3);
+	rsrcd::write_u16be(fondPayload.data() + 12, 1);
+	rsrcd::write_u16be(fondPayload.data() + 14, 18);
+	rsrcd::write_u32be(fondPayload.data() + 16, 0);
+	rsrcd::write_u32be(fondPayload.data() + 20, 0);
+	rsrcd::write_u32be(fondPayload.data() + 24, 0);
+	rsrcd::write_u16be(fondPayload.data() + 28, 1);
+	assert_json_resource_contains("FOND", 128, fondPayload, {
+		"\"familyId\": 128",
+		"\"lastChar\": 126",
+		"\"version\": 1",
+	});
+
+	assert_json_resource_contains("decl", 1, {0x12, 0x34, 0x56}, {
+		"\"decodeStatus\": \"preserved\"",
+		"\"byteLength\": 3",
+		"\"resourceType\": \"decl\"",
+	});
 }
 
 void test_resource_color_and_ui_transforms()
@@ -1484,6 +1677,38 @@ void test_resource_package_writes()
 	assert(codeSummaries[0].outputArtifacts[0].path == "resource-disassembly/Stack_CODE_mac68k_1.s");
 	assert(codeSummaries[0].outputArtifacts[0].format == "text");
 	assert(codeSummaries[0].outputArtifacts[1].path == "CODE_1.json");
+
+	const std::vector<uint8_t> packFork = make_single_resource_fork("PACK", 7, {0x4E, 0x75});
+	const std::string packOutputPath = std::string("/tmp/stackimport-pack-output-") + std::to_string(std::rand());
+	assert(counting_make_directory(packOutputPath.c_str(), nullptr) == 0);
+	ResourceForkPlatformState packPlatformState;
+	packPlatformState.resource_fork_data = packFork.data();
+	packPlatformState.resource_fork_size = packFork.size();
+	stackimport_platform packPlatform = resourceForkPlatform;
+	packPlatform.user_data = &packPlatformState;
+	const stackimport_internal_platform packInternalPlatform = stackimport_internal_platform_from_api(&packPlatform);
+	CountingResourceOutput packOutput;
+	std::vector<CResourceSummary> packSummaries;
+	std::string packStatus;
+	uint64_t packBytes = 0;
+	{
+		stackimport_platform_scope packScope(packInternalPlatform);
+		assert(stackimport_load_resource_fork(
+			resourceForkRoot,
+			packOutputPath,
+			"Stack",
+			&packOutput,
+			packSummaries,
+			packStatus,
+			packBytes));
+	}
+	assert(packStatus == "ok");
+	assert(packSummaries.size() == 1);
+	assert(packSummaries[0].type == "PACK");
+	assert(packSummaries[0].status == "disassembled");
+	assert(packSummaries[0].disassemblyFile == "resource-disassembly/Stack_PACK_mac68k_7.s");
+	assert(packSummaries[0].outputArtifacts.size() == 1);
+	assert(packSummaries[0].outputArtifacts[0].path == "resource-disassembly/Stack_PACK_mac68k_7.s");
 }
 
 void test_stack_block_identifier()
@@ -1735,6 +1960,34 @@ void	RunTests()
 	test_resource_text_transforms();
 	test_resource_code_transforms();
 	test_resource_color_and_ui_transforms();
+
+	const std::vector<uint8_t> movFixture = make_quicktime_fixture();
+	const stackimport::mov2qt::Analysis movAnalysis = stackimport::mov2qt::analyze(std::span<const uint8_t>(movFixture.data(), movFixture.size()));
+	assert(movAnalysis.ok);
+	assert(movAnalysis.movie_header.present);
+	assert(movAnalysis.movie_header.time_scale == 600);
+	assert(movAnalysis.movie_header.duration == 1200);
+	assert(movAnalysis.tracks.size() == 1);
+	assert(movAnalysis.tracks[0].handler_type == "vide");
+	assert(movAnalysis.tracks[0].sample_count == 3);
+	assert(movAnalysis.tracks[0].chunk_count == 2);
+	assert(movAnalysis.tracks[0].sample_descriptions.size() == 1);
+	assert(movAnalysis.tracks[0].sample_descriptions[0].format == "rpza");
+	assert(movAnalysis.tracks[0].sample_descriptions[0].codec_name == "Apple Video / Road Pizza");
+	assert(movAnalysis.tracks[0].sample_descriptions[0].decoder_status == "candidate_clean_room");
+	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"handlerType\":\"vide\"") != std::string::npos);
+	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"codecName\":\"Apple Video / Road Pizza\"") != std::string::npos);
+	const std::vector<uint8_t> cinepakFixture = make_cinepak_fixture();
+	stackimport::mov2qt::CinepakFrame cinepakFrame;
+	std::string cinepakError;
+	assert(stackimport::mov2qt::decode_cinepak_frame(std::span<const uint8_t>(cinepakFixture.data(), cinepakFixture.size()), cinepakFrame, cinepakError));
+	assert(cinepakFrame.width == 4);
+	assert(cinepakFrame.height == 4);
+	assert(cinepakFrame.rgba.size() == 64);
+	assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[1] == 80);
+	assert(cinepakFrame.rgba[2] == 80);
+	assert(cinepakFrame.rgba[3] == 255);
 
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;

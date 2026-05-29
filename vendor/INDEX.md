@@ -20,6 +20,7 @@ locally patched.
 | `dr_wav/` | `dr_wav.h` | Header-only WAV reader/writer candidate retained for future comparison | Public domain or MIT-0, license text embedded at end of `dr_wav/dr_wav.h` | `vendor_dr_wav` interface target linked privately into core stackimport targets | No upstream source changes intended. CMake wrapper only. |
 | `snd2wav/` | `snd2wav` snapshot at `d6900ad35ba4da1fb488fe006f64a7977d98b32c` | Legacy Mac `snd ` to WAV conversion reference retained for comparison | No explicit license file found in snapshot; source copyright headers state all rights reserved | `vendor_snd2wav` static target linked privately into core stackimport targets and included in `stackimport-vendor-static` | Converted from a git submodule to checked-in vendored source. Added CMake wrapper in `vendor/CMakeLists.txt` and local provenance note in `snd2wav/STACKIMPORT_VENDOR.md`. Builds with required C++23, extensions off, and the shared vendor warning baseline plus targeted legacy-noise suppressions. |
 | `ppcd/` | PPCD snapshot at `58f7e6df284fa4cd5a9a734b7a44d1851dcdaf16` | PowerPC instruction disassembler candidate for XCMD/XFCN reverse engineering | CC0-1.0, see `ppcd/LICENSE` | `vendor_ppcd` static target linked privately into core stackimport targets and included in `stackimport-vendor-static` | Added `ppcd/STACKIMPORT_VENDOR.md` and CMake wrapper in `vendor/CMakeLists.txt`. Upstream `CommonDefs.h` is stored as `Commondefs.h` to match the include spelling on case-sensitive filesystems. Local source patch: one `char *` string-literal pointer changed to `const char *` in `ppcd.cpp`. Builds with the shared vendor warning baseline plus targeted legacy-noise suppressions. |
+| `mov2qt/` | StackImport QuickTime MOV parser derived from Kaitai `quicktime_mov` | StackImport-owned QuickTime atom and sample-table parser for Myst movie reverse engineering | CC0-1.0 schema basis, see `mov2qt/STACKIMPORT_VENDOR.md`; local wrapper code is StackImport-owned | `vendor_mov2qt` static target linked privately into core stackimport targets and included in `stackimport-vendor-static` | Added a checked-in Kaitai schema excerpt for provenance plus hand-written C++23 atom parsing aligned with the schema. No generator/runtime dependency is required for normal builds. |
 
 ## Build Targets
 
@@ -34,6 +35,7 @@ The main vendor entry points are defined in `vendor/CMakeLists.txt`:
 | `vendor_cli11` | Exposes the vendored CLI11 command-line parser header. |
 | `vendor_ppcd` | Builds the vendored PPCD PowerPC disassembler as a static library. |
 | `vendor_snd2wav` | Builds the vendored local `snd2wav` helper as a legacy reference static library. |
+| `vendor_mov2qt` | Builds the StackImport-owned QuickTime/MOV atom parser derived from the Kaitai `quicktime_mov` schema. |
 | `stackimport_mace_resource_dasm_adapter` | Isolates private resource_dasm MACE and code-resource disassembly dependencies behind narrow StackImport adapters. |
 | `phosg_stackimport_hash_adapter` | Isolates the phosg SHA-256 helper used by ROM analysis. |
 | `vendor-tools` | Builds header-only targets plus Deark, phosg, and resource_dasm. |

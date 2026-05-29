@@ -1,0 +1,40 @@
+---
+title: QuickTime Codec Research
+description: Codec mapping and decoder candidates for legacy QuickTime assets.
+---
+
+Myst movie assets currently use classic QuickTime split media: `mdat` sample
+data in the data fork and `moov` metadata in the resource fork. The vendored
+`mov2qt` parser records a codec mapping for each `stsd` sample description.
+
+| FourCC | Name                                          | Kind  | Current path                      | Permissive decoder status                                                                                 |
+| ------ | --------------------------------------------- | ----- | --------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `cvid` | Cinepak                                       | Video | Research before implementation    | No permissive C/C++ decoder found yet; FFmpeg has an LGPL decoder and encoder.                            |
+| `rpza` | Apple Video / Road Pizza                      | Video | Good clean-room candidate         | No permissive C/C++ decoder found yet; public format notes describe the 4x4 RGB555 block stream.          |
+| `rle ` | QuickTime Animation / QTRLE                   | Video | Good clean-room candidate         | No permissive C/C++ decoder found yet; public format notes describe the RLE packet stream and bit depths. |
+| `raw ` | Unsigned 8-bit PCM, when used on sound tracks | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
+| `twos` | Signed big-endian PCM                         | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
+| `sowt` | Signed little-endian PCM                      | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
+
+Initial source checks:
+
+- Kaitai `quicktime_mov` provides the atom-parsing baseline under CC0-1.0.
+- FFmpeg documents that most files are LGPL v2.1-or-later, and its Cinepak,
+  RPZA, and QTRLE decoder sources carry LGPL headers. These are good behavior
+  references but not candidates for direct vendoring into StackImport's
+  permissive vendor set.
+- MultimediaWiki has public format notes for Cinepak, RPZA, and QTRLE. These
+  are better inputs for clean-room implementation planning than copying LGPL
+  decoder code.
+
+Implementation priority:
+
+1. Finish sample-table extraction for sample sizes, sample-to-chunk mappings,
+   time-to-sample runs, and chunk offsets.
+2. Implement internal PCM extraction for `raw ` and `twos` sound tracks.
+3. Implement `rpza` and `rle ` as small clean-room video decoders.
+4. Revisit `cvid` after sample extraction is solid; it is the largest Myst
+   codec by count and has more state than RPZA/QTRLE.
+
+See [QuickTime Decoder Implementation Plan](../quicktime-decoder-implementation-plan/)
+for the implementation sequence and acceptance criteria.

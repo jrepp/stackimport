@@ -1,0 +1,96 @@
+---
+title: QuickTime Decoder Implementation Plan
+description: Plan for turning mov2qt analysis into modern media outputs.
+---
+
+This plan covers the QuickTime sample formats found in the Myst import runs:
+`cvid`, `rpza`, `rle `, `raw `, and `twos`.
+
+## Shared Foundation
+
+1. Complete sample-table extraction in `mov2qt`.
+   - Parse `stts`, `stsc`, `stsz`, `stco`/`co64`, and sample description
+     fields into structured track sample runs.
+   - Emit a per-track sample map with data-fork offsets, byte sizes, decode
+     timestamps, durations, keyframe hints when available, and codec mapping.
+   - Acceptance: every Myst movie with `ok: true` has either a sample map or a
+     concrete unsupported reason.
+
+2. Add a media extraction API.
+   - Expose a `mov2qt` API that accepts data fork bytes plus resource fork bytes
+     and returns decoded tracks or intermediate frame/sample packets.
+   - Keep raw packets addressable by source path, atom source, offset, size, and
+     SHA-256.
+   - Acceptance: importer can write per-track packet manifests without decoding.
+
+3. Add modern output writers.
+   - Audio first: WAV for PCM tracks.
+   - Video next: numbered PNG frames plus frame timing JSON.
+   - Later: assemble still frames/audio into a modern container through an
+     optional external tool path if the project decides to allow it.
+
+## `raw ` PCM Audio
+
+1. Read sound sample description fields needed for channel count, sample size,
+   sample rate, and compression ID.
+2. Extract packets through the shared sample map.
+3. Write WAV as unsigned 8-bit PCM when the sample description confirms 8-bit
+   unsigned samples.
+4. Acceptance: Myst `raw ` sound tracks export WAVs with expected duration and
+   no third-party decoder.
+
+## `twos` PCM Audio
+
+1. Reuse the PCM extraction path.
+2. Byte-swap signed big-endian samples to WAV little-endian PCM.
+3. Support mono/stereo and 8/16-bit variants as discovered in sample
+   descriptions.
+4. Acceptance: Myst `twos` sound tracks export WAVs with expected duration and
+   byte count.
+
+## `rpza` Apple Video
+
+1. Implement a clean-room frame decoder from public format notes.
+   - Chunk header: leading flag byte plus 24-bit size.
+   - Decode 4x4 RGB555 blocks.
+   - Handle skip, single-color, four-color/indexed, and 16-color opcodes.
+2. Preserve previous-frame state for skipped blocks.
+3. Convert RGB555 to RGBA32.
+4. Acceptance: synthetic fixtures cover each opcode family, and representative
+   Myst frames export nonblank PNGs with correct dimensions.
+
+## `rle ` QuickTime Animation
+
+1. Parse sample description bit depth and palette data.
+2. Implement clean-room frame decode for 1, 2, 4, 8, 16, 24, and 32 bpp packet
+   variants.
+3. Preserve previous-frame state for NOP/partial-update frames.
+4. Convert indexed/RGB outputs to RGBA32.
+5. Acceptance: synthetic fixtures cover literal runs, repeated runs,
+   line-skips, partial updates, and NOP frames; Myst frames export correctly
+   sized PNGs.
+
+## `cvid` Cinepak
+
+1. Land the frame decoder in small pieces.
+   - Frame header: flags, 24-bit frame length, coded width/height, strip count.
+   - Strip header: strip ID, size, top/left/bottom/right coordinates.
+   - Full and selective V1/V4 codebook chunks for 12 bpp and 8 bpp modes.
+   - Vector chunks `0x3000`, `0x3100`, and `0x3200`.
+2. Maintain strip codebooks across strips/frames where the frame flags require
+   previous codebook reuse.
+3. Convert Cinepak YUV-like vectors to RGBA32 with the public conversion matrix.
+4. Add corpus-derived fixtures only as binary test data, not copied decoder
+   code.
+5. Acceptance: synthetic fixtures cover full codebooks, selective codebook
+   updates, V1 blocks, V4 blocks, skipped inter blocks, and multi-strip frames;
+   Myst `cvid` frames export nonblank PNGs with stable frame dimensions.
+
+## Licensing Policy
+
+- Do not copy LGPL FFmpeg decoder implementation into `mov2qt`.
+- Use FFmpeg only as behavioral comparison tooling when needed.
+- Prefer public format descriptions, local binary fixtures, and independently
+  written code.
+- Record each implementation source in this documentation and in
+  `vendor/mov2qt/STACKIMPORT_VENDOR.md`.
