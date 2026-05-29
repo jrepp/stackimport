@@ -1,6 +1,7 @@
 #include "StackImportCli.h"
 
 #include "RomDasm.h"
+#include "StackImportPngWriter.h"
 #include "stackimport_logging.h"
 #include "stackimport_version.h"
 #include "stackimport/mov2qt.hpp"
@@ -282,7 +283,95 @@ std::string movie_audio_package_path(const fs::path& relPath, size_t trackIndex)
 	return path.generic_string();
 }
 
-bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, const fs::path& relPath, std::string& packagePath, std::vector<std::string>& audioPaths)
+fs::path movie_frame_package_dir(const fs::path& relPath, size_t trackIndex)
+{
+	fs::path path = fs::path("external-assets") / "quicktime-frames" / relPath;
+	path += ".track-" + std::to_string(trackIndex + 1u);
+	return path;
+}
+
+std::string movie_frame_manifest_package_path(const fs::path& relPath, size_t trackIndex)
+{
+	fs::path path = movie_frame_package_dir(relPath, trackIndex);
+	path /= "frames.json";
+	return path.generic_string();
+}
+
+bool track_has_format(const stackimport::mov2qt::Track& track, const char format[5])
+{
+	for(const stackimport::mov2qt::SampleDescription& description : track.sample_descriptions)
+		if(description.format == format)
+			return true;
+	return false;
+}
+
+bool write_rpza_frame_exports(
+	const std::vector<uint8_t>& bytes,
+	const fs::path& packageRoot,
+	const fs::path& relPath,
+	size_t trackIndex,
+	const stackimport::mov2qt::Track& track,
+	std::string& manifestPath)
+{
+	if(!track_has_format(track, "rpza") || track.width <= 0.0 || track.height <= 0.0 || track.sample_packets.empty())
+		return true;
+	const auto width = static_cast<uint16_t>(track.width + 0.5);
+	const auto height = static_cast<uint16_t>(track.height + 0.5);
+	if(width == 0 || height == 0)
+		return true;
+	const fs::path frameDir = movie_frame_package_dir(relPath, trackIndex);
+	std::string manifest = "{\n";
+	manifest += "  \"format\": \"stackimport.quicktimeFrameManifest\",\n";
+	manifest += "  \"codec\": \"rpza\",\n";
+	manifest += "  \"trackIndex\": " + std::to_string(trackIndex + 1u) + ",\n";
+	manifest += "  \"width\": " + std::to_string(width) + ",\n";
+	manifest += "  \"height\": " + std::to_string(height) + ",\n";
+	manifest += "  \"frames\": [\n";
+	size_t frameCount = 0;
+	stackimport::mov2qt::RgbaFrame previousFrame;
+	bool havePreviousFrame = false;
+	for(const stackimport::mov2qt::SamplePacket& packet : track.sample_packets)
+	{
+		std::span<const uint8_t> packetBytes;
+		std::string error;
+		if(!stackimport::mov2qt::sample_packet_bytes(std::span<const uint8_t>(bytes.data(), bytes.size()), packet, packetBytes, error))
+			continue;
+		stackimport::mov2qt::RgbaFrame frame;
+		if(!stackimport::mov2qt::decode_rpza_frame(packetBytes, width, height, frame, error, havePreviousFrame ? &previousFrame : nullptr))
+			continue;
+		std::vector<uint8_t> png;
+		if(!stackimport::WritePngToMemory(png, frame.width, frame.height, 4, frame.rgba.data(), static_cast<int>(frame.width) * 4))
+			continue;
+		char fileName[32] = {};
+		std::snprintf(fileName, sizeof(fileName), "frame-%06zu.png", frameCount + 1u);
+		const fs::path packageFramePath = frameDir / fileName;
+		if(!write_binary_file(packageRoot / packageFramePath, png))
+			continue;
+		if(frameCount > 0)
+			manifest += ",\n";
+		manifest += "    {\"index\":" + std::to_string(packet.index);
+		manifest += ",\"decodeTime\":" + std::to_string(packet.decode_time);
+		manifest += ",\"duration\":" + std::to_string(packet.duration);
+		manifest += ",\"path\":\"" + json_escape(packageFramePath.generic_string()) + "\"}";
+		previousFrame = std::move(frame);
+		havePreviousFrame = true;
+		frameCount++;
+	}
+	manifest += "\n  ],\n";
+	manifest += "  \"frameCount\": " + std::to_string(frameCount) + "\n";
+	manifest += "}\n";
+	if(frameCount == 0)
+		return true;
+	manifestPath = movie_frame_manifest_package_path(relPath, trackIndex);
+	if(!write_text_file((packageRoot / fs::path(manifestPath)).string(), manifest))
+	{
+		manifestPath.clear();
+		return false;
+	}
+	return true;
+}
+
+bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, const fs::path& relPath, std::string& packagePath, std::vector<std::string>& audioPaths, std::vector<std::string>& frameManifestPaths)
 {
 	std::vector<uint8_t> bytes;
 	if(!read_entire_file(source.string(), bytes))
@@ -315,6 +404,15 @@ bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, c
 			audioPaths.push_back(audioPath);
 		else
 			stackimport_quill_diagnosticf("Warning: Could not write QuickTime audio export '%s'.\n", audioPath.c_str());
+	}
+	frameManifestPaths.clear();
+	for(size_t trackIndex = 0; trackIndex < analysis.tracks.size(); trackIndex++)
+	{
+		std::string frameManifestPath;
+		if(!write_rpza_frame_exports(bytes, packageRoot, relPath, trackIndex, analysis.tracks[trackIndex], frameManifestPath))
+			stackimport_quill_diagnosticf("Warning: Could not write QuickTime frame exports for '%s' track %zu.\n", source.string().c_str(), trackIndex + 1u);
+		if(!frameManifestPath.empty())
+			frameManifestPaths.push_back(frameManifestPath);
 	}
 	return true;
 }
@@ -391,7 +489,8 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 		const std::string kind = classify_external_asset(source, finderInfo, safeSize);
 		std::string quicktimeAnalysisPath;
 		std::vector<std::string> quicktimeAudioPaths;
-		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), quicktimeAnalysisPath, quicktimeAudioPaths))
+		std::vector<std::string> quicktimeFrameManifestPaths;
+		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), quicktimeAnalysisPath, quicktimeAudioPaths, quicktimeFrameManifestPaths))
 			stackimport_quill_diagnosticf("Warning: Could not parse QuickTime atoms for external asset '%s'.\n", source.string().c_str());
 
 		if(assetCount > 0)
@@ -417,6 +516,17 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 				if(audioIndex > 0)
 					manifest += ",";
 				manifest += "\"" + json_escape(quicktimeAudioPaths[audioIndex]) + "\"";
+			}
+			manifest += "]";
+		}
+		if(!quicktimeFrameManifestPaths.empty())
+		{
+			manifest += ",\"quicktimeFrames\":[";
+			for(size_t frameIndex = 0; frameIndex < quicktimeFrameManifestPaths.size(); frameIndex++)
+			{
+				if(frameIndex > 0)
+					manifest += ",";
+				manifest += "\"" + json_escape(quicktimeFrameManifestPaths[frameIndex]) + "\"";
 			}
 			manifest += "]";
 		}
