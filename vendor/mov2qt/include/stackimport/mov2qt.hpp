@@ -46,6 +46,11 @@ struct SampleDescription {
 	uint16_t data_reference_index = 0;
 	uint16_t width = 0;
 	uint16_t height = 0;
+	uint16_t channel_count = 0;
+	uint16_t sample_size_bits = 0;
+	uint16_t compression_id = 0;
+	uint16_t packet_size = 0;
+	double sample_rate_hz = 0.0;
 };
 
 struct TimeToSampleEntry {
@@ -105,6 +110,8 @@ struct Analysis {
 Analysis analyze(std::span<const uint8_t> data);
 Analysis analyze(std::span<const uint8_t> data, std::span<const uint8_t> resource_fork);
 std::string analysis_to_json(const Analysis& analysis, int indent = 0);
+bool sample_packet_bytes(std::span<const uint8_t> data, const SamplePacket& packet, std::span<const uint8_t>& bytes, std::string& error);
+bool decode_pcm_track_to_wav(std::span<const uint8_t> data, const Track& track, std::vector<uint8_t>& wav, std::string& error);
 
 struct CinepakFrame {
 	uint16_t width = 0;

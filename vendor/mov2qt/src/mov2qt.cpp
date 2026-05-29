@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <array>
+#include <limits>
 
 namespace stackimport::mov2qt {
 
@@ -215,6 +216,14 @@ struct Parser {
 			{
 				description.width = u2(pos + 32);
 				description.height = u2(pos + 34);
+			}
+			if(entry_size >= 36 && track->handler_type == "soun")
+			{
+				description.channel_count = u2(pos + 24);
+				description.sample_size_bits = u2(pos + 26);
+				description.compression_id = u2(pos + 28);
+				description.packet_size = u2(pos + 30);
+				description.sample_rate_hz = fixed_16_16(pos + 32);
 			}
 			track->sample_descriptions.push_back(description);
 			pos += entry_size;
@@ -496,17 +505,14 @@ uint32_t sample_duration_at(const Track& track, uint64_t sample_index)
 	return 0;
 }
 
-void finalize_track_sample_packets(Track& track)
+template <typename Callback>
+bool for_each_derived_sample_packet(const Track& track, Callback callback)
 {
 	if(track.chunk_offsets.empty() || track.sample_to_chunk.empty() || track.sample_count == 0)
-		return;
+		return true;
 
-	track.sample_packets.clear();
-	track.sample_packet_preview_truncated = false;
-	track.sample_packets.reserve(static_cast<size_t>(std::min<uint64_t>(track.sample_count, kSamplePacketPreviewLimit)));
 	uint64_t sample_index = 0;
 	uint64_t decode_time = 0;
-
 	for(size_t stsc_index = 0; stsc_index < track.sample_to_chunk.size(); stsc_index++)
 	{
 		const SampleToChunkEntry& entry = track.sample_to_chunk[stsc_index];
@@ -524,7 +530,7 @@ void finalize_track_sample_packets(Track& track)
 			{
 				const uint32_t size = sample_size_at(track, sample_index);
 				const uint32_t duration = sample_duration_at(track, sample_index);
-				track.sample_packets.push_back(SamplePacket{
+				const SamplePacket packet{
 					sample_index + 1u,
 					chunk,
 					sample_offset,
@@ -532,18 +538,35 @@ void finalize_track_sample_packets(Track& track)
 					decode_time,
 					duration,
 					entry.sample_description_id,
-				});
+				};
 				sample_offset += size;
 				decode_time += duration;
 				sample_index++;
-				if(track.sample_packets.size() >= kSamplePacketPreviewLimit)
-				{
-					track.sample_packet_preview_truncated = sample_index < track.sample_count;
-					return;
-				}
+				if(!callback(packet))
+					return false;
 			}
 		}
 	}
+	return true;
+}
+
+void finalize_track_sample_packets(Track& track)
+{
+	if(track.chunk_offsets.empty() || track.sample_to_chunk.empty() || track.sample_count == 0)
+		return;
+
+	track.sample_packets.clear();
+	track.sample_packet_preview_truncated = false;
+	track.sample_packets.reserve(static_cast<size_t>(std::min<uint64_t>(track.sample_count, kSamplePacketPreviewLimit)));
+	for_each_derived_sample_packet(track, [&track](const SamplePacket& packet) {
+		track.sample_packets.push_back(packet);
+		if(track.sample_packets.size() >= kSamplePacketPreviewLimit)
+		{
+			track.sample_packet_preview_truncated = packet.index < track.sample_count;
+			return false;
+		}
+		return true;
+	});
 }
 
 void finalize_analysis(Analysis& analysis)
@@ -879,6 +902,20 @@ bool decode_vector_chunk(std::span<const uint8_t> payload, uint16_t chunk_id, Ci
 	return true;
 }
 
+void append_u16le(std::vector<uint8_t>& out, uint16_t value)
+{
+	out.push_back(static_cast<uint8_t>(value & 0xFFu));
+	out.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
+}
+
+void append_u32le(std::vector<uint8_t>& out, uint32_t value)
+{
+	out.push_back(static_cast<uint8_t>(value & 0xFFu));
+	out.push_back(static_cast<uint8_t>((value >> 8u) & 0xFFu));
+	out.push_back(static_cast<uint8_t>((value >> 16u) & 0xFFu));
+	out.push_back(static_cast<uint8_t>((value >> 24u) & 0xFFu));
+}
+
 } // namespace
 
 Analysis analyze(std::span<const uint8_t> data)
@@ -900,6 +937,113 @@ Analysis analyze(std::span<const uint8_t> data, std::span<const uint8_t> resourc
 		parser.analysis.error = "no atoms";
 	}
 	return parser.analysis;
+}
+
+bool sample_packet_bytes(std::span<const uint8_t> data, const SamplePacket& packet, std::span<const uint8_t>& bytes, std::string& error)
+{
+	bytes = std::span<const uint8_t>();
+	if(packet.offset > data.size() || packet.size > data.size() - static_cast<size_t>(packet.offset))
+	{
+		error = "sample packet points outside the data fork";
+		return false;
+	}
+	bytes = data.subspan(static_cast<size_t>(packet.offset), packet.size);
+	return true;
+}
+
+bool decode_pcm_track_to_wav(std::span<const uint8_t> data, const Track& track, std::vector<uint8_t>& wav, std::string& error)
+{
+	wav.clear();
+	if(track.handler_type != "soun")
+	{
+		error = "track is not an audio track";
+		return false;
+	}
+	if(track.sample_descriptions.empty())
+	{
+		error = "audio track has no sample description";
+		return false;
+	}
+	const SampleDescription& description = track.sample_descriptions.front();
+	const bool raw_u8 = description.format == "raw " && description.sample_size_bits == 8;
+	const bool twos_s8 = description.format == "twos" && description.sample_size_bits == 8;
+	const bool sowt_s8 = description.format == "sowt" && description.sample_size_bits == 8;
+	const bool twos_s16 = description.format == "twos" && description.sample_size_bits == 16;
+	const bool sowt_s16 = description.format == "sowt" && description.sample_size_bits == 16;
+	if(!raw_u8 && !twos_s8 && !sowt_s8 && !twos_s16 && !sowt_s16)
+	{
+		error = "audio codec is not supported by the internal PCM WAV path";
+		return false;
+	}
+	if(description.channel_count == 0 || description.sample_rate_hz <= 0.0)
+	{
+		error = "audio sample description is missing channel count or sample rate";
+		return false;
+	}
+	const uint16_t bits_per_sample = description.sample_size_bits;
+	const uint16_t channel_count = description.channel_count;
+	const uint32_t sample_rate = static_cast<uint32_t>(description.sample_rate_hz + 0.5);
+	const uint16_t block_align = static_cast<uint16_t>((static_cast<uint32_t>(channel_count) * bits_per_sample + 7u) / 8u);
+	const uint32_t byte_rate = sample_rate * block_align;
+
+	std::vector<uint8_t> pcm;
+	bool ok = true;
+	for_each_derived_sample_packet(track, [&](const SamplePacket& packet) {
+		std::span<const uint8_t> packet_bytes;
+		if(!sample_packet_bytes(data, packet, packet_bytes, error))
+		{
+			ok = false;
+			return false;
+		}
+		if(twos_s16)
+		{
+			if(packet_bytes.size() % 2u != 0)
+			{
+				error = "twos packet has an odd byte count";
+				ok = false;
+				return false;
+			}
+			for(size_t i = 0; i + 1 < packet_bytes.size(); i += 2)
+			{
+				pcm.push_back(packet_bytes[i + 1]);
+				pcm.push_back(packet_bytes[i]);
+			}
+		}
+		else if(twos_s8 || sowt_s8)
+		{
+			for(const uint8_t byte : packet_bytes)
+				pcm.push_back(static_cast<uint8_t>(byte ^ 0x80u));
+		}
+		else
+		{
+			pcm.insert(pcm.end(), packet_bytes.begin(), packet_bytes.end());
+		}
+		return true;
+	});
+	if(!ok)
+		return false;
+	if(pcm.size() > std::numeric_limits<uint32_t>::max() - 36u)
+	{
+		error = "PCM output is too large for a RIFF/WAV file";
+		return false;
+	}
+
+	wav.reserve(pcm.size() + 44u);
+	wav.insert(wav.end(), {'R', 'I', 'F', 'F'});
+	append_u32le(wav, static_cast<uint32_t>(36u + pcm.size()));
+	wav.insert(wav.end(), {'W', 'A', 'V', 'E'});
+	wav.insert(wav.end(), {'f', 'm', 't', ' '});
+	append_u32le(wav, 16);
+	append_u16le(wav, 1);
+	append_u16le(wav, channel_count);
+	append_u32le(wav, sample_rate);
+	append_u32le(wav, byte_rate);
+	append_u16le(wav, block_align);
+	append_u16le(wav, bits_per_sample);
+	wav.insert(wav.end(), {'d', 'a', 't', 'a'});
+	append_u32le(wav, static_cast<uint32_t>(pcm.size()));
+	wav.insert(wav.end(), pcm.begin(), pcm.end());
+	return true;
 }
 
 std::string analysis_to_json(const Analysis& analysis, int indent)
@@ -977,7 +1121,14 @@ std::string analysis_to_json(const Analysis& analysis, int indent)
 			out += ",\"notes\":\"" + json_escape(desc.notes) + "\"";
 			out += ",\"dataReferenceIndex\":" + std::to_string(desc.data_reference_index);
 			out += ",\"width\":" + std::to_string(desc.width);
-			out += ",\"height\":" + std::to_string(desc.height) + "}";
+			out += ",\"height\":" + std::to_string(desc.height);
+			out += ",\"channelCount\":" + std::to_string(desc.channel_count);
+			out += ",\"sampleSizeBits\":" + std::to_string(desc.sample_size_bits);
+			out += ",\"compressionId\":" + std::to_string(desc.compression_id);
+			out += ",\"packetSize\":" + std::to_string(desc.packet_size);
+			out += ",\"sampleRateHz\":";
+			append_number(out, desc.sample_rate_hz);
+			out += "}";
 		}
 		out += "]";
 		out += ",\"sampleTable\":{";

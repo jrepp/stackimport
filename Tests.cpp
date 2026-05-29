@@ -436,6 +436,91 @@ std::vector<uint8_t> make_quicktime_fixture()
 	return mov;
 }
 
+std::vector<uint8_t> make_quicktime_pcm_fixture()
+{
+	std::vector<uint8_t> ftyp;
+	append_fourcc(ftyp, "qt  ");
+	append_u32be(ftyp, 0);
+	append_fourcc(ftyp, "qt  ");
+
+	std::vector<uint8_t> mdhd(20, 0);
+	rsrcd::write_u32be(mdhd.data() + 12, 8000);
+	rsrcd::write_u32be(mdhd.data() + 16, 2);
+
+	std::vector<uint8_t> hdlr(24, 0);
+	std::memcpy(hdlr.data() + 8, "soun", 4);
+
+	const uint32_t sampleOffset = static_cast<uint32_t>(8 + ftyp.size() + 8);
+	std::vector<uint8_t> stsd;
+	append_u32be(stsd, 0);
+	append_u32be(stsd, 1);
+	append_u32be(stsd, 36);
+	append_fourcc(stsd, "twos");
+	stsd.resize(stsd.size() + 6, 0);
+	append_u16be(stsd, 1);
+	append_u16be(stsd, 0);
+	append_u16be(stsd, 0);
+	append_u32be(stsd, 0);
+	append_u16be(stsd, 1);
+	append_u16be(stsd, 16);
+	append_u16be(stsd, 0);
+	append_u16be(stsd, 0);
+	append_u32be(stsd, 8000u << 16u);
+
+	std::vector<uint8_t> stts;
+	append_u32be(stts, 0);
+	append_u32be(stts, 1);
+	append_u32be(stts, 2);
+	append_u32be(stts, 1);
+
+	std::vector<uint8_t> stsc;
+	append_u32be(stsc, 0);
+	append_u32be(stsc, 1);
+	append_u32be(stsc, 1);
+	append_u32be(stsc, 2);
+	append_u32be(stsc, 1);
+
+	std::vector<uint8_t> stsz;
+	append_u32be(stsz, 0);
+	append_u32be(stsz, 0);
+	append_u32be(stsz, 2);
+	append_u32be(stsz, 2);
+	append_u32be(stsz, 2);
+
+	std::vector<uint8_t> stco;
+	append_u32be(stco, 0);
+	append_u32be(stco, 1);
+	append_u32be(stco, sampleOffset);
+
+	std::vector<uint8_t> stbl;
+	append_atom(stbl, "stsd", stsd);
+	append_atom(stbl, "stts", stts);
+	append_atom(stbl, "stsc", stsc);
+	append_atom(stbl, "stsz", stsz);
+	append_atom(stbl, "stco", stco);
+
+	std::vector<uint8_t> minf;
+	append_atom(minf, "stbl", stbl);
+
+	std::vector<uint8_t> mdia;
+	append_atom(mdia, "mdhd", mdhd);
+	append_atom(mdia, "hdlr", hdlr);
+	append_atom(mdia, "minf", minf);
+
+	std::vector<uint8_t> trak;
+	append_atom(trak, "mdia", mdia);
+
+	std::vector<uint8_t> moov;
+	append_atom(moov, "trak", trak);
+
+	std::vector<uint8_t> mdat = {0x01, 0x02, 0x03, 0x04};
+	std::vector<uint8_t> mov;
+	append_atom(mov, "ftyp", ftyp);
+	append_atom(mov, "mdat", mdat);
+	append_atom(mov, "moov", moov);
+	return mov;
+}
+
 std::vector<uint8_t> make_cinepak_fixture()
 {
 	std::vector<uint8_t> codebook;
@@ -2005,6 +2090,51 @@ void	RunTests()
 	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"handlerType\":\"vide\"") != std::string::npos);
 	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"codecName\":\"Apple Video / Road Pizza\"") != std::string::npos);
 	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"packetPreview\"") != std::string::npos);
+
+	const std::vector<uint8_t> pcmMovFixture = make_quicktime_pcm_fixture();
+	const stackimport::mov2qt::Analysis pcmMovAnalysis = stackimport::mov2qt::analyze(std::span<const uint8_t>(pcmMovFixture.data(), pcmMovFixture.size()));
+	assert(pcmMovAnalysis.ok);
+	assert(pcmMovAnalysis.tracks.size() == 1);
+	assert(pcmMovAnalysis.tracks[0].handler_type == "soun");
+	assert(pcmMovAnalysis.tracks[0].sample_descriptions.size() == 1);
+	assert(pcmMovAnalysis.tracks[0].sample_descriptions[0].format == "twos");
+	assert(pcmMovAnalysis.tracks[0].sample_descriptions[0].channel_count == 1);
+	assert(pcmMovAnalysis.tracks[0].sample_descriptions[0].sample_size_bits == 16);
+	assert(pcmMovAnalysis.tracks[0].sample_descriptions[0].sample_rate_hz == 8000.0);
+	assert(pcmMovAnalysis.tracks[0].sample_packets.size() == 2);
+	std::span<const uint8_t> packetBytes;
+	std::string packetError;
+	assert(stackimport::mov2qt::sample_packet_bytes(std::span<const uint8_t>(pcmMovFixture.data(), pcmMovFixture.size()), pcmMovAnalysis.tracks[0].sample_packets[0], packetBytes, packetError));
+	assert(packetBytes.size() == 2);
+	assert(packetBytes[0] == 0x01);
+	assert(packetBytes[1] == 0x02);
+	std::vector<uint8_t> wavBytes;
+	std::string wavError;
+	assert(stackimport::mov2qt::decode_pcm_track_to_wav(std::span<const uint8_t>(pcmMovFixture.data(), pcmMovFixture.size()), pcmMovAnalysis.tracks[0], wavBytes, wavError));
+	assert(wavBytes.size() == 48);
+	assert(std::memcmp(wavBytes.data(), "RIFF", 4) == 0);
+	assert(std::memcmp(wavBytes.data() + 8, "WAVE", 4) == 0);
+	assert(wavBytes[44] == 0x02);
+	assert(wavBytes[45] == 0x01);
+	assert(wavBytes[46] == 0x04);
+	assert(wavBytes[47] == 0x03);
+	stackimport::mov2qt::Track signed8Track;
+	signed8Track.handler_type = "soun";
+	signed8Track.sample_count = 2;
+	signed8Track.constant_sample_size = 1;
+	signed8Track.chunk_offsets.push_back(28);
+	signed8Track.sample_to_chunk.push_back(stackimport::mov2qt::SampleToChunkEntry{1, 2, 1});
+	signed8Track.time_to_sample.push_back(stackimport::mov2qt::TimeToSampleEntry{2, 1});
+	stackimport::mov2qt::SampleDescription signed8Description;
+	signed8Description.format = "twos";
+	signed8Description.channel_count = 1;
+	signed8Description.sample_size_bits = 8;
+	signed8Description.sample_rate_hz = 8000.0;
+	signed8Track.sample_descriptions.push_back(signed8Description);
+	assert(stackimport::mov2qt::decode_pcm_track_to_wav(std::span<const uint8_t>(pcmMovFixture.data(), pcmMovFixture.size()), signed8Track, wavBytes, wavError));
+	assert(wavBytes[44] == 0x81);
+	assert(wavBytes[45] == 0x82);
+
 	const std::vector<uint8_t> cinepakFixture = make_cinepak_fixture();
 	stackimport::mov2qt::CinepakFrame cinepakFrame;
 	std::string cinepakError;
