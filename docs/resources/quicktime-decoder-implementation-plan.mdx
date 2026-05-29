@@ -79,9 +79,13 @@ fixtures cover single-color and literal blocks, and a probe decoded 12 Myst
 
 Status: stateful decoder support now carries strip codebooks and previous RGBA
 frames across packets, with neutral U/V chroma handling and multi-strip
-coordinate handling. A probe decoded 2302 preview packets across all 151 Myst
-`cvid` tracks into nonblank RGBA frames. PNG export still needs a packaging pass
-and manifest validation before being enabled by default.
+coordinate handling. The importer now emits capped PNG preview frames and frame
+timing manifests for `cvid` tracks through the same `quicktimeFrames` packaging
+path used by `rpza`. A Myst validation import wrote 151 Cinepak track manifests
+and 31 RPZA track manifests under `/tmp/Myst-mov2qt-cvid-frames-20260528.xstk`,
+exporting 2732 preview PNGs from 65753 source sample packets. Manifests record
+`samplePacketCount`, `exportLimit`, and `truncated` so large movies stay
+tractable without hiding that more samples exist.
 
 1. Land the frame decoder in small pieces.
    - Frame header: flags, 24-bit frame length, coded width/height, strip count.
@@ -95,7 +99,8 @@ and manifest validation before being enabled by default.
    code.
 5. Acceptance: synthetic fixtures cover full codebooks, selective codebook
    updates, V1 blocks, V4 blocks, skipped inter blocks, and multi-strip frames;
-   Myst `cvid` frames export nonblank PNGs with stable frame dimensions.
+   Myst `cvid` tracks export nonblank PNG previews with stable frame dimensions
+   and manifest truncation metadata.
 
 ## Licensing Policy
 
