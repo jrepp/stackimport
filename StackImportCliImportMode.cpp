@@ -24,6 +24,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
+constexpr size_t kQuickTimeFramePreviewLimit = 16;
+
 void* cli_allocate(size_t size, size_t alignment, void*)
 {
 	void* ptr = nullptr;
@@ -305,7 +307,7 @@ bool track_has_format(const stackimport::mov2qt::Track& track, const char format
 	return false;
 }
 
-bool write_rpza_frame_exports(
+bool write_video_frame_exports(
 	const std::vector<uint8_t>& bytes,
 	const fs::path& packageRoot,
 	const fs::path& relPath,
@@ -313,32 +315,46 @@ bool write_rpza_frame_exports(
 	const stackimport::mov2qt::Track& track,
 	std::string& manifestPath)
 {
-	if(!track_has_format(track, "rpza") || track.width <= 0.0 || track.height <= 0.0 || track.sample_packets.empty())
+	const bool isRpza = track_has_format(track, "rpza");
+	const bool isCinepak = track_has_format(track, "cvid");
+	if((!isRpza && !isCinepak) || track.sample_packets.empty())
 		return true;
-	const auto width = static_cast<uint16_t>(track.width + 0.5);
-	const auto height = static_cast<uint16_t>(track.height + 0.5);
-	if(width == 0 || height == 0)
+	const std::string codec = isRpza ? "rpza" : "cvid";
+	const auto trackWidth = static_cast<uint16_t>(track.width + 0.5);
+	const auto trackHeight = static_cast<uint16_t>(track.height + 0.5);
+	if(isRpza && (trackWidth == 0 || trackHeight == 0))
 		return true;
 	const fs::path frameDir = movie_frame_package_dir(relPath, trackIndex);
-	std::string manifest = "{\n";
-	manifest += "  \"format\": \"stackimport.quicktimeFrameManifest\",\n";
-	manifest += "  \"codec\": \"rpza\",\n";
-	manifest += "  \"trackIndex\": " + std::to_string(trackIndex + 1u) + ",\n";
-	manifest += "  \"width\": " + std::to_string(width) + ",\n";
-	manifest += "  \"height\": " + std::to_string(height) + ",\n";
-	manifest += "  \"frames\": [\n";
+	std::string frames;
 	size_t frameCount = 0;
+	uint32_t manifestWidth = trackWidth;
+	uint32_t manifestHeight = trackHeight;
 	stackimport::mov2qt::RgbaFrame previousFrame;
 	bool havePreviousFrame = false;
+	stackimport::mov2qt::CinepakDecoderState cinepakState;
 	for(const stackimport::mov2qt::SamplePacket& packet : track.sample_packets)
 	{
+		if(frameCount >= kQuickTimeFramePreviewLimit)
+			break;
 		std::span<const uint8_t> packetBytes;
 		std::string error;
 		if(!stackimport::mov2qt::sample_packet_bytes(std::span<const uint8_t>(bytes.data(), bytes.size()), packet, packetBytes, error))
 			continue;
 		stackimport::mov2qt::RgbaFrame frame;
-		if(!stackimport::mov2qt::decode_rpza_frame(packetBytes, width, height, frame, error, havePreviousFrame ? &previousFrame : nullptr))
+		bool decoded = false;
+		if(isRpza)
+			decoded = stackimport::mov2qt::decode_rpza_frame(packetBytes, trackWidth, trackHeight, frame, error, havePreviousFrame ? &previousFrame : nullptr);
+		else
+			decoded = stackimport::mov2qt::decode_cinepak_frame(packetBytes, frame, error, &cinepakState);
+		if(!decoded)
 			continue;
+		if(frame.width == 0 || frame.height == 0 || frame.rgba.empty())
+			continue;
+		if(manifestWidth == 0 || manifestHeight == 0)
+		{
+			manifestWidth = frame.width;
+			manifestHeight = frame.height;
+		}
 		std::vector<uint8_t> png;
 		if(!stackimport::WritePngToMemory(png, frame.width, frame.height, 4, frame.rgba.data(), static_cast<int>(frame.width) * 4))
 			continue;
@@ -348,15 +364,28 @@ bool write_rpza_frame_exports(
 		if(!write_binary_file(packageRoot / packageFramePath, png))
 			continue;
 		if(frameCount > 0)
-			manifest += ",\n";
-		manifest += "    {\"index\":" + std::to_string(packet.index);
-		manifest += ",\"decodeTime\":" + std::to_string(packet.decode_time);
-		manifest += ",\"duration\":" + std::to_string(packet.duration);
-		manifest += ",\"path\":\"" + json_escape(packageFramePath.generic_string()) + "\"}";
+			frames += ",\n";
+		frames += "    {\"index\":" + std::to_string(packet.index);
+		frames += ",\"decodeTime\":" + std::to_string(packet.decode_time);
+		frames += ",\"duration\":" + std::to_string(packet.duration);
+		frames += ",\"width\":" + std::to_string(frame.width);
+		frames += ",\"height\":" + std::to_string(frame.height);
+		frames += ",\"path\":\"" + json_escape(packageFramePath.generic_string()) + "\"}";
 		previousFrame = std::move(frame);
 		havePreviousFrame = true;
 		frameCount++;
 	}
+	std::string manifest = "{\n";
+	manifest += "  \"format\": \"stackimport.quicktimeFrameManifest\",\n";
+	manifest += "  \"codec\": \"" + codec + "\",\n";
+	manifest += "  \"trackIndex\": " + std::to_string(trackIndex + 1u) + ",\n";
+	manifest += "  \"width\": " + std::to_string(manifestWidth) + ",\n";
+	manifest += "  \"height\": " + std::to_string(manifestHeight) + ",\n";
+	manifest += "  \"samplePacketCount\": " + std::to_string(track.sample_packets.size()) + ",\n";
+	manifest += "  \"exportLimit\": " + std::to_string(kQuickTimeFramePreviewLimit) + ",\n";
+	manifest += "  \"truncated\": " + std::string(track.sample_packets.size() > frameCount ? "true" : "false") + ",\n";
+	manifest += "  \"frames\": [\n";
+	manifest += frames;
 	manifest += "\n  ],\n";
 	manifest += "  \"frameCount\": " + std::to_string(frameCount) + "\n";
 	manifest += "}\n";
@@ -409,7 +438,7 @@ bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, c
 	for(size_t trackIndex = 0; trackIndex < analysis.tracks.size(); trackIndex++)
 	{
 		std::string frameManifestPath;
-		if(!write_rpza_frame_exports(bytes, packageRoot, relPath, trackIndex, analysis.tracks[trackIndex], frameManifestPath))
+		if(!write_video_frame_exports(bytes, packageRoot, relPath, trackIndex, analysis.tracks[trackIndex], frameManifestPath))
 			stackimport_quill_diagnosticf("Warning: Could not write QuickTime frame exports for '%s' track %zu.\n", source.string().c_str(), trackIndex + 1u);
 		if(!frameManifestPath.empty())
 			frameManifestPaths.push_back(frameManifestPath);
