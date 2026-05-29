@@ -27,10 +27,18 @@
 #include "stackimport_rapidjson_allocator.h"
 #include "include/stackimport_sax.hpp"
 
+#include "RomDasm.h"
+
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 
+#include <algorithm>
+#include <cctype>
+#include <set>
+#if defined(__APPLE__)
+#include <sys/xattr.h>
+#endif
 
 // Table of C-strings for converting the non-ASCII MacRoman characters (above 127)
 //	into the requisite UTF8 byte sequences:
@@ -161,6 +169,199 @@ void append_format(std::string& text, const char* format, ...)
 #endif
 	va_end(args);
 	text.append(dynamicBuffer.data(), static_cast<size_t>(written));
+}
+
+std::string lowercase_ascii(std::string text)
+{
+	for(char& ch : text)
+	{
+		if(ch >= 'A' && ch <= 'Z')
+			ch = static_cast<char>(ch - 'A' + 'a');
+	}
+	return text;
+}
+
+std::string trim_ascii(const std::string& text)
+{
+	size_t start = 0;
+	while(start < text.size() && static_cast<unsigned char>(text[start]) <= 0x20)
+		start++;
+	size_t end = text.size();
+	while(end > start && static_cast<unsigned char>(text[end - 1]) <= 0x20)
+		end--;
+	return text.substr(start, end - start);
+}
+
+std::string first_word(const std::string& text)
+{
+	size_t start = 0;
+	while(start < text.size() && !std::isalpha(static_cast<unsigned char>(text[start])) && text[start] != '_')
+		start++;
+	size_t end = start;
+	while(end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) || text[end] == '_'))
+		end++;
+	return text.substr(start, end - start);
+}
+
+bool starts_with_case_insensitive(const std::string& text, const char* prefix)
+{
+	const std::string lowerText = lowercase_ascii(text);
+	const std::string lowerPrefix = lowercase_ascii(prefix);
+	return lowerText.rfind(lowerPrefix, 0) == 0;
+}
+
+std::string fourcc_string(const char* bytes)
+{
+	std::string text;
+	for(size_t i = 0; i < 4; i++)
+	{
+		if(bytes[i] == '\0')
+			break;
+		text.push_back(bytes[i]);
+	}
+	return text;
+}
+
+struct ClassicMacFileInfo
+{
+	std::string finderType;
+	std::string creator;
+	std::string classification;
+	std::string dataForkSha256;
+	std::string resourceForkSha256;
+	uint64_t resourceForkBytes = 0;
+};
+
+std::string sha256_for_path(const std::string& path)
+{
+	std::vector<uint8_t> data;
+	stackimport_file_handle file = stackimport_internal_open_file(path.c_str(), "rb");
+	if(!file)
+		return std::string();
+	uint8_t buffer[65536];
+	while(true)
+	{
+		const size_t count = stackimport_internal_read_file(file, buffer, sizeof(buffer));
+		if(count == 0)
+			break;
+		data.insert(data.end(), buffer, buffer + count);
+		if(count < sizeof(buffer))
+			break;
+	}
+	stackimport_internal_close_file(file);
+	return stackimport::RomDasm::compute_sha256(std::span<const uint8_t>(data.data(), data.size()));
+}
+
+ClassicMacFileInfo classic_mac_file_info(const std::string& path, uint64_t resourceForkBytes)
+{
+	ClassicMacFileInfo info;
+	info.resourceForkBytes = resourceForkBytes;
+	info.dataForkSha256 = sha256_for_path(path);
+#if defined(__APPLE__)
+	char finderInfo[32] = {};
+	const ssize_t finderSize = getxattr(path.c_str(), "com.apple.FinderInfo", finderInfo, sizeof(finderInfo), 0, 0);
+	if(finderSize >= 8)
+	{
+		info.finderType = fourcc_string(finderInfo);
+		info.creator = fourcc_string(finderInfo + 4);
+	}
+	if(resourceForkBytes > 0)
+		info.resourceForkSha256 = sha256_for_path(path + "/..namedfork/rsrc");
+#else
+	(void)resourceForkBytes;
+#endif
+
+	const bool hasStackDataFork = !info.dataForkSha256.empty();
+	const bool hasHyperCardCode = resourceForkBytes > 0;
+	if(info.finderType == "APPL" && hasStackDataFork && hasHyperCardCode)
+		info.classification = "hypercard_standalone_application";
+	else if(info.finderType == "APPL")
+		info.classification = "classic_mac_application";
+	else if(info.finderType == "STAK" || info.finderType == "MYag")
+		info.classification = "hypercard_stack";
+	else if(hasStackDataFork)
+		info.classification = "hypercard_stack_data_fork";
+	else
+		info.classification = "unknown";
+	return info;
+}
+
+std::vector<std::string> split_script_lines(const std::string& script)
+{
+	std::vector<std::string> lines;
+	size_t start = 0;
+	for(size_t i = 0; i <= script.size(); i++)
+	{
+		if(i == script.size() || script[i] == '\r' || script[i] == '\n')
+		{
+			lines.push_back(script.substr(start, i - start));
+			if(i + 1 < script.size() && script[i] == '\r' && script[i + 1] == '\n')
+				i++;
+			start = i + 1;
+		}
+	}
+	return lines;
+}
+
+std::vector<std::string> script_string_literals(const std::string& line)
+{
+	std::vector<std::string> literals;
+	for(size_t i = 0; i < line.size(); i++)
+	{
+		if(line[i] != '"')
+			continue;
+		std::string literal;
+		i++;
+		for(; i < line.size(); i++)
+		{
+			if(line[i] == '"')
+			{
+				if(i + 1 < line.size() && line[i + 1] == '"')
+				{
+					literal.push_back('"');
+					i++;
+					continue;
+				}
+				break;
+			}
+			literal.push_back(line[i]);
+		}
+		literals.push_back(literal);
+	}
+	return literals;
+}
+
+std::string inferred_reference_kind(const std::string& lowerLine, const std::string& lowerLiteral)
+{
+	if(lowerLine.find("playqt") != std::string::npos || lowerLine.find("movie") != std::string::npos ||
+		lowerLiteral.find(".mov") != std::string::npos || lowerLiteral.find(" moov") != std::string::npos ||
+		lowerLiteral.find(" mov") != std::string::npos)
+		return "movie";
+	if(lowerLine.find("start using stack") != std::string::npos || lowerLine.find(" in stack ") != std::string::npos)
+		return "stack";
+	if(lowerLine.find("go card") != std::string::npos || lowerLine.find("go to card") != std::string::npos)
+		return "card";
+	if(lowerLine.find("sound") != std::string::npos)
+		return "sound";
+	if(lowerLine.find("htaddpict") != std::string::npos || lowerLine.find("htchangepict") != std::string::npos ||
+		lowerLine.find("picture") != std::string::npos)
+		return "picture";
+	return std::string();
+}
+
+bool is_control_command(const std::string& lowerCommand)
+{
+	static const char* controls[] = {
+		"if", "else", "repeat", "end", "put", "set", "get", "global", "local",
+		"return", "exit", "pass", "then", "case", "switch", "answer", "ask",
+		"wait", "send", "do", "hide", "show", "on", "function"
+	};
+	for(const char* control : controls)
+	{
+		if(lowerCommand == control)
+			return true;
+	}
+	return false;
 }
 
 class PlatformStackReader final : public stackimport::IStackReader {
@@ -394,9 +595,21 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 	document.AddMember("generator", json_string("stackimport.core", allocator), allocator);
 	document.AddMember("sourcePath", json_string(mFileName, allocator), allocator);
 	document.AddMember("outputPackage", json_string(mBasePath, allocator), allocator);
+	const ClassicMacFileInfo fileInfo = classic_mac_file_info(mSourcePath, mResourceForkBytes);
+	JsonValue sourceFile(rapidjson::kObjectType);
+	sourceFile.AddMember("path", json_string(mSourcePath, allocator), allocator);
+	sourceFile.AddMember("name", json_string(mFileName, allocator), allocator);
+	sourceFile.AddMember("classification", json_string(fileInfo.classification, allocator), allocator);
+	sourceFile.AddMember("finderType", json_string(fileInfo.finderType, allocator), allocator);
+	sourceFile.AddMember("creator", json_string(fileInfo.creator, allocator), allocator);
+	sourceFile.AddMember("dataForkSha256", json_string(fileInfo.dataForkSha256, allocator), allocator);
+	sourceFile.AddMember("resourceForkSha256", json_string(fileInfo.resourceForkSha256, allocator), allocator);
+	sourceFile.AddMember("resourceForkBytes", JsonValue().SetUint64(fileInfo.resourceForkBytes), allocator);
+	document.AddMember("sourceFile", sourceFile, allocator);
 
 	JsonValue dataFork(rapidjson::kObjectType);
 	dataFork.AddMember("bytes", JsonValue().SetUint64(dataForkBytes), allocator);
+	dataFork.AddMember("sha256", json_string(fileInfo.dataForkSha256, allocator), allocator);
 	dataFork.AddMember("streamStatus", json_string(streamStatus ? streamStatus : "ok", allocator), allocator);
 
 	JsonValue blocks(rapidjson::kArrayType);
@@ -471,6 +684,7 @@ bool	CStackFile::WriteSourceManifest( uint64_t dataForkBytes, const char* stream
 	JsonValue resourceFork(rapidjson::kObjectType);
 	resourceFork.AddMember("status", json_string(mResourceForkStatus, allocator), allocator);
 	resourceFork.AddMember("bytes", JsonValue().SetUint64(mResourceForkBytes), allocator);
+	resourceFork.AddMember("sha256", json_string(fileInfo.resourceForkSha256, allocator), allocator);
 	JsonValue resources(rapidjson::kArrayType);
 	std::map<std::string,int32_t> resourceTypeCounts;
 	for( const CResourceSummary& resource : mResourceSummaries )
@@ -617,6 +831,20 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 	
 	if( blockData.hasdata( 1524, 1 ) )
 		mStackScript = mac_roman_string( blockData, 1524 );
+	if( !mStackScript.empty() )
+	{
+		mScriptSummaries.push_back(CScriptSummary{
+			"stack",
+			stackID,
+			"stack_-1.json",
+			mFileName,
+			std::string(),
+			-1,
+			std::string(),
+			-1,
+			mStackScript
+		});
+	}
 	
 	if( mProgressMessages )
 		stackimport_emit_infof( "Progress: %d of %d\n", ++mCurrentProgress, mMaxProgress );
@@ -1322,10 +1550,26 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			part.AddMember("textHeight", textHeight, allocator);
 		size_t x = 0;
 		size_t startOffs = currOffsIntoData +30;
-		part.AddMember("name", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
+		std::string partName = mac_roman_string(blockData, startOffs);
+		part.AddMember("name", json_string(partName, allocator), allocator);
 		x = MacRomanStringEnd(blockData, startOffs);
 		startOffs = x +2;
-		part.AddMember("script", json_string(mac_roman_string(blockData, startOffs), allocator), allocator);
+		std::string partScript = mac_roman_string(blockData, startOffs);
+		part.AddMember("script", json_string(partScript, allocator), allocator);
+		if( !partScript.empty() )
+		{
+			mScriptSummaries.push_back(CScriptSummary{
+				"part",
+				partID,
+				vFileName,
+				partName,
+				isButton ? "button" : "field",
+				partID,
+				isCard ? "card" : "background",
+				blockID,
+				partScript
+			});
+		}
 		parts.PushBack(part, allocator);
 		currOffsIntoData += partRecordLength;
 		currOffsIntoData += (currOffsIntoData % 2);
@@ -1466,6 +1710,20 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	startOffs = nameEnd +1;
 	std::string script = mac_roman_string(blockData, startOffs);
 	document.AddMember("script", json_string(script, allocator), allocator);
+	if( !script.empty() )
+	{
+		mScriptSummaries.push_back(CScriptSummary{
+			isCard ? "card" : "background",
+			blockID,
+			vFileName,
+			layerName,
+			std::string(),
+			-1,
+			std::string(),
+			-1,
+			script
+		});
+	}
 	mLayerSummaries.push_back(CLayerSummary{
 		isCard,
 		blockID,
@@ -1657,6 +1915,164 @@ bool	CStackFile::LoadResourceFork( const std::string& fpath )
 		mResourceForkBytes);
 }
 
+bool	CStackFile::WriteScriptIndex() const
+{
+	StackImportRapidJsonAllocator baseAllocator;
+	JsonPoolAllocator pool(4096, &baseAllocator);
+	JsonDocument document(&pool, 4096, &baseAllocator);
+	document.SetObject();
+	JsonPoolAllocator& allocator = document.GetAllocator();
+	document.AddMember("format", json_string("stackimport.scriptIndex", allocator), allocator);
+	document.AddMember("schemaVersion", 1, allocator);
+	document.AddMember("sourceFileName", json_string(mFileName, allocator), allocator);
+
+	std::set<std::string> externalNames;
+	for(const CResourceSummary& resource : mResourceSummaries)
+	{
+		if((resource.type == "XCMD" || resource.type == "XFCN" || resource.type == "xcmd" || resource.type == "xfcn") && !resource.name.empty())
+			externalNames.insert(lowercase_ascii(resource.name));
+	}
+
+	JsonValue scripts(rapidjson::kArrayType);
+	std::map<std::string, int> aggregateCallCounts;
+	std::map<std::string, int> aggregateReferenceCounts;
+	for(const CScriptSummary& source : mScriptSummaries)
+	{
+		JsonValue script(rapidjson::kObjectType);
+		script.AddMember("ownerKind", json_string(source.ownerKind, allocator), allocator);
+		script.AddMember("ownerId", source.ownerId, allocator);
+		script.AddMember("file", json_string(source.file, allocator), allocator);
+		script.AddMember("name", json_string(source.name, allocator), allocator);
+		if(!source.partType.empty())
+		{
+			script.AddMember("partType", json_string(source.partType, allocator), allocator);
+			script.AddMember("partId", source.partId, allocator);
+		}
+		if(!source.parentKind.empty())
+		{
+			script.AddMember("parentKind", json_string(source.parentKind, allocator), allocator);
+			script.AddMember("parentId", source.parentId, allocator);
+		}
+		script.AddMember("scriptBytes", static_cast<uint64_t>(source.script.size()), allocator);
+
+		JsonValue handlers(rapidjson::kArrayType);
+		JsonValue calls(rapidjson::kArrayType);
+		JsonValue externalCalls(rapidjson::kArrayType);
+		JsonValue stringLiterals(rapidjson::kArrayType);
+		JsonValue references(rapidjson::kArrayType);
+		std::set<std::string> seenCalls;
+		std::set<std::string> seenExternalCalls;
+		std::set<std::string> seenStrings;
+		std::set<std::string> seenReferences;
+
+		const std::vector<std::string> lines = split_script_lines(source.script);
+		for(size_t lineIndex = 0; lineIndex < lines.size(); lineIndex++)
+		{
+			const std::string trimmed = trim_ascii(lines[lineIndex]);
+			if(trimmed.empty() || starts_with_case_insensitive(trimmed, "--"))
+				continue;
+			const std::string lowerLine = lowercase_ascii(trimmed);
+
+			if(starts_with_case_insensitive(trimmed, "on ") || starts_with_case_insensitive(trimmed, "function "))
+			{
+				const bool functionHandler = starts_with_case_insensitive(trimmed, "function ");
+				const size_t nameStart = functionHandler ? 9u : 3u;
+				const std::string handlerName = first_word(trimmed.substr(nameStart));
+				if(!handlerName.empty())
+				{
+					JsonValue handler(rapidjson::kObjectType);
+					handler.AddMember("name", json_string(handlerName, allocator), allocator);
+					handler.AddMember("kind", json_string(functionHandler ? "function" : "message", allocator), allocator);
+					handler.AddMember("line", static_cast<uint64_t>(lineIndex + 1), allocator);
+					handlers.PushBack(handler, allocator);
+				}
+			}
+
+			const std::string command = first_word(trimmed);
+			const std::string lowerCommand = lowercase_ascii(command);
+			if(!command.empty() && !is_control_command(lowerCommand))
+			{
+				if(seenCalls.insert(lowerCommand).second)
+				{
+					JsonValue call(rapidjson::kObjectType);
+					call.AddMember("name", json_string(command, allocator), allocator);
+					call.AddMember("line", static_cast<uint64_t>(lineIndex + 1), allocator);
+					calls.PushBack(call, allocator);
+				}
+				aggregateCallCounts[lowerCommand]++;
+
+				const bool looksExternal = externalNames.find(lowerCommand) != externalNames.end() ||
+					(!command.empty() && (command[0] == 'x' || command[0] == 'X')) ||
+					lowerCommand.rfind("ht", 0) == 0 ||
+					lowerCommand == "hypertint" ||
+					lowerCommand == "playqt";
+				if(looksExternal && seenExternalCalls.insert(lowerCommand).second)
+				{
+					JsonValue externalCall(rapidjson::kObjectType);
+					externalCall.AddMember("name", json_string(command, allocator), allocator);
+					externalCall.AddMember("line", static_cast<uint64_t>(lineIndex + 1), allocator);
+					externalCall.AddMember("resourceBacked", externalNames.find(lowerCommand) != externalNames.end(), allocator);
+					externalCalls.PushBack(externalCall, allocator);
+				}
+			}
+
+			for(const std::string& literal : script_string_literals(trimmed))
+			{
+				const std::string lowerLiteral = lowercase_ascii(literal);
+				if(seenStrings.insert(literal).second)
+				{
+					JsonValue literalJson(rapidjson::kObjectType);
+					literalJson.AddMember("value", json_string(literal, allocator), allocator);
+					literalJson.AddMember("line", static_cast<uint64_t>(lineIndex + 1), allocator);
+					stringLiterals.PushBack(literalJson, allocator);
+				}
+				const std::string referenceKind = inferred_reference_kind(lowerLine, lowerLiteral);
+				if(!referenceKind.empty())
+				{
+					const std::string referenceKey = referenceKind + "\n" + literal;
+					if(seenReferences.insert(referenceKey).second)
+					{
+						JsonValue reference(rapidjson::kObjectType);
+						reference.AddMember("kind", json_string(referenceKind, allocator), allocator);
+						reference.AddMember("value", json_string(literal, allocator), allocator);
+						reference.AddMember("line", static_cast<uint64_t>(lineIndex + 1), allocator);
+						references.PushBack(reference, allocator);
+					}
+					aggregateReferenceCounts[referenceKind]++;
+				}
+			}
+		}
+
+		script.AddMember("handlers", handlers, allocator);
+		script.AddMember("calls", calls, allocator);
+		script.AddMember("externalCalls", externalCalls, allocator);
+		script.AddMember("stringLiterals", stringLiterals, allocator);
+		script.AddMember("references", references, allocator);
+		scripts.PushBack(script, allocator);
+	}
+	document.AddMember("scripts", scripts, allocator);
+
+	JsonValue summary(rapidjson::kObjectType);
+	summary.AddMember("scriptCount", static_cast<uint64_t>(mScriptSummaries.size()), allocator);
+	JsonValue callCounts(rapidjson::kObjectType);
+	for(const auto& count : aggregateCallCounts)
+	{
+		JsonValue key = json_string(count.first, allocator);
+		callCounts.AddMember(key, count.second, allocator);
+	}
+	summary.AddMember("callCounts", callCounts, allocator);
+	JsonValue referenceCounts(rapidjson::kObjectType);
+	for(const auto& count : aggregateReferenceCounts)
+	{
+		JsonValue key = json_string(count.first, allocator);
+		referenceCounts.AddMember(key, count.second, allocator);
+	}
+	summary.AddMember("referenceCounts", referenceCounts, allocator);
+	document.AddMember("summary", summary, allocator);
+
+	return write_json_document(OutputPath("script-index.json"), document, baseAllocator);
+}
+
 
 bool	CStackFile::WriteJsonIndexes() const
 {
@@ -1768,6 +2184,7 @@ bool	CStackFile::WriteJsonIndexes() const
 		outputs.PushBack(json_output_ref("stylesheet", mStyleTableBlockID, mStyleSheetName.c_str(), "STBL", mStyleTableBlockID, projectAllocator), projectAllocator);
 	outputs.PushBack(json_output_ref("project", -1, "project.json", nullptr, -1, projectAllocator), projectAllocator);
 	outputs.PushBack(json_output_ref("stack", mStackID, "stack_-1.json", "STAK", mStackID, projectAllocator), projectAllocator);
+	outputs.PushBack(json_output_ref("scriptIndex", -1, "script-index.json", nullptr, -1, projectAllocator), projectAllocator);
 	for(const auto& layer : mLayerSummaries)
 		outputs.PushBack(json_output_ref(layer.isCard ? "card" : "background", layer.id, layer.file.c_str(), layer.isCard ? "CARD" : "BKGD", layer.id, projectAllocator), projectAllocator);
 	project.AddMember("outputs", outputs, projectAllocator);
@@ -1837,7 +2254,7 @@ bool	CStackFile::WriteJsonIndexes() const
 	JsonWriter stackWriter(stackBuffer, &baseAllocator);
 	stack.Accept(stackWriter);
 	const std::string stackPath = OutputPath("stack_-1.json");
-	return write_json_file(stackPath, stackBuffer.GetString(), stackBuffer.GetSize());
+	return write_json_file(stackPath, stackBuffer.GetString(), stackBuffer.GetSize()) && WriteScriptIndex();
 }
 
 
@@ -1864,6 +2281,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 	}
 
 	mBasePath = packagePath;
+	mSourcePath = fpath;
 		
   #if MAC_CODE
 	FSRef		fileRef;

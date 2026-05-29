@@ -20,6 +20,7 @@ struct Options {
 	uint32_t flags = STACKIMPORT_IMPORT_DUMP_RAW_BLOCKS;
 	std::string input_path;
 	std::string output_path;
+	std::string media_root_path;
 	std::string atlas_output_path;
 	std::string source_root_path;
 	bool emit_atlas = false;

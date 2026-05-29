@@ -322,6 +322,14 @@ bool parse_resource_map_at(
   return true;
 }
 
+bool address_in_data_region(const RomAnalysis& analysis, uint32_t address) {
+  for(const auto& region : analysis.data_regions) {
+    if(address >= region.start_address && address < region.end_address)
+      return true;
+  }
+  return false;
+}
+
 }
 
 std::string format_address(uint32_t addr) {
@@ -842,6 +850,28 @@ void classify_rom_structure(
       analysis.data_regions.push_back({map.data_address, map.data_address + static_cast<uint32_t>(map.data_length), "resource_data", map.resource_count, map.confidence});
       analysis.data_regions.push_back({map.map_address, map.map_address + static_cast<uint32_t>(map.map_length), "resource_map", map.resource_count, map.confidence});
       offset += std::max<size_t>(32, map.map_address - base_address - offset);
+    }
+  }
+
+  if(!analysis.data_regions.empty()) {
+    for(auto& region : analysis.code_regions) {
+      region.is_code = false;
+      region.confidence = std::min(region.confidence, 0.75);
+    }
+    for(auto& xref : xrefs) {
+      if(address_in_data_region(analysis, xref.from)) {
+        xref.confidence = std::min(xref.confidence, 0.35);
+        xref.source += ":probable-data-source";
+      } else if(address_in_data_region(analysis, xref.to)) {
+        xref.confidence = std::min(xref.confidence, 0.50);
+        xref.source += ":probable-data-target";
+      }
+    }
+    for(auto& trap : traps) {
+      if(address_in_data_region(analysis, trap.address)) {
+        trap.confidence = std::min(trap.confidence, 0.35);
+        trap.source += ":probable-data-source";
+      }
     }
   }
 

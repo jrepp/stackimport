@@ -20,11 +20,11 @@ where new support should live. The target architecture is:
 | `SICN` | RGBA transform per small icon and PNG package artifacts | `rsrcd::img`, `StackImportResourceTransforms.cpp` | 16x16 1-bit small icon list. |
 | `icm#` / `ics#` | RGBA transform and PNG package artifact | `rsrcd::img`, `StackImportResourceTransforms.cpp` | 1-bit mini/small icon lists. Exactly two images are decoded as bitmap plus mask; other counts emit per-image variants. |
 | `icl4` / `icl8` / `icm4` / `icm8` / `ics4` / `ics8` | RGBA transform and PNG package artifact | `rsrcd::img`, `StackImportResourceTransforms.cpp` | Opaque 4-bit and 8-bit color icon bitmaps. Parallel mask composition remains future event-stream work. |
-| `cicn` | Typed color-icon metadata parse to JSON transform and package artifact | `rsrcd::color_icon`, `StackImportResourceTransforms.cpp` | Pixel map, mask, bitmap, and data offsets. Rendered color icon PNG output remains future work. |
+| `cicn` | Typed color-icon metadata parse plus RGBA/PNG transform and package artifacts | `rsrcd::color_icon`, `StackImportResourceTransforms.cpp` | Pixel map, mask, bitmap, data offsets, and decoded color icon pixels. |
 | `PLTE` | Typed parse to JSON transform and package artifact | `rsrcd::plte`, `StackImportResourceTransforms.cpp` | Palette window metadata and buttons. |
 | `clut` / `CTBL` / `actb` / `cctb` / `dctb` / `fctb` / `wctb` | Typed color-table parse to JSON transform and package artifact | `rsrcd::color_table`, `StackImportResourceTransforms.cpp` | Color table entries with 16-bit RGB. |
 | `pltt` | Typed palette parse to JSON transform and package artifact | `rsrcd::pltt`, `StackImportResourceTransforms.cpp` | Palette entries with 16-bit RGB. |
-| `ppat` / `ppt#` | Typed pixel-pattern metadata parse to JSON transform and package artifact | `rsrcd::pixel_pattern`, `StackImportResourceTransforms.cpp` | Pattern headers, monochrome bits, list offsets, and pixmap metadata where present. Rendered pattern images remain future output work. |
+| `ppat` / `ppt#` | Typed pixel-pattern metadata parse plus RGBA/PNG transform and package artifacts | `rsrcd::pixel_pattern`, `StackImportResourceTransforms.cpp` | Pattern headers, monochrome bits, list offsets, pixmap metadata, and decoded pattern/tiled image variants where present. |
 | `HCbg` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Background overlay metadata. |
 | `HCcd` | Typed AddColor parse to JSON transform and package artifact | `rsrcd::ac`, `StackImportResourceTransforms.cpp` | Card overlay metadata. |
 | `STR ` | Typed MacRoman decode to UTF-8 text transform and package artifact | `rsrcd::text`, `StackImportResourceTransforms.cpp` | Pascal string resource. |
@@ -39,10 +39,12 @@ where new support should live. The target architecture is:
 | `cfrg` | Typed code-fragment metadata parse to JSON transform and package artifact | `rsrcd::cfrg`, `StackImportResourceTransforms.cpp` | CFM fragment entries, usage/location, names, and extension bytes. |
 | `ROv#` | Typed ROM override metadata parse to JSON transform and package artifact | `rsrcd::rov`, `StackImportResourceTransforms.cpp` | ROM version plus overridden resource type/id entries. |
 | `RSSC` | Typed code-resource metadata parse to JSON transform and package artifact | `rsrcd::rssc`, `StackImportResourceTransforms.cpp` | RSSC signature, export offsets, and code size. Disassembly remains adapter/code-resource work. |
-| `CODE` | Typed code-resource metadata parse to JSON transform and package artifact | `rsrcd::code_resource`, `StackImportResourceTransforms.cpp` | CODE 0 jump table and near/far segment headers. Disassembly remains adapter/code-resource work. |
-| `DRVR` | Typed driver metadata parse to JSON transform and package artifact | `rsrcd::drvr`, `StackImportResourceTransforms.cpp` | Driver flags, event mask, entry labels, name, and code size. Disassembly remains adapter/code-resource work. |
-| `dcmp` | Typed decompressor metadata parse to JSON transform and package artifact | `rsrcd::dcmp`, `StackImportResourceTransforms.cpp` | Entry labels, PC offset, and code size. Decompression/disassembly remains adapter/code-resource work. |
+| `CODE` | Typed code-resource metadata parse plus 68K disassembly text transform and package artifacts | `rsrcd::code_resource`, `StackImportResourceTransforms.cpp` | CODE 0 jump table, near/far segment headers, and segment code disassembly. |
+| `DRVR` | Typed driver metadata parse plus 68K disassembly text transform and package artifacts | `rsrcd::drvr`, `StackImportResourceTransforms.cpp` | Driver flags, event mask, entry labels, name, code size, and driver code disassembly. |
+| `dcmp` | Typed decompressor metadata parse plus 68K disassembly text transform and package artifacts | `rsrcd::dcmp`, `StackImportResourceTransforms.cpp` | Entry labels, PC offset, code size, and decompressor code disassembly. Decompression remains future work. |
 | `finf` | Typed font metadata parse to JSON transform and package artifact | `rsrcd::finf`, `StackImportResourceTransforms.cpp` | Font id, style flags, and size triples. |
+| `FONT` / `NFNT` | Bounded bitmap-font header metadata parse and 1-bit bitmap strike PNG transform | `StackImportResourceTransforms.cpp` | Type flags, bit depth, character range, metrics, bitmap row width, basic bounds evidence, and rendered full bitmap strike for monochrome fonts. Per-glyph atlas output remains future adapter work. |
+| `FOND` | Bounded font-family header metadata parse to JSON transform and package artifact | `StackImportResourceTransforms.cpp` | Family ID, character range, metrics, table offsets, version presence, and offset bounds evidence. Deeper association-table parsing remains future work. |
 | `CNTL` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Control bounds, state, proc id, refcon, and title. |
 | `DLOG` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Dialog bounds, visibility, item list id, title, and auto-position. |
 | `WIND` | Typed UI metadata parse to JSON transform and package artifact | `rsrcd::ui`, `StackImportResourceTransforms.cpp` | Window bounds, visibility, title, and auto-position. |
@@ -55,6 +57,8 @@ where new support should live. The target architecture is:
 | `snd ` | WAV transform and package artifact | `StackImportSoundConverter.cpp` | MACE uses the resource_dasm-backed MACE adapter when enabled. |
 | `XCMD` / `XFCN` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | 68K code resources. |
 | `xcmd` / `xfcn` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp` | PowerPC code resources. |
+| `PACK` / `boot` / `ptch` | Text disassembly transform and package artifact | `Mac68kDisassembly.cpp`, `StackImportResourceTransforms.cpp` | Inline 68K resource payloads are disassembled as text artifacts. |
+| `decl` | Preserved metadata JSON transform and package artifact | `StackImportResourceTransforms.cpp` | Records byte length and prefix evidence while preserving native bytes in ROM asset output. Full declaration parsing remains future work. |
 
 ## resource_dasm Support To Fold Or Adapt
 
@@ -71,8 +75,8 @@ interface is clear.
 | Text | None currently listed | typed decoders and exporters | Fold MacRoman-aware parsers into rsrcd. `STR `, `STR#`, `TEXT`, `TwCS`, `TxSt`, `styl`, and `KCHR` now live in StackImport core. |
 | Metadata/templates | `TMPL` | typed decoders and exporters | Fold small metadata parsers into rsrcd; keep executable/container metadata adapter-backed where complex. `vers`, `SIZE`, `cfrg`, `ROv#`, and `RSSC` metadata now live in StackImport core. |
 | UI/layout | None currently listed | typed decoders and exporters | Fold fixed-record parsers into rsrcd after corpus validation. `CNTL`, `DLOG`, `WIND`, `MENU`, `DITL`, `MBAR`, `ALRT`, `FREF`, and `BNDL` now live in StackImport core. |
-| Fonts | `FONT`, `NFNT`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. `finf` now lives in StackImport core. |
-| Code | `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. `CODE`, `DRVR`, and `dcmp` metadata now live in StackImport core. |
+| Fonts | `FONT`, `NFNT`, `sfnt` | bitmap font decoders and extension mapping | Adapter first for rendered output; fold metadata/bounds checks into rsrcd. `finf`, `FONT`, and `NFNT` metadata now live in StackImport core. |
+| Code | `CDEF`, `INIT`, `LDEF`, `MDEF`, `PACK`, `WDEF`, `FKEY` | 68K/PEF/code metadata decoders and exporters | Keep disassembly/decompiler work behind adapters; fold headers/metadata only. `CODE`, `DRVR`, `dcmp`, and inline `PACK` disassembly now live in StackImport core. |
 | Audio/music | `csnd`, `esnd`, `ESnd`, `Ysnd`, `SMSD`, `SOUN`, `SONG`, `INST`, `Tune`, MIDI-like resources | audio/music decoders and exporters | Adapter first for codecs; fold metadata-only parsing into rsrcd. |
 | Template-backed metadata | Other system templates | system-template description | Fold small bounded templates into rsrcd when they appear in corpus output paths. `RECT`, `TOOL`, `PICK`, `KBDN`, `PAPA`, and `LAYO` now live in StackImport core. |
 

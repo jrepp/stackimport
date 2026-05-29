@@ -22,8 +22,23 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STACKS_DIR = Path("/Users/jrepp/d/pantechnicon/stacks")
+DEFAULT_RUN_ROOT = Path("/tmp/stackimport-import-runs")
 ARCHIVE_SUFFIXES = (".sit", ".hqx")
 IGNORED_INPUT_NAMES = {".mirror-manifest.json", ".mirror.log", ".DS_Store"}
+DEFAULT_IGNORED_DIR_NAMES = {
+    ".git",
+    ".hg",
+    ".svn",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "node_modules",
+    "import-runs",
+    "roms",
+}
 CODE_RESOURCE_TYPES = {"XCMD", "XFCN", "xcmd", "xfcn"}
 EXECUTABLE_RESOURCE_TYPES = CODE_RESOURCE_TYPES | {"cfrg"}
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -126,8 +141,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-root",
         type=Path,
-        default=Path(os.environ.get("RUN_ROOT", REPO_ROOT / "import-runs")),
-        help="Directory for captured runs. Default: import-runs",
+        default=Path(os.environ.get("RUN_ROOT", DEFAULT_RUN_ROOT)),
+        help=f"Directory for captured runs. Default: {DEFAULT_RUN_ROOT}",
+    )
+    parser.add_argument(
+        "--ignore-dir",
+        action="append",
+        default=[],
+        help="Directory basename to ignore while scanning. May be repeated.",
+    )
+    parser.add_argument(
+        "--no-default-ignore-dirs",
+        action="store_true",
+        help="Disable default ignored directories such as .git, import-runs, roms, and node_modules.",
     )
     parser.add_argument(
         "--run-id",
@@ -144,6 +170,8 @@ def parse_args() -> argparse.Namespace:
     if stackimport_args and stackimport_args[0] == "--":
         stackimport_args = stackimport_args[1:]
     args.stackimport_args = stackimport_args
+    default_ignored_dirs = set() if args.no_default_ignore_dirs else set(DEFAULT_IGNORED_DIR_NAMES)
+    args.ignored_dir_names = default_ignored_dirs | set(args.ignore_dir)
     return args
 
 
@@ -634,9 +662,15 @@ def classify_file(path: Path, rel_path: str) -> ClassifiedFile:
     lower_extension = extension.lower()
     decision = "skip"
     reason = "unrecognized"
-    if finder_type == "STAK":
+    rel_parts = Path(rel_path).parts
+    is_myst_age_stack = finder_type == "MYag" and len(rel_parts) >= 2 and rel_parts[-2] == "Myst Files"
+    if finder_type == "STAK" or is_myst_age_stack:
         decision = "stack"
-        reason = "finder_type_stak"
+        reason = "finder_type_stack_like"
+    elif finder_type == "APPL":
+        reason = "finder_type_application"
+    elif finder_type == "MYag":
+        reason = "myst_resource_sidecar"
     elif binary_type == "STAK" and binary_size is not None and 12 <= binary_size <= bytes_count:
         decision = "stack"
         reason = "binary_stak_header"
@@ -669,8 +703,10 @@ def external_kind_for(classified: ClassifiedFile) -> str:
         return "text"
     if finder_type in {"APPL"}:
         return "application"
-    if finder_type in {"MooV"} or extension in {"mov", "movie"}:
+    if finder_type in {"MooV", "Moov", "MYqt"} or extension in {"mov", "moov", "movie"}:
         return "movie"
+    if finder_type in {"MYag"}:
+        return "myst_resource"
     if finder_type in {"snd "} or extension in {"snd", "aif", "aiff", "wav"}:
         return "sound"
     if finder_type in {"Mcr$", "Mcr0"}:
@@ -723,10 +759,16 @@ def insert_external_binary(
     )
 
 
-def iter_input_files(stacks_dir: Path) -> list[Path]:
+def has_ignored_dir(path: Path, ignored_dir_names: set[str]) -> bool:
+    return any(part in ignored_dir_names for part in path.parts[:-1])
+
+
+def iter_input_files(stacks_dir: Path, ignored_dir_names: set[str]) -> list[Path]:
     files: list[Path] = []
     for path in stacks_dir.rglob("*"):
         if not path.is_file():
+            continue
+        if has_ignored_dir(path.relative_to(stacks_dir), ignored_dir_names):
             continue
         if any(part.endswith(".xstk") for part in path.parts):
             continue
@@ -810,9 +852,10 @@ def chunk_status_from_log(line: str) -> tuple[str, str, int | None, int | None] 
     return None
 
 
-def output_package_for(import_path: Path) -> Path:
+def output_package_for(import_path: Path, package_root: Path, input_key: str) -> Path:
+    package_dir = package_root / log_stem_for(input_key)
     package_name = filesystem_escape(import_path.stem if import_path.suffix else import_path.name)
-    return import_path.with_name(f"{package_name}.xstk")
+    return package_dir / f"{package_name}.xstk"
 
 
 def kind_for_output(path: Path) -> str:
@@ -940,11 +983,12 @@ def run_stackimport(
     stackimport_bin: Path,
     stackimport_args: list[str],
     stackimport_pty: bool,
+    output_package: Path,
     resource_dasm_bin: Path,
     disassemble_code_resources: bool,
     classified: ClassifiedFile | None = None,
 ) -> ImportResult:
-    output_package = output_package_for(import_path)
+    output_package.parent.mkdir(parents=True, exist_ok=True)
     command = [str(stackimport_bin), *stackimport_args, "--output", str(output_package), str(import_path)]
     completed = run_command(command, use_pty=stackimport_pty)
     captured_output = completed.stdout or ""
@@ -3306,6 +3350,7 @@ def main() -> int:
     run_dir = (args.run_root / args.run_id).resolve()
     log_dir = run_dir / "logs"
     extract_dir = run_dir / "extracted"
+    package_dir = run_dir / "packages"
     db_path = run_dir / "run.db"
 
     if not stacks_dir.is_dir():
@@ -3322,6 +3367,7 @@ def main() -> int:
 
     log_dir.mkdir(parents=True, exist_ok=True)
     extract_dir.mkdir(parents=True, exist_ok=True)
+    package_dir.mkdir(parents=True, exist_ok=True)
     conn = connect_database(db_path)
     started_at = datetime.now().isoformat(timespec="seconds")
     conn.execute(
@@ -3336,7 +3382,7 @@ def main() -> int:
     processed = stack_ok = stack_failed = no_stack = extract_failed = 0
     disassembly_jobs: list[DisassemblyJob] = []
     packages_to_index: list[tuple[int, Path]] = []
-    for source_path in iter_input_files(stacks_dir):
+    for source_path in iter_input_files(stacks_dir, args.ignored_dir_names):
         processed += 1
         rel_path = str(source_path.relative_to(stacks_dir))
         print(f"[{processed}] {rel_path}", flush=True)
@@ -3404,6 +3450,7 @@ def main() -> int:
                     stackimport_bin,
                     args.stackimport_args,
                     args.stackimport_pty,
+                    output_package_for(extracted_path, package_dir, display_input),
                     args.resource_dasm_bin,
                     args.disassemble_code_resources,
                     classified,
@@ -3474,6 +3521,7 @@ def main() -> int:
                     stackimport_bin,
                     args.stackimport_args,
                     args.stackimport_pty,
+                    output_package_for(source_path, package_dir, rel_path),
                     args.resource_dasm_bin,
                     args.disassemble_code_resources,
                     classified,

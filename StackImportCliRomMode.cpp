@@ -242,6 +242,9 @@ bool write_atlas_outputs(
 	(void)outputRel;
 	double firstBytesConfidence = 0.0;
 	const char* firstBytesKind = initial_bytes_hypothesis(buf, firstBytesConfidence);
+	const bool hasParsedResources = !analysis.resources.empty();
+	const bool hasMarkerOnlyResources = !analysis.resource_markers.empty() && analysis.resources.empty();
+	const bool hasSourceOverlays = false;
 
 	std::string roms = "id\tpath\tsize\tcrc32\tsha256\tbase_address\tmachine_family\tmodel_tokens\n";
 	roms += romId + "\t" + tsv_escape(inputRel) + "\t" + std::to_string(analysis.info.size) + "\t";
@@ -286,14 +289,15 @@ bool write_atlas_outputs(
 		regions += std::to_string(region.confidence) + "\tscanner\n";
 	}
 
-	std::string functions = "id\trom_id\tstart\tend\tkind\tlabel\tinstruction_count\tinbound_calls\toutbound_calls\treferences\tconfidence\tevidence\n";
+	std::string functions = "id\trom_id\tstart\tend\tboundary_status\tkind\tlabel\tinstruction_count\tinbound_calls\toutbound_calls\treferences\tconfidence\tevidence\n";
 	for(const auto& fn : analysis.function_candidates)
 	{
 		const std::string id = "fn-" + RomDasm::format_address(fn.address);
-		functions += id + "\t" + romId + "\t" + RomDasm::format_address(fn.address) + "\t\tcandidate\t";
-		functions += tsv_escape(fn.label) + "\t0\t" + std::to_string(fn.calls) + "\t";
+		const std::string label = fn.label.empty() ? ("sub_" + RomDasm::format_address(fn.address)) : fn.label;
+		functions += id + "\t" + romId + "\t" + RomDasm::format_address(fn.address) + "\t\tunknown\tcandidate\t";
+		functions += tsv_escape(label) + "\t\t" + std::to_string(fn.calls) + "\t";
 		functions += std::to_string(fn.jumps) + "\t" + std::to_string(fn.references) + "\t";
-		functions += std::to_string(fn.confidence) + "\tinbound references from linear disassembly\n";
+		functions += std::to_string(fn.confidence) + "\tinbound references from linear disassembly; boundary not inferred\n";
 	}
 
 	std::string pointerTables = "id\trom_id\taddress\tentry_count\tdecoded_target_count\tconfidence\tsource\n";
@@ -313,12 +317,12 @@ bool write_atlas_outputs(
 		dataRegions += std::to_string(region.confidence) + "\tscanner\n";
 	}
 
-	std::string resources = "id\taddress\tkind\tresource_type\tresource_id\tname\tmedia_type\toutput_file\tconfidence\tsource\n";
+	std::string resources = "id\trom_id\taddress\tkind\tresource_type\tresource_id\tname\tmedia_type\toutput_file\tconfidence\tsource\n";
 	for(size_t i = 0; i < analysis.resource_markers.size(); i++)
 	{
 		const auto& marker = analysis.resource_markers[i];
 		resources += "resmarker-" + RomDasm::format_address(marker.address) + "-" + std::to_string(i) + "\t";
-		resources += RomDasm::format_address(marker.address) + "\tmarker\t" + tsv_escape(marker.type);
+		resources += romId + "\t" + RomDasm::format_address(marker.address) + "\tmarker\t" + tsv_escape(marker.type);
 		resources += "\t\t\t\t\t0.40\tmarker-scan:" + tsv_escape(marker.context) + "\n";
 	}
 	for(size_t i = 0; i < analysis.resources.size(); i++)
@@ -327,7 +331,7 @@ bool write_atlas_outputs(
 		const std::string address = RomDasm::format_address(resource.address);
 		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
 		resources += "res-" + address + "-" + tsv_escape(resource.type) + "-" + std::to_string(resource.id) + "-" + std::to_string(i) + "\t";
-		resources += address + "\tparsed\t" + tsv_escape(resource.type) + "\t" + std::to_string(resource.id) + "\t";
+		resources += romId + "\t" + address + "\tparsed\t" + tsv_escape(resource.type) + "\t" + std::to_string(resource.id) + "\t";
 		resources += tsv_escape(resource.name) + "\t" + tsv_escape(asset.media_type) + "\t" + tsv_escape(asset.relative_path) + "\t";
 		resources += std::to_string(resource.confidence) + "\t" + tsv_escape(resource.source) + "\n";
 	}
@@ -375,15 +379,67 @@ bool write_atlas_outputs(
 	}
 	std::string sourceOverlays = "id\trom_id\taddress\tsource_path\tsymbol\tconfidence\tevidence\n";
 	std::string sourceGaps = "id\trom_id\taddress\tkind\tpriority\tconfidence\tevidence\n";
+	size_t emittedFunctionGaps = 0;
 	for(const auto& fn : analysis.function_candidates)
 	{
-		if(fn.label.empty() && fn.confidence >= 0.50)
+		if(fn.confidence >= 0.75 && emittedFunctionGaps < 100)
 		{
 			const std::string address = RomDasm::format_address(fn.address);
-			sourceGaps += "gap-" + address + "\t" + romId + "\t" + address + "\tfunction_candidate\tmedium\t";
-			sourceGaps += std::to_string(fn.confidence) + "\tno source overlay supplied\n";
+			sourceGaps += "gap-function-" + address + "\t" + romId + "\t" + address + "\tfunction_candidate\thigh\t";
+			sourceGaps += std::to_string(fn.confidence) + "\thigh-confidence function candidate has no source overlay; inbound_calls=";
+			sourceGaps += std::to_string(fn.calls) + "; references=" + std::to_string(fn.references) + "\n";
+			emittedFunctionGaps++;
 		}
 	}
+	size_t emittedResourceGaps = 0;
+	for(const auto& marker : analysis.resource_markers)
+	{
+		if(emittedResourceGaps >= 100)
+			break;
+		const std::string address = RomDasm::format_address(marker.address);
+		sourceGaps += "gap-resource-marker-" + address + "-" + std::to_string(emittedResourceGaps) + "\t" + romId + "\t";
+		sourceGaps += address + "\tresource_marker\tmedium\t0.40\tmarker-only resource candidate lacks parsed resource-map record; type=";
+		sourceGaps += tsv_escape(marker.type) + "\n";
+		emittedResourceGaps++;
+	}
+	if(!hasSourceOverlays)
+		sourceGaps += "gap-source-overlay-missing-" + romId + "\t" + romId + "\t\tanalysis_phase\tmedium\t0.50\tno source root overlay supplied or matched for this run\n";
+
+	std::string manifest = "schema_version: 1\n";
+	manifest += "tool:\n";
+	manifest += "  name: stackimport\n";
+	manifest += "  version: " STACKIMPORT_VERSION_STRING "\n";
+	manifest += "rom:\n";
+	manifest += "  id: " + romId + "\n";
+	manifest += "  path: " + inputRel + "\n";
+	manifest += "  size: " + std::to_string(analysis.info.size) + "\n";
+	manifest += "  crc32: " + RomDasm::format_address(analysis.info.crc32) + "\n";
+	manifest += "  sha256: " + analysis.info.sha256 + "\n";
+	manifest += "  base_address: " + RomDasm::format_address(analysis.info.base_address) + "\n";
+	manifest += "validation_status: partial\n";
+	manifest += "phase_status:\n";
+	manifest += "  identity: complete\n";
+	manifest += "  disassembly: complete\n";
+	manifest += "  xrefs: partial_linear\n";
+	manifest += "  regions: partial\n";
+	manifest += std::string("  resources: ") + (hasParsedResources ? "partial_parsed\n" : "marker_only\n");
+	manifest += "  source_overlays: not_run\n";
+	manifest += "row_counts:\n";
+	manifest += "  functions: " + std::to_string(analysis.function_candidates.size()) + "\n";
+	manifest += "  xrefs: " + std::to_string(analysis.xrefs.size()) + "\n";
+	manifest += "  traps: " + std::to_string(analysis.traps.size()) + "\n";
+	manifest += "  strings: " + std::to_string(analysis.strings.size()) + "\n";
+	manifest += "  pointer_table_regions: " + std::to_string(analysis.pointer_table_regions.size()) + "\n";
+	manifest += "  data_regions: " + std::to_string(analysis.data_regions.size()) + "\n";
+	manifest += "  resource_markers: " + std::to_string(analysis.resource_markers.size()) + "\n";
+	manifest += "  resource_maps: " + std::to_string(analysis.resource_maps.size()) + "\n";
+	manifest += "  resource_records: " + std::to_string(analysis.resources.size()) + "\n";
+	manifest += "warnings:\n";
+	manifest += "  - whole-ROM linear disassembly is region-overlay input, not confirmed code coverage\n";
+	if(hasMarkerOnlyResources)
+		manifest += "  - resource scan found markers but no parsed resource map records\n";
+	if(!hasSourceOverlays)
+		manifest += "  - source overlay phase did not produce matches\n";
 
 	return write_text_file(path_join(atlasDir, "roms.tsv"), roms) &&
 		write_text_file(path_join(atlasDir, "inventory.tsv"), inventory) &&
@@ -397,7 +453,8 @@ bool write_atlas_outputs(
 		write_text_file(path_join(atlasDir, "strings.tsv"), strings) &&
 		write_text_file(path_join(atlasDir, "traps.tsv"), traps) &&
 		write_text_file(path_join(atlasDir, "source-overlays.tsv"), sourceOverlays) &&
-		write_text_file(path_join(atlasDir, "source-gaps.tsv"), sourceGaps);
+		write_text_file(path_join(atlasDir, "source-gaps.tsv"), sourceGaps) &&
+		write_text_file(path_join(atlasDir, "manifest.yaml"), manifest);
 }
 
 bool write_analysis_json(
@@ -418,6 +475,10 @@ bool write_analysis_json(
 	const char* firstBytesKind = initial_bytes_hypothesis(buf, firstBytesConfidence);
 	const std::string inputRel = relative_to_cwd(inputPath);
 	const std::string outputRel = relative_to_cwd(outputDir);
+	const std::string romId = rom_id_from_info(analysis);
+	const bool hasParsedResources = !analysis.resources.empty();
+	const bool hasMarkerOnlyResources = !analysis.resource_markers.empty() && analysis.resources.empty();
+	const bool hasSourceOverlays = false;
 
 	fprintf(jsonFile, "{\n");
 	fprintf(jsonFile, "  \"schema_version\": 1,\n");
@@ -446,6 +507,8 @@ bool write_analysis_json(
 	fprintf(jsonFile, "  \"disassembly\": {\"mode\": \"%s\", \"linear_warning\": true, \"instruction_count\": %zu},\n",
 		rom_disassembly_mode(),
 		analysis.total_instructions);
+	fprintf(jsonFile, "  \"phase_status\": {\"identity\":\"complete\",\"disassembly\":\"complete\",\"xrefs\":\"partial_linear\",\"regions\":\"partial\",\"resources\":\"%s\",\"source_overlays\":\"not_run\"},\n",
+		hasParsedResources ? "partial_parsed" : "marker_only");
 	fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
 	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"resource_maps\": %zu, \"resource_records\": %zu, \"xrefs\": %zu, \"traps\": %zu},\n",
 		analysis.code_regions.size(),
@@ -502,10 +565,10 @@ bool write_analysis_json(
 	{
 		const auto& fn = analysis.function_candidates[i];
 		fprintf(jsonFile,
-			"    {\"id\":\"fn-%08X\",\"start\":\"%08X\",\"end\":null,\"kind\":\"candidate\",\"label\":\"%s\",\"instruction_count\":0,\"inbound_calls\":%zu,\"outbound_calls\":%zu,\"references\":%zu,\"confidence\":%.2f,\"evidence\":\"inbound references from linear disassembly\"}%s\n",
+			"    {\"id\":\"fn-%08X\",\"start\":\"%08X\",\"end\":null,\"boundary_status\":\"unknown\",\"kind\":\"candidate\",\"label\":\"%s\",\"instruction_count\":null,\"inbound_calls\":%zu,\"outbound_calls\":%zu,\"references\":%zu,\"confidence\":%.2f,\"evidence\":\"inbound references from linear disassembly; boundary not inferred\"}%s\n",
 			static_cast<unsigned>(fn.address),
 			static_cast<unsigned>(fn.address),
-			json_escape(fn.label).c_str(),
+			json_escape(fn.label.empty() ? ("sub_" + RomDasm::format_address(fn.address)) : fn.label).c_str(),
 			fn.calls,
 			fn.jumps,
 			fn.references,
@@ -572,9 +635,10 @@ bool write_analysis_json(
 	{
 		const auto& marker = analysis.resource_markers[i];
 		fprintf(jsonFile,
-			"    {\"id\":\"resmarker-%08X-%zu\",\"address\":\"%08X\",\"kind\":\"marker\",\"resource_type\":\"%s\",\"resource_id\":null,\"name\":\"\",\"media_type\":\"\",\"output_file\":\"\",\"decode_status\":\"marker_only\",\"confidence\":0.40,\"source\":\"marker-scan\",\"context\":\"%s\"}",
+			"    {\"id\":\"resmarker-%08X-%zu\",\"rom_id\":\"%s\",\"address\":\"%08X\",\"kind\":\"marker\",\"resource_type\":\"%s\",\"resource_id\":null,\"name\":\"\",\"media_type\":\"\",\"output_file\":\"\",\"decode_status\":\"marker_only\",\"confidence\":0.40,\"source\":\"marker-scan\",\"context\":\"%s\"}",
 			static_cast<unsigned>(marker.address),
 			i,
+			json_escape(romId).c_str(),
 			static_cast<unsigned>(marker.address),
 			json_escape(marker.type).c_str(),
 			json_escape(marker.context).c_str());
@@ -588,11 +652,12 @@ bool write_analysis_json(
 		const RomResourceAsset asset = primary_resource_asset(resource, buf, analysis, emitAssets);
 		const std::string rawOutputFile = emitAssets ? resource_asset_relative_path(resource) : "";
 		fprintf(jsonFile,
-			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u,\"output_artifacts\":[",
+			"    {\"id\":\"res-%08X-%s-%d-%zu\",\"rom_id\":\"%s\",\"address\":\"%08X\",\"map_address\":\"%08X\",\"data_address\":\"%08X\",\"kind\":\"parsed\",\"resource_type\":\"%s\",\"resource_id\":%d,\"name\":\"%s\",\"flags\":%u,\"length\":%zu,\"media_type\":\"%s\",\"output_file\":\"%s\",\"raw_output_file\":\"%s\",\"decode_status\":\"%s\",\"converter\":\"%s\",\"variant_index\":%u,\"width\":%u,\"height\":%u,\"row_bytes\":%u,\"output_artifacts\":[",
 			static_cast<unsigned>(resource.address),
 			json_escape(resource.type).c_str(),
 			resource.id,
 			i,
+			json_escape(romId).c_str(),
 			static_cast<unsigned>(resource.address),
 			static_cast<unsigned>(resource.map_address),
 			static_cast<unsigned>(resource.data_address),
@@ -686,23 +751,57 @@ bool write_analysis_json(
 	size_t sourceGapIndex = 0;
 	for(const auto& fn : analysis.function_candidates)
 	{
-		if(fn.label.empty() && fn.confidence >= 0.50)
+		if(fn.confidence >= 0.75 && sourceGapIndex < 100)
 		{
 			if(sourceGapIndex > 0)
 				fprintf(jsonFile, ",\n");
 			const std::string address = RomDasm::format_address(fn.address);
 			fprintf(jsonFile,
-				"    {\"id\":\"gap-%s\",\"address\":\"%s\",\"kind\":\"function_candidate\",\"priority\":\"medium\",\"confidence\":%.2f,\"evidence\":\"no source overlay supplied\"}",
+				"    {\"id\":\"gap-function-%s\",\"rom_id\":\"%s\",\"address\":\"%s\",\"kind\":\"function_candidate\",\"priority\":\"high\",\"confidence\":%.2f,\"evidence\":\"high-confidence function candidate has no source overlay; inbound_calls=%zu; references=%zu\"}",
 				address.c_str(),
+				json_escape(romId).c_str(),
 				address.c_str(),
-				fn.confidence);
+				fn.confidence,
+				fn.calls,
+				fn.references);
 			sourceGapIndex++;
 		}
+	}
+	for(size_t i = 0; i < analysis.resource_markers.size() && i < 100; i++)
+	{
+		if(sourceGapIndex > 0)
+			fprintf(jsonFile, ",\n");
+		const auto& marker = analysis.resource_markers[i];
+		const std::string address = RomDasm::format_address(marker.address);
+		fprintf(jsonFile,
+			"    {\"id\":\"gap-resource-marker-%s-%zu\",\"rom_id\":\"%s\",\"address\":\"%s\",\"kind\":\"resource_marker\",\"priority\":\"medium\",\"confidence\":0.40,\"evidence\":\"marker-only resource candidate lacks parsed resource-map record; type=%s\"}",
+			address.c_str(),
+			i,
+			json_escape(romId).c_str(),
+			address.c_str(),
+			json_escape(marker.type).c_str());
+		sourceGapIndex++;
+	}
+	if(!hasSourceOverlays)
+	{
+		if(sourceGapIndex > 0)
+			fprintf(jsonFile, ",\n");
+		fprintf(jsonFile,
+			"    {\"id\":\"gap-source-overlay-missing-%s\",\"rom_id\":\"%s\",\"address\":null,\"kind\":\"analysis_phase\",\"priority\":\"medium\",\"confidence\":0.50,\"evidence\":\"no source root overlay supplied or matched for this run\"}",
+			json_escape(romId).c_str(),
+			json_escape(romId).c_str());
+		sourceGapIndex++;
 	}
 	if(sourceGapIndex > 0)
 		fprintf(jsonFile, "\n");
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"warnings\": []\n");
+	fprintf(jsonFile, "  \"warnings\": [\n");
+	fprintf(jsonFile, "    \"whole-ROM linear disassembly is region-overlay input, not confirmed code coverage\"");
+	if(hasMarkerOnlyResources)
+		fprintf(jsonFile, ",\n    \"resource scan found markers but no parsed resource map records\"");
+	if(!hasSourceOverlays)
+		fprintf(jsonFile, ",\n    \"source overlay phase did not produce matches\"");
+	fprintf(jsonFile, "\n  ]\n");
 	fprintf(jsonFile, "}\n");
 	return fclose(jsonFile) == 0;
 }

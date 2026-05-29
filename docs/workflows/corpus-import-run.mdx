@@ -24,9 +24,18 @@ format-investigation task.
    scripts/import_all_stacks.py --stackimport-bin build/stackimport
    ```
 
+   Captured logs, extracted archives, packages, reports, and the run database
+   default to `/tmp/stackimport-import-runs/<run-id>/`. Use `--run-root` only
+   when a persistent output location is intentional.
+
+   The scanner skips known non-input directories by default, including `.git`,
+   `import-runs`, `roms`, and `node_modules`. Add more directory basenames with
+   repeated `--ignore-dir <name>` options, or use `--no-default-ignore-dirs`
+   when investigating the scanner itself.
+
 2. For focused analysis, prefer a small input subset before running the full
    corpus.
-3. Review the generated run directory under `import-runs/`.
+3. Review the generated run directory under `/tmp/stackimport-import-runs/`.
 4. Inspect report tables in the run SQLite database, captured logs, output
    packages, and aggregate stats.
 5. Identify whether failures come from extraction, file classification, parser

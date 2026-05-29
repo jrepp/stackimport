@@ -157,6 +157,19 @@ struct CResourceSummary
 	std::vector<CResourceOutputArtifact> outputArtifacts;
 };
 
+struct CScriptSummary
+{
+	std::string	ownerKind;
+	int32_t		ownerId;
+	std::string	file;
+	std::string	name;
+	std::string	partType;
+	int32_t		partId;
+	std::string	parentKind;
+	int32_t		parentId;
+	std::string	script;
+};
+
 class CStyleEntry
 {
 public:
@@ -207,6 +220,7 @@ protected:
 	bool	WriteSourceManifest( uint64_t dataForkBytes, const char* streamStatus ) const;
 	bool	LoadResourceFork( const std::string& fpath );
 	bool	WriteJsonIndexes() const;
+	bool	WriteScriptIndex() const;
 	
 #if MAC_CODE
 	bool	LoadBWIcons();
@@ -247,6 +261,7 @@ protected:
 	CBlockMap		mBlockMap;			// Associative map of type/id -> block data mappings for random access to blocks when actually parsing their contents.
 	std::vector<CSourceBlockSummary>	mSourceBlocks;
 	std::vector<CResourceSummary>	mResourceSummaries;
+	std::vector<CScriptSummary>	mScriptSummaries;
 	std::string		mResourceForkStatus;
 	uint64_t		mResourceForkBytes;
 	int				mCurrentProgress;	// Current value for progress output.
@@ -255,6 +270,7 @@ protected:
 	std::vector<CLayerSummary>	mLayerSummaries;
 	std::vector<CPageSummary>	mPageSummaries;
 	std::string		mBasePath;			// Path to package folder, in which we'll put JSON files and graphics'n stuff.
+	std::string		mSourcePath;		// Original stack path.
 	std::string		mFileName;			// Name of the original stack file, w/o the path.
 	std::string		mStyleSheetName;	// Name of CSS file containing our styles table.
 	CFontTable		mFontTable;			// Actual, parsed font ID -> name mappings from FTBL block.

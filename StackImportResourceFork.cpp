@@ -3,7 +3,9 @@
 #include "StackImportResourceTransforms.h"
 #include "StackImportResourceTypes.h"
 
+#include <array>
 #include <cerrno>
+#include <cstring>
 #include <cstdio>
 #include <utility>
 
@@ -114,21 +116,229 @@ bool read_binary_file(const std::string& path, std::vector<uint8_t>& data)
 	return closeStatus == 0;
 }
 
-bool resource_type_is(const rsrcd::ResRef& res, const char* type)
+constexpr uint32_t fourcc(const char (&type)[5])
 {
-	return res.type.size == 4 && res.type.data != nullptr && std::memcmp(res.type.data, type, 4) == 0;
+	return (static_cast<uint32_t>(static_cast<unsigned char>(type[0])) << 24u) |
+		(static_cast<uint32_t>(static_cast<unsigned char>(type[1])) << 16u) |
+		(static_cast<uint32_t>(static_cast<unsigned char>(type[2])) << 8u) |
+		static_cast<uint32_t>(static_cast<unsigned char>(type[3]));
 }
 
-bool resource_type_is_indexed_icon(const rsrcd::ResRef& res)
+uint32_t resource_type_code(const rsrcd::ResRef& res)
 {
-	return resource_type_is(res, "icl4") || resource_type_is(res, "icl8") ||
-		resource_type_is(res, "icm4") || resource_type_is(res, "icm8") ||
-		resource_type_is(res, "ics4") || resource_type_is(res, "ics8");
+	return res.type.size == 4 && res.type.data != nullptr ? rsrcd::read_u32be(res.type.data) : 0;
 }
 
-bool resource_type_is_monochrome_icon_list(const rsrcd::ResRef& res)
+template<size_t N>
+bool contains_fourcc(const std::array<uint32_t, N>& values, uint32_t type)
 {
-	return resource_type_is(res, "icm#") || resource_type_is(res, "ics#");
+	for(uint32_t value : values)
+	{
+		if(value == type)
+			return true;
+	}
+	return false;
+}
+
+constexpr std::array<uint32_t, 6> kIndexedIconTypes = {
+	fourcc("icl4"),
+	fourcc("icl8"),
+	fourcc("icm4"),
+	fourcc("icm8"),
+	fourcc("ics4"),
+	fourcc("ics8"),
+};
+
+constexpr std::array<uint32_t, 2> kMonochromeIconListTypes = {
+	fourcc("icm#"),
+	fourcc("ics#"),
+};
+
+constexpr std::array<uint32_t, 10> kDisassemblyTypes = {
+	fourcc("XCMD"),
+	fourcc("XFCN"),
+	fourcc("xcmd"),
+	fourcc("xfcn"),
+	fourcc("CODE"),
+	fourcc("DRVR"),
+	fourcc("dcmp"),
+	fourcc("PACK"),
+	fourcc("boot"),
+	fourcc("ptch"),
+};
+
+bool resource_type_is_indexed_icon(uint32_t type)
+{
+	return contains_fourcc(kIndexedIconTypes, type);
+}
+
+bool resource_type_is_monochrome_icon_list(uint32_t type)
+{
+	return contains_fourcc(kMonochromeIconListTypes, type);
+}
+
+bool resource_type_is_disassembly(uint32_t type)
+{
+	return contains_fourcc(kDisassemblyTypes, type);
+}
+
+bool resource_type_is_text(uint32_t type)
+{
+	return type == fourcc("STR ") || type == fourcc("TEXT");
+}
+
+enum class ResourceErrorKind : uint8_t {
+	Parse,
+	ConvertSound,
+	ConvertPict,
+	Disassemble,
+	Other,
+};
+
+constexpr std::array<uint32_t, 49> kParseErrorTypes = {
+	fourcc("PLTE"),
+	fourcc("HCbg"),
+	fourcc("HCcd"),
+	fourcc("vers"),
+	fourcc("cfrg"),
+	fourcc("clut"),
+	fourcc("CTBL"),
+	fourcc("actb"),
+	fourcc("cctb"),
+	fourcc("dctb"),
+	fourcc("fctb"),
+	fourcc("wctb"),
+	fourcc("pltt"),
+	fourcc("ppat"),
+	fourcc("ppt#"),
+	fourcc("cicn"),
+	fourcc("crsr"),
+	fourcc("SIZE"),
+	fourcc("finf"),
+	fourcc("CNTL"),
+	fourcc("DLOG"),
+	fourcc("WIND"),
+	fourcc("MENU"),
+	fourcc("DITL"),
+	fourcc("MBAR"),
+	fourcc("ALRT"),
+	fourcc("FREF"),
+	fourcc("BNDL"),
+	fourcc("ROv#"),
+	fourcc("RSSC"),
+	fourcc("TxSt"),
+	fourcc("styl"),
+	fourcc("KCHR"),
+	fourcc("RECT"),
+	fourcc("TOOL"),
+	fourcc("PICK"),
+	fourcc("KBDN"),
+	fourcc("PAPA"),
+	fourcc("LAYO"),
+	fourcc("FONT"),
+	fourcc("NFNT"),
+	fourcc("FOND"),
+	fourcc("decl"),
+	fourcc("STR "),
+	fourcc("STR#"),
+	fourcc("TwCS"),
+	fourcc("CODE"),
+	fourcc("DRVR"),
+	fourcc("dcmp"),
+};
+
+ResourceErrorKind resource_error_kind(uint32_t type)
+{
+	if(contains_fourcc(kParseErrorTypes, type) || type == fourcc("TEXT"))
+		return ResourceErrorKind::Parse;
+	if(type == fourcc("snd "))
+		return ResourceErrorKind::ConvertSound;
+	if(type == fourcc("PICT"))
+		return ResourceErrorKind::ConvertPict;
+	if(resource_type_is_disassembly(type))
+		return ResourceErrorKind::Disassemble;
+	return ResourceErrorKind::Other;
+}
+
+struct ResourceJsonName {
+	uint32_t type;
+	const char* stem;
+};
+
+constexpr std::array<ResourceJsonName, 49> kJsonResourceNames = {{
+	{fourcc("PLTE"), "PLTE"},
+	{fourcc("HCbg"), "HCbg"},
+	{fourcc("HCcd"), "HCcd"},
+	{fourcc("STR#"), "STR#"},
+	{fourcc("TwCS"), "TwCS"},
+	{fourcc("CURS"), "CURS"},
+	{fourcc("vers"), "vers"},
+	{fourcc("clut"), "clut"},
+	{fourcc("CTBL"), "CTBL"},
+	{fourcc("actb"), "actb"},
+	{fourcc("cctb"), "cctb"},
+	{fourcc("dctb"), "dctb"},
+	{fourcc("fctb"), "fctb"},
+	{fourcc("wctb"), "wctb"},
+	{fourcc("pltt"), "pltt"},
+	{fourcc("ppat"), "ppat"},
+	{fourcc("ppt#"), "ppt#"},
+	{fourcc("cicn"), "cicn"},
+	{fourcc("crsr"), "crsr"},
+	{fourcc("SIZE"), "SIZE"},
+	{fourcc("finf"), "finf"},
+	{fourcc("CNTL"), "CNTL"},
+	{fourcc("DLOG"), "DLOG"},
+	{fourcc("WIND"), "WIND"},
+	{fourcc("MENU"), "MENU"},
+	{fourcc("DITL"), "DITL"},
+	{fourcc("cfrg"), "cfrg"},
+	{fourcc("MBAR"), "MBAR"},
+	{fourcc("ALRT"), "ALRT"},
+	{fourcc("FREF"), "FREF"},
+	{fourcc("BNDL"), "BNDL"},
+	{fourcc("ROv#"), "ROv#"},
+	{fourcc("RSSC"), "RSSC"},
+	{fourcc("TxSt"), "TxSt"},
+	{fourcc("styl"), "styl"},
+	{fourcc("KCHR"), "KCHR"},
+	{fourcc("RECT"), "RECT"},
+	{fourcc("TOOL"), "TOOL"},
+	{fourcc("PICK"), "PICK"},
+	{fourcc("KBDN"), "KBDN"},
+	{fourcc("PAPA"), "PAPA"},
+	{fourcc("LAYO"), "LAYO"},
+	{fourcc("CODE"), "CODE"},
+	{fourcc("DRVR"), "DRVR"},
+	{fourcc("dcmp"), "dcmp"},
+	{fourcc("FONT"), "FONT"},
+	{fourcc("NFNT"), "NFNT"},
+	{fourcc("FOND"), "FOND"},
+	{fourcc("decl"), "decl"},
+}};
+
+const char* json_name_stem(uint32_t type)
+{
+	for(const ResourceJsonName& name : kJsonResourceNames)
+	{
+		if(name.type == type)
+			return name.stem;
+	}
+	return nullptr;
+}
+
+void format_fourcc_file_name(char* dst, size_t dstSize, uint32_t type, int32_t id, const char* suffix)
+{
+	snprintf(
+		dst,
+		dstSize,
+		"%c%c%c%c_%d%s",
+		static_cast<char>((type >> 24u) & 0xFFu),
+		static_cast<char>((type >> 16u) & 0xFFu),
+		static_cast<char>((type >> 8u) & 0xFFu),
+		static_cast<char>(type & 0xFFu),
+		id,
+		suffix);
 }
 
 class PackageBuiltinTransformOutput final : public stackimport::IResourceOutput {
@@ -178,44 +388,25 @@ public:
 	auto on_resource_error(const stackimport::ResourceRef& resource, const char* msg) -> bool override
 	{
 		(void)resource;
-		(void)msg;
-		if(resource_type_is(res_, "PLTE") || resource_type_is(res_, "HCbg") || resource_type_is(res_, "HCcd") ||
-			resource_type_is(res_, "vers") || resource_type_is(res_, "cfrg") || resource_type_is(res_, "clut") || resource_type_is(res_, "CTBL") ||
-			resource_type_is(res_, "actb") || resource_type_is(res_, "cctb") || resource_type_is(res_, "dctb") ||
-			resource_type_is(res_, "fctb") || resource_type_is(res_, "wctb") || resource_type_is(res_, "pltt") ||
-			resource_type_is(res_, "ppat") || resource_type_is(res_, "ppt#") || resource_type_is(res_, "cicn") ||
-			resource_type_is(res_, "crsr") ||
-			resource_type_is(res_, "SIZE") || resource_type_is(res_, "finf") ||
-			resource_type_is(res_, "CNTL") || resource_type_is(res_, "DLOG") ||
-			resource_type_is(res_, "WIND") || resource_type_is(res_, "MENU") ||
-			resource_type_is(res_, "DITL") || resource_type_is(res_, "MBAR") ||
-			resource_type_is(res_, "ALRT") || resource_type_is(res_, "FREF") ||
-			resource_type_is(res_, "BNDL") || resource_type_is(res_, "ROv#") ||
-			resource_type_is(res_, "RSSC") || resource_type_is(res_, "TxSt") ||
-			resource_type_is(res_, "styl") || resource_type_is(res_, "KCHR") ||
-			resource_type_is(res_, "RECT") || resource_type_is(res_, "TOOL") ||
-			resource_type_is(res_, "PICK") || resource_type_is(res_, "KBDN") ||
-			resource_type_is(res_, "PAPA") || resource_type_is(res_, "LAYO") ||
-			resource_type_is(res_, "CODE") || resource_type_is(res_, "DRVR") ||
-			resource_type_is(res_, "dcmp"))
-			summary_.status = "parse_failed";
-		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "STR#") || resource_type_is(res_, "TEXT"))
-			summary_.status = "parse_failed";
-		else if(resource_type_is(res_, "snd "))
+		switch(resource_error_kind(resource_type_code(res_)))
 		{
-			summary_.status = "convert_failed";
-			stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res_.id, msg);
-		}
-		else if(resource_type_is(res_, "PICT"))
-		{
-			summary_.status = "convert_failed";
-			stackimport_emit_diagnosticf("Warning: Couldn't render PICT #%d: %s.\n", res_.id, msg);
-		}
-		else if(resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
-			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn"))
-		{
-			summary_.status = "disassembly_failed";
-			stackimport_emit_diagnosticf("Warning: Couldn't disassemble '%s' #%d: %s.\n", summary_.type.c_str(), summary_.id, msg);
+			case ResourceErrorKind::Parse:
+				summary_.status = "parse_failed";
+				break;
+			case ResourceErrorKind::ConvertSound:
+				summary_.status = "convert_failed";
+				stackimport_emit_diagnosticf("Warning: Couldn't convert snd #%d: %s.\n", res_.id, msg);
+				break;
+			case ResourceErrorKind::ConvertPict:
+				summary_.status = "convert_failed";
+				stackimport_emit_diagnosticf("Warning: Couldn't render PICT #%d: %s.\n", res_.id, msg);
+				break;
+			case ResourceErrorKind::Disassemble:
+				summary_.status = "disassembly_failed";
+				stackimport_emit_diagnosticf("Warning: Couldn't disassemble '%s' #%d: %s.\n", summary_.type.c_str(), summary_.id, msg);
+				break;
+			case ResourceErrorKind::Other:
+				break;
 		}
 		return true;
 	}
@@ -275,7 +466,8 @@ private:
 			return;
 
 		char fname[64];
-		if(resource_type_is(res_, "ICON"))
+		const uint32_t type = resource_type_code(res_);
+		if(type == fourcc("ICON"))
 		{
 			snprintf(fname, sizeof(fname), "ICON_%d.png", res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
@@ -290,7 +482,7 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "ICN#"))
+		if(type == fourcc("ICN#"))
 		{
 			snprintf(fname, sizeof(fname), "ICN#_%d.png", res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
@@ -305,7 +497,7 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "CURS"))
+		if(type == fourcc("CURS"))
 		{
 			snprintf(fname, sizeof(fname), "CURS_%d.png", res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
@@ -320,18 +512,21 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "PAT#"))
+		if(type == fourcc("PAT#"))
 		{
 			snprintf(fname, sizeof(fname), "PAT#_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
+				summary_.status = "exported";
 				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 			}
+			else
+				summary_.status = "export_failed";
 			return;
 		}
 
-		if(resource_type_is(res_, "PAT "))
+		if(type == fourcc("PAT "))
 		{
 			snprintf(fname, sizeof(fname), "PAT_%d.png", res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
@@ -346,23 +541,26 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "SICN"))
+		if(type == fourcc("SICN"))
 		{
 			snprintf(fname, sizeof(fname), "SICN_%d_%02u.png", res_.id, static_cast<unsigned>(payload.variant_index));
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
+				summary_.status = "exported";
 				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 			}
+			else
+				summary_.status = "export_failed";
 			return;
 		}
 
-		if(resource_type_is(res_, "ppat") || resource_type_is(res_, "ppt#"))
+		if(type == fourcc("ppat") || type == fourcc("ppt#"))
 		{
 			const char* suffixes[] = {"color", "color_tiled", "bitmap", "bitmap_tiled"};
 			const uint32_t pattern_index = payload.variant_index / 4u;
 			const uint32_t image_kind = payload.variant_index % 4u;
-			if(resource_type_is(res_, "ppat"))
+			if(type == fourcc("ppat"))
 				snprintf(fname, sizeof(fname), "ppat_%d_%s.png", res_.id, suffixes[image_kind]);
 			else
 				snprintf(fname, sizeof(fname), "ppt#_%d_%02u_%s.png", res_.id, static_cast<unsigned>(pattern_index), suffixes[image_kind]);
@@ -377,7 +575,7 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "cicn"))
+		if(type == fourcc("cicn"))
 		{
 			snprintf(fname, sizeof(fname), "cicn_%d.png", res_.id);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
@@ -392,7 +590,7 @@ private:
 			return;
 		}
 
-		if(resource_type_is(res_, "crsr"))
+		if(type == fourcc("crsr"))
 		{
 			if(payload.variant_index == 0)
 				snprintf(fname, sizeof(fname), "crsr_%d.png", res_.id);
@@ -409,16 +607,12 @@ private:
 			return;
 		}
 
-		if(resource_type_is_indexed_icon(res_))
+		if(resource_type_is_indexed_icon(type))
 		{
-			snprintf(fname, sizeof(fname), "%c%c%c%c_%d.png",
-				static_cast<char>(res_.type.data[0]),
-				static_cast<char>(res_.type.data[1]),
-				static_cast<char>(res_.type.data[2]),
-				static_cast<char>(res_.type.data[3]),
-				res_.id);
+			format_fourcc_file_name(fname, sizeof(fname), type, res_.id, ".png");
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
+				summary_.status = "exported";
 				record_output_artifact(fname, payload, true);
 				exportedCount_++;
 			}
@@ -427,19 +621,31 @@ private:
 			return;
 		}
 
-		if(resource_type_is_monochrome_icon_list(res_))
+		if(resource_type_is_monochrome_icon_list(type))
 		{
-			snprintf(fname, sizeof(fname), "%c%c%c%c_%d_%02u.png",
-				static_cast<char>(res_.type.data[0]),
-				static_cast<char>(res_.type.data[1]),
-				static_cast<char>(res_.type.data[2]),
-				static_cast<char>(res_.type.data[3]),
-				res_.id,
-				static_cast<unsigned>(payload.variant_index));
+			char suffix[16];
+			snprintf(suffix, sizeof(suffix), "_%02u.png", static_cast<unsigned>(payload.variant_index));
+			format_fourcc_file_name(fname, sizeof(fname), type, res_.id, suffix);
 			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
 			{
+				summary_.status = "exported";
 				record_output_artifact(fname, payload, true);
 				exportedCount_++;
+			}
+			else
+				summary_.status = "export_failed";
+			return;
+		}
+
+		if(type == fourcc("FONT") || type == fourcc("NFNT"))
+		{
+			format_fourcc_file_name(fname, sizeof(fname), type, res_.id, ".png");
+			if(stackimport::WritePngFile(output_path(basePath_, fname), static_cast<int>(payload.width), static_cast<int>(payload.height), 4, payload.data.data, static_cast<int>(payload.row_bytes)))
+			{
+				summary_.status = "exported";
+				record_output_artifact(fname, payload, true);
+				exportedCount_++;
+				stackimport_emit_infof("Status: Wrote %s #%d bitmap strike as PNG.\n", summary_.type.c_str(), res_.id);
 			}
 			else
 				summary_.status = "export_failed";
@@ -452,7 +658,8 @@ private:
 		if(payload.data.data == nullptr)
 			return;
 
-		if(resource_type_is(res_, "PICT") && payload.media_type != nullptr && std::strcmp(payload.media_type, "image/png") == 0)
+		const uint32_t type = resource_type_code(res_);
+		if(type == fourcc("PICT") && payload.media_type != nullptr && std::strcmp(payload.media_type, "image/png") == 0)
 		{
 			char fname[64];
 			snprintf(fname, sizeof(fname), "PICT_%d.png", res_.id);
@@ -468,7 +675,7 @@ private:
 			return;
 		}
 
-		if(!resource_type_is(res_, "snd "))
+		if(type != fourcc("snd "))
 			return;
 
 		const std::string soundsDir = output_path(basePath_, "sounds");
@@ -494,98 +701,10 @@ private:
 		if(payload.data.data == nullptr)
 			return;
 		char fname[64];
-		if(resource_type_is(res_, "PLTE"))
-			snprintf(fname, sizeof(fname), "PLTE_%d.json", res_.id);
-		else if(resource_type_is(res_, "HCbg"))
-			snprintf(fname, sizeof(fname), "HCbg_%d.json", res_.id);
-		else if(resource_type_is(res_, "HCcd"))
-			snprintf(fname, sizeof(fname), "HCcd_%d.json", res_.id);
-		else if(resource_type_is(res_, "STR#"))
-			snprintf(fname, sizeof(fname), "STR#_%d.json", res_.id);
-		else if(resource_type_is(res_, "TwCS"))
-			snprintf(fname, sizeof(fname), "TwCS_%d.json", res_.id);
-		else if(resource_type_is(res_, "CURS"))
-			snprintf(fname, sizeof(fname), "CURS_%d.json", res_.id);
-		else if(resource_type_is(res_, "vers"))
-			snprintf(fname, sizeof(fname), "vers_%d.json", res_.id);
-		else if(resource_type_is(res_, "clut"))
-			snprintf(fname, sizeof(fname), "clut_%d.json", res_.id);
-		else if(resource_type_is(res_, "CTBL"))
-			snprintf(fname, sizeof(fname), "CTBL_%d.json", res_.id);
-		else if(resource_type_is(res_, "actb"))
-			snprintf(fname, sizeof(fname), "actb_%d.json", res_.id);
-		else if(resource_type_is(res_, "cctb"))
-			snprintf(fname, sizeof(fname), "cctb_%d.json", res_.id);
-		else if(resource_type_is(res_, "dctb"))
-			snprintf(fname, sizeof(fname), "dctb_%d.json", res_.id);
-		else if(resource_type_is(res_, "fctb"))
-			snprintf(fname, sizeof(fname), "fctb_%d.json", res_.id);
-		else if(resource_type_is(res_, "wctb"))
-			snprintf(fname, sizeof(fname), "wctb_%d.json", res_.id);
-		else if(resource_type_is(res_, "pltt"))
-			snprintf(fname, sizeof(fname), "pltt_%d.json", res_.id);
-		else if(resource_type_is(res_, "ppat"))
-			snprintf(fname, sizeof(fname), "ppat_%d.json", res_.id);
-		else if(resource_type_is(res_, "ppt#"))
-			snprintf(fname, sizeof(fname), "ppt#_%d.json", res_.id);
-		else if(resource_type_is(res_, "cicn"))
-			snprintf(fname, sizeof(fname), "cicn_%d.json", res_.id);
-		else if(resource_type_is(res_, "crsr"))
-			snprintf(fname, sizeof(fname), "crsr_%d.json", res_.id);
-		else if(resource_type_is(res_, "SIZE"))
-			snprintf(fname, sizeof(fname), "SIZE_%d.json", res_.id);
-		else if(resource_type_is(res_, "finf"))
-			snprintf(fname, sizeof(fname), "finf_%d.json", res_.id);
-		else if(resource_type_is(res_, "CNTL"))
-			snprintf(fname, sizeof(fname), "CNTL_%d.json", res_.id);
-		else if(resource_type_is(res_, "DLOG"))
-			snprintf(fname, sizeof(fname), "DLOG_%d.json", res_.id);
-		else if(resource_type_is(res_, "WIND"))
-			snprintf(fname, sizeof(fname), "WIND_%d.json", res_.id);
-		else if(resource_type_is(res_, "MENU"))
-			snprintf(fname, sizeof(fname), "MENU_%d.json", res_.id);
-		else if(resource_type_is(res_, "DITL"))
-			snprintf(fname, sizeof(fname), "DITL_%d.json", res_.id);
-		else if(resource_type_is(res_, "cfrg"))
-			snprintf(fname, sizeof(fname), "cfrg_%d.json", res_.id);
-		else if(resource_type_is(res_, "MBAR"))
-			snprintf(fname, sizeof(fname), "MBAR_%d.json", res_.id);
-		else if(resource_type_is(res_, "ALRT"))
-			snprintf(fname, sizeof(fname), "ALRT_%d.json", res_.id);
-		else if(resource_type_is(res_, "FREF"))
-			snprintf(fname, sizeof(fname), "FREF_%d.json", res_.id);
-		else if(resource_type_is(res_, "BNDL"))
-			snprintf(fname, sizeof(fname), "BNDL_%d.json", res_.id);
-		else if(resource_type_is(res_, "ROv#"))
-			snprintf(fname, sizeof(fname), "ROv#_%d.json", res_.id);
-		else if(resource_type_is(res_, "RSSC"))
-			snprintf(fname, sizeof(fname), "RSSC_%d.json", res_.id);
-		else if(resource_type_is(res_, "TxSt"))
-			snprintf(fname, sizeof(fname), "TxSt_%d.json", res_.id);
-		else if(resource_type_is(res_, "styl"))
-			snprintf(fname, sizeof(fname), "styl_%d.json", res_.id);
-		else if(resource_type_is(res_, "KCHR"))
-			snprintf(fname, sizeof(fname), "KCHR_%d.json", res_.id);
-		else if(resource_type_is(res_, "RECT"))
-			snprintf(fname, sizeof(fname), "RECT_%d.json", res_.id);
-		else if(resource_type_is(res_, "TOOL"))
-			snprintf(fname, sizeof(fname), "TOOL_%d.json", res_.id);
-		else if(resource_type_is(res_, "PICK"))
-			snprintf(fname, sizeof(fname), "PICK_%d.json", res_.id);
-		else if(resource_type_is(res_, "KBDN"))
-			snprintf(fname, sizeof(fname), "KBDN_%d.json", res_.id);
-		else if(resource_type_is(res_, "PAPA"))
-			snprintf(fname, sizeof(fname), "PAPA_%d.json", res_.id);
-		else if(resource_type_is(res_, "LAYO"))
-			snprintf(fname, sizeof(fname), "LAYO_%d.json", res_.id);
-		else if(resource_type_is(res_, "CODE"))
-			snprintf(fname, sizeof(fname), "CODE_%d.json", res_.id);
-		else if(resource_type_is(res_, "DRVR"))
-			snprintf(fname, sizeof(fname), "DRVR_%d.json", res_.id);
-		else if(resource_type_is(res_, "dcmp"))
-			snprintf(fname, sizeof(fname), "dcmp_%d.json", res_.id);
-		else
+		const char* stem = json_name_stem(resource_type_code(res_));
+		if(stem == nullptr)
 			return;
+		snprintf(fname, sizeof(fname), "%s_%d.json", stem, res_.id);
 
 		if(write_json_file(output_path(basePath_, fname), reinterpret_cast<const char*>(payload.data.data), payload.data.size))
 		{
@@ -604,18 +723,15 @@ private:
 			return;
 		const std::string text(reinterpret_cast<const char*>(payload.data.data), payload.data.size);
 		std::string relativePath;
-		const bool isDisassembly =
-			resource_type_is(res_, "XCMD") || resource_type_is(res_, "XFCN") ||
-			resource_type_is(res_, "xcmd") || resource_type_is(res_, "xfcn") ||
-			resource_type_is(res_, "CODE") || resource_type_is(res_, "DRVR") ||
-			resource_type_is(res_, "dcmp");
+		const uint32_t type = resource_type_code(res_);
+		const bool isDisassembly = resource_type_is_disassembly(type);
 		if(isDisassembly)
 		{
 			const std::string architecture = summary_.architecture.empty() ? "mac68k" : summary_.architecture;
 			const std::string typeAndArchitecture = summary_.type + "_" + architecture;
 			relativePath = std::string("resource-disassembly/") + sanitized_resource_file_name(stackFileName_, typeAndArchitecture, summary_.id, summary_.name, ".s");
 		}
-		else if(resource_type_is(res_, "STR ") || resource_type_is(res_, "TEXT"))
+		else if(resource_type_is_text(type))
 		{
 			const std::string textDir = output_path(basePath_, "resource-text");
 			if(stackimport_internal_make_directory(textDir.c_str()) != 0 && errno != EEXIST)
@@ -735,191 +851,14 @@ bool stackimport_load_resource_fork(
 		if(!resourceStreamingStopped && !stackimport::emit_resource_payload(resourceOutput, stackimport::make_native_resource_payload(resourceRef, res.data)))
 			resourceStreamingStopped = true;
 
-		const bool is68K = std::memcmp(res.type.data, "XCMD", 4) == 0 || std::memcmp(res.type.data, "XFCN", 4) == 0;
-		const bool isPPC = std::memcmp(res.type.data, "xcmd", 4) == 0 || std::memcmp(res.type.data, "xfcn", 4) == 0;
-
-		if(is68K)
-		{
+		if(summary.typeCode == fourcc("XCMD") || summary.typeCode == fourcc("XFCN"))
 			summary.architecture = "mac68k";
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(isPPC)
-		{
+		else if(summary.typeCode == fourcc("xcmd") || summary.typeCode == fourcc("xfcn"))
 			summary.architecture = "macppc";
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "ICON", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "ICN#", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "CURS", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "PAT#", 4) == 0)
-		{
-			size_t patCount = rsrcd::patlist::count(res.data);
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			int exported = transformOutput.exported_count();
-			if(exported > 0)
-			{
-				summary.status = "exported";
-				stackimport_emit_infof("Status: Wrote %d/%zu patterns from PAT# #%d as PNG.\n", exported, patCount, res.id);
-			}
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "PAT ", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "SICN", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			int exported = transformOutput.exported_count();
-			if(exported > 0)
-			{
-				summary.status = "exported";
-				stackimport_emit_infof("Status: Wrote %d small icons from SICN #%d as PNG.\n", exported, res.id);
-			}
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(resource_type_is_indexed_icon(res))
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			if(transformOutput.exported_count() > 0)
-				summary.status = "exported";
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(resource_type_is_monochrome_icon_list(res))
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			if(transformOutput.exported_count() > 0)
-				summary.status = "exported";
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "PICT", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "snd ", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "PLTE", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "HCbg", 4) == 0 || std::memcmp(res.type.data, "HCcd", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "STR ", 4) == 0 || std::memcmp(res.type.data, "STR#", 4) == 0 ||
-			std::memcmp(res.type.data, "TEXT", 4) == 0 || std::memcmp(res.type.data, "TwCS", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "vers", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "cfrg", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "clut", 4) == 0 || std::memcmp(res.type.data, "CTBL", 4) == 0 ||
-			std::memcmp(res.type.data, "actb", 4) == 0 || std::memcmp(res.type.data, "cctb", 4) == 0 ||
-			std::memcmp(res.type.data, "dctb", 4) == 0 || std::memcmp(res.type.data, "fctb", 4) == 0 ||
-			std::memcmp(res.type.data, "wctb", 4) == 0 || std::memcmp(res.type.data, "pltt", 4) == 0 ||
-			std::memcmp(res.type.data, "ppat", 4) == 0 || std::memcmp(res.type.data, "ppt#", 4) == 0 ||
-			std::memcmp(res.type.data, "cicn", 4) == 0 || std::memcmp(res.type.data, "crsr", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "SIZE", 4) == 0 || std::memcmp(res.type.data, "finf", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else if(std::memcmp(res.type.data, "CNTL", 4) == 0 || std::memcmp(res.type.data, "DLOG", 4) == 0 ||
-			std::memcmp(res.type.data, "WIND", 4) == 0 || std::memcmp(res.type.data, "MENU", 4) == 0 ||
-			std::memcmp(res.type.data, "DITL", 4) == 0 || std::memcmp(res.type.data, "MBAR", 4) == 0 ||
-			std::memcmp(res.type.data, "ALRT", 4) == 0 || std::memcmp(res.type.data, "FREF", 4) == 0 ||
-			std::memcmp(res.type.data, "BNDL", 4) == 0 || std::memcmp(res.type.data, "ROv#", 4) == 0 ||
-			std::memcmp(res.type.data, "RSSC", 4) == 0 || std::memcmp(res.type.data, "TxSt", 4) == 0 ||
-			std::memcmp(res.type.data, "styl", 4) == 0 || std::memcmp(res.type.data, "KCHR", 4) == 0 ||
-			std::memcmp(res.type.data, "RECT", 4) == 0 || std::memcmp(res.type.data, "TOOL", 4) == 0 ||
-			std::memcmp(res.type.data, "PICK", 4) == 0 || std::memcmp(res.type.data, "KBDN", 4) == 0 ||
-			std::memcmp(res.type.data, "PAPA", 4) == 0 || std::memcmp(res.type.data, "LAYO", 4) == 0 ||
-			std::memcmp(res.type.data, "CODE", 4) == 0 || std::memcmp(res.type.data, "DRVR", 4) == 0 ||
-			std::memcmp(res.type.data, "dcmp", 4) == 0)
-		{
-			PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
-			stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
-			resourceSummaries.push_back(summary);
-			continue;
-		}
-		else
-		{
-			resourceSummaries.push_back(summary);
-			continue;
-		}
 
+		PackageBuiltinTransformOutput transformOutput(res, basePath, stackFileName, resourceOutput, summary, resourceStreamingStopped);
+		stackimport::emit_builtin_resource_transforms(res, resourceRef, transformOutput);
+		resourceSummaries.push_back(summary);
 	}
 
 	resourceForkStatus = resourceForkHadInvalidResources ? "partial" : "ok";

@@ -1244,6 +1244,248 @@ auto emit_dcmp_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+auto font_depth_name(uint16_t type_flags) -> const char*
+{
+	switch(type_flags & 0x000Cu)
+	{
+		case 0x0000u:
+			return "1";
+		case 0x0004u:
+			return "2";
+		case 0x0008u:
+			return "4";
+		case 0x000Cu:
+			return "8";
+	}
+	return "unknown";
+}
+
+auto emit_font_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		resource_type_is(resource, "NFNT") ? "parsed NFNT bitmap font metadata" : "parsed FONT bitmap font metadata");
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		resource_type_is(resource, "NFNT") ? "decoded NFNT 1-bit bitmap strike" : "decoded FONT 1-bit bitmap strike");
+	const bool wants_json = output.wants_resource_payload(descriptor);
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	if(!wants_json && !wants_image)
+		return true;
+	if(resource.data.size < 26)
+		return output.on_resource_error(ref, "FONT/NFNT resource is shorter than the font header");
+
+	const uint16_t type_flags = rsrcd::read_u16be(resource.data.data + 0);
+	const uint16_t first_char = rsrcd::read_u16be(resource.data.data + 2);
+	const uint16_t last_char = rsrcd::read_u16be(resource.data.data + 4);
+	const uint16_t max_width = rsrcd::read_u16be(resource.data.data + 6);
+	const int16_t max_kerning = rsrcd::read_i16be(resource.data.data + 8);
+	const int16_t descent_or_width_high = rsrcd::read_i16be(resource.data.data + 10);
+	const uint16_t rect_width = rsrcd::read_u16be(resource.data.data + 12);
+	const uint16_t rect_height = rsrcd::read_u16be(resource.data.data + 14);
+	const uint16_t width_offset_table_offset = rsrcd::read_u16be(resource.data.data + 16);
+	const int16_t max_ascent = rsrcd::read_i16be(resource.data.data + 18);
+	const int16_t max_descent = rsrcd::read_i16be(resource.data.data + 20);
+	const int16_t leading = rsrcd::read_i16be(resource.data.data + 22);
+	const uint16_t bitmap_row_width_words = rsrcd::read_u16be(resource.data.data + 24);
+	const uint64_t bitmap_bytes = static_cast<uint64_t>(bitmap_row_width_words) * 2u * static_cast<uint64_t>(rect_height);
+	const uint64_t bitmap_end = 26u + bitmap_bytes;
+	const uint32_t bitmap_width = static_cast<uint32_t>(bitmap_row_width_words) * 16u;
+	const bool bitmap_fits = bitmap_end <= resource.data.size;
+	if(wants_image && (type_flags & 0x000Cu) == 0 && bitmap_fits && bitmap_width > 0 && rect_height > 0)
+	{
+		const uint64_t pixel_count64 = static_cast<uint64_t>(bitmap_width) * static_cast<uint64_t>(rect_height);
+		if(pixel_count64 <= 1048576u)
+		{
+			std::vector<uint8_t> rgba(static_cast<size_t>(pixel_count64) * 4u);
+			const uint8_t* bitmap = resource.data.data + 26;
+			const size_t row_bytes = static_cast<size_t>(bitmap_row_width_words) * 2u;
+			for(uint32_t y = 0; y < rect_height; ++y)
+			{
+				for(uint32_t x = 0; x < bitmap_width; ++x)
+				{
+					const uint8_t byte = bitmap[static_cast<size_t>(y) * row_bytes + x / 8u];
+					const bool set = ((byte >> (7u - (x % 8u))) & 1u) != 0;
+					const size_t pixel = (static_cast<size_t>(y) * bitmap_width + x) * 4u;
+					const uint8_t value = set ? 0u : 255u;
+					rgba[pixel + 0] = value;
+					rgba[pixel + 1] = value;
+					rgba[pixel + 2] = value;
+					rgba[pixel + 3] = 255u;
+				}
+			}
+			image_descriptor.width = bitmap_width;
+			image_descriptor.height = rect_height;
+			image_descriptor.row_bytes = bitmap_width * 4u;
+			image_descriptor.data = rsrcd::Bytes{rgba.data(), rgba.size()};
+			if(!output.on_resource_payload(image_descriptor))
+				return false;
+		}
+	}
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("typeFlags", type_flags, allocator);
+	doc.AddMember("bitDepth", json_string(font_depth_name(type_flags), allocator), allocator);
+	doc.AddMember("containsImageHeightTable", (type_flags & 0x0001u) != 0, allocator);
+	doc.AddMember("containsGlyphWidthTable", (type_flags & 0x0002u) != 0, allocator);
+	doc.AddMember("hasColorTable", (type_flags & 0x0080u) != 0, allocator);
+	doc.AddMember("isDynamic", (type_flags & 0x0010u) != 0, allocator);
+	doc.AddMember("hasNonBlackColors", (type_flags & 0x0020u) != 0, allocator);
+	doc.AddMember("fixedWidth", (type_flags & 0x2000u) != 0, allocator);
+	doc.AddMember("cannotExpand", (type_flags & 0x4000u) != 0, allocator);
+	doc.AddMember("firstChar", first_char, allocator);
+	doc.AddMember("lastChar", last_char, allocator);
+	doc.AddMember("glyphCountIncludingMissing", last_char >= first_char ? static_cast<uint32_t>((last_char - first_char) + 2u) : 0u, allocator);
+	doc.AddMember("maxWidth", max_width, allocator);
+	doc.AddMember("maxKerning", max_kerning, allocator);
+	doc.AddMember("descentOrWidthOffsetHighWord", descent_or_width_high, allocator);
+	doc.AddMember("rectWidth", rect_width, allocator);
+	doc.AddMember("rectHeight", rect_height, allocator);
+	doc.AddMember("bitmapWidth", bitmap_width, allocator);
+	doc.AddMember("widthOffsetTableOffset", width_offset_table_offset, allocator);
+	doc.AddMember("maxAscent", max_ascent, allocator);
+	doc.AddMember("maxDescent", max_descent, allocator);
+	doc.AddMember("leading", leading, allocator);
+	doc.AddMember("bitmapRowWidthWords", bitmap_row_width_words, allocator);
+	doc.AddMember("bitmapByteCount", bitmap_bytes, allocator);
+	doc.AddMember("bitmapFitsResource", bitmap_fits, allocator);
+
+	if(!wants_json)
+		return true;
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_fond_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed FOND font-family header metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+	if(resource.data.size < 28)
+		return output.on_resource_error(ref, "FOND resource is shorter than the font-family header");
+
+	const uint16_t flags = rsrcd::read_u16be(resource.data.data + 0);
+	const int16_t family_id = rsrcd::read_i16be(resource.data.data + 2);
+	const uint16_t first_char = rsrcd::read_u16be(resource.data.data + 4);
+	const uint16_t last_char = rsrcd::read_u16be(resource.data.data + 6);
+	const int16_t ascent = rsrcd::read_i16be(resource.data.data + 8);
+	const int16_t descent = rsrcd::read_i16be(resource.data.data + 10);
+	const int16_t leading = rsrcd::read_i16be(resource.data.data + 12);
+	const uint16_t max_width = rsrcd::read_u16be(resource.data.data + 14);
+	const uint32_t width_table_offset = rsrcd::read_u32be(resource.data.data + 16);
+	const uint32_t kerning_table_offset = rsrcd::read_u32be(resource.data.data + 20);
+	const uint32_t style_mapping_table_offset = rsrcd::read_u32be(resource.data.data + 24);
+	const bool has_version = resource.data.size >= 30;
+	const uint16_t version = has_version ? rsrcd::read_u16be(resource.data.data + 28) : 0;
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(2048, &base_alloc);
+	JsonDocument doc(&pool, 2048, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("flags", flags, allocator);
+	doc.AddMember("familyId", family_id, allocator);
+	doc.AddMember("firstChar", first_char, allocator);
+	doc.AddMember("lastChar", last_char, allocator);
+	doc.AddMember("ascent", ascent, allocator);
+	doc.AddMember("descent", descent, allocator);
+	doc.AddMember("leading", leading, allocator);
+	doc.AddMember("maxWidth", max_width, allocator);
+	doc.AddMember("widthTableOffset", width_table_offset, allocator);
+	doc.AddMember("kerningTableOffset", kerning_table_offset, allocator);
+	doc.AddMember("styleMappingTableOffset", style_mapping_table_offset, allocator);
+	doc.AddMember("hasVersion", has_version, allocator);
+	if(has_version)
+		doc.AddMember("version", version, allocator);
+	doc.AddMember("widthTableFitsResource", width_table_offset == 0 || width_table_offset < resource.data.size, allocator);
+	doc.AddMember("kerningTableFitsResource", kerning_table_offset == 0 || kerning_table_offset < resource.data.size, allocator);
+	doc.AddMember("styleMappingTableFitsResource", style_mapping_table_offset == 0 || style_mapping_table_offset < resource.data.size, allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_raw_metadata_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const char* description) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		description);
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("decodeStatus", json_string("preserved", allocator), allocator);
+	doc.AddMember("byteLength", static_cast<uint64_t>(resource.data.size), allocator);
+	doc.AddMember("resourceType", json_string(resource_type_string(ref.type.to_uint32()), allocator), allocator);
+	std::string prefix_hex = bytes_to_hex(resource.data.slice(0, resource.data.size < 32 ? resource.data.size : 32));
+	doc.AddMember("prefixHex", json_string(prefix_hex, allocator), allocator);
+
+	JsonStringBuffer json_buffer(&base_alloc);
+	JsonWriter writer(json_buffer, &base_alloc);
+	doc.Accept(writer);
+	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+	return output.on_resource_payload(descriptor);
+}
+
+auto emit_inline_mac68k_resource_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const char* description) -> bool
+{
+	return emit_mac68k_disassembly_payload(
+		resource,
+		ref,
+		output,
+		resource.data,
+		0,
+		output.wants_resource_payload(make_converted_resource_payload(
+			ref,
+			ResourcePayloadFormat::TextUtf8,
+			rsrcd::Bytes{nullptr, 0},
+			"text/x-asm; charset=utf-8",
+			description)),
+		description);
+}
+
 auto emit_addcolor_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -2847,6 +3089,24 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "dcmp"))
 		return emit_dcmp_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "PACK"))
+		return emit_inline_mac68k_resource_transform(resource, ref, output, "Mac 68K package resource disassembly");
+
+	if(resource_type_is(resource, "boot"))
+		return emit_inline_mac68k_resource_transform(resource, ref, output, "Mac 68K boot resource disassembly");
+
+	if(resource_type_is(resource, "ptch"))
+		return emit_inline_mac68k_resource_transform(resource, ref, output, "Mac 68K patch resource disassembly");
+
+	if(resource_type_is(resource, "FONT") || resource_type_is(resource, "NFNT"))
+		return emit_font_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "FOND"))
+		return emit_fond_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "decl"))
+		return emit_raw_metadata_transform(resource, ref, output, "preserved declaration resource metadata");
 
 	if(resource_type_is(resource, "HCbg"))
 		return emit_addcolor_transform(resource, ref, output, "background");

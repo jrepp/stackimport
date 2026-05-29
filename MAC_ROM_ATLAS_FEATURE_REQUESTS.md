@@ -441,6 +441,93 @@ Acceptance:
 
 - Swapping or upgrading a vendor library changes stackimport internals, not atlas file schemas.
 
+## Current ROM Scan Evaluation
+
+Observed run:
+
+```text
+/tmp/stackimport-rom-scan-20260528-115621
+```
+
+Inputs:
+
+| ROM | Size | CRC32 | Exit | Atlas TSVs |
+|---|---:|---|---:|---|
+| `1994-05 - B6909089 - PowerBook 520 520c 540 540c.ROM` | 2097152 | `66CF9F2F` | 0 | written |
+| `1994-09 - 5BF10FD1 - Quadra 660av & 840av.ROM` | 2097152 | `6973886C` | 0 | written |
+| `1995-08 - 4D27039C - Powerbook 190 & 190cs.ROM` | 2097152 | `9C71C823` | 0 | written |
+| `Quadra-900.rom` | 1048576 | `88EA2081` | 0 | written |
+
+What works now:
+
+- ROM mode exits `0` for all four manifest-verified inputs.
+- `analysis.json`, `disassembly.s`, and every expected atlas TSV file are emitted.
+- CRC32 and SHA256 values are uppercase and match the local fixture manifest.
+- `analysis.json.disassembly.mode` reports `m68k`, and `disassembly.s` contains real mnemonics rather than fallback-only `dc.w` rows.
+- `xrefs.tsv`, `traps.tsv`, `functions.tsv`, `labels.tsv`, `strings.tsv`, and region files are populated enough for first-pass atlas browsing.
+- Empty source correlation files still include headers, which is good for stable ingestion.
+
+Important gaps found:
+
+- Output paths are absolute in `analysis.json.input.path`, `analysis.json.identity.path`, `analysis.json.output_path`, and `roms.tsv`. Atlas publication needs repo-relative paths when possible.
+- Atlas output does not include `manifest.yaml`, despite FR-010 requiring it.
+- `resources.tsv` rows are marker-only. Inventory reports `resource_maps=0` and `resource_records=0` for all four ROMs, even though marker scans find `DRVR`, `CODE`, `PACK`, `boot`, `ptch`, `decl`, `MENU`, `DITL`, `ALRT`, `STR `, and `STR#` candidates.
+- No assets directory or converted resource payloads are emitted by this run, so FR-006 remains mostly unimplemented beyond marker discovery.
+- `source-overlays.tsv` and `source-gaps.tsv` contain only headers. `inventory.tsv` reports `source_status=unmatched`, but no machine-readable "what to investigate next" rows are produced.
+- Region classification is still too coarse: every ROM has one high-confidence whole-ROM code region, while `data-regions.tsv` only reports string clusters. This makes the atlas overpaint data/resource/table islands as code.
+- Function candidates are overbroad and under-specified. For example, Quadra 900 emits 7,490 candidates, with sample rows having empty `end` and `instruction_count=0`. These are useful labels, but not yet function boundaries.
+- Trap counts are very high for linear disassembly (`10,186` to `18,356` per 1-2 MB ROM). Without data-island suppression or function context, many are probably false positives from decoding non-code bytes.
+- String extraction is noisy. Early Quadra 900 strings include short low-confidence fragments such as `.T(h` and `"HBa`; atlas users need filtering, scoring, and better defaults for browseable string views.
+- Pointer table detection varies sharply across similar ROMs: 71 entries for PowerBook 520, 2,267 for Quadra 660av/840av, 147 for PowerBook 190, and 122 for Quadra 900. That may be real, but it needs validation evidence and false-positive controls.
+- Some TSV schemas are missing useful join columns. `resources.tsv` currently lacks `rom_id`, unlike most other atlas files, which complicates multi-ROM aggregation.
+- Warnings are empty even when phases are clearly partial, such as marker-only resources, no source root, no parsed resource maps, and whole-ROM linear code classification.
+
+Recommended updates to this feature backlog:
+
+- Keep FR-001 and FR-002 near done but require repo-relative path emission and deterministic re-run comparison before marking complete.
+- Treat FR-003 as partially implemented. Add acceptance that xrefs derived from linear disassembly must carry a region-aware confidence downgrade when the source address is inside probable data.
+- Treat FR-004 as not complete until candidates have non-empty ranges or explicitly report `boundary_status=unknown`. A zero instruction count should not appear for a function candidate unless the row is clearly a pure label.
+- Raise FR-005 implementation priority within P0. Region quality is now the main blocker for trustworthy functions, traps, strings, and xrefs.
+- Treat FR-006 as marker-discovery only. Parsed resource-map support, resource records, and asset extraction are the next concrete improvements.
+- Treat FR-007 as partially implemented. Add minimum browse filters such as length threshold, printable ratio, duplicate handling, and confidence bands.
+- Treat FR-009 as blocked on source overlays and region quality. In the meantime, emit coarse gap rows for high-fan-in candidates, marker-only resources, and major unknown regions instead of empty files.
+- Update FR-010 to require a generated manifest with command, input hashes, stackimport version, atlas schema version, row counts, and validation status.
+- Update FR-011 to require phase status objects, not just `warnings`, so partial analyses are visible even when the CLI exits successfully.
+- Add a TSV schema consistency requirement: every per-ROM atlas TSV should include `rom_id`, stable row IDs, confidence, and source/provenance where applicable.
+
+Coverage pass implemented after this evaluation:
+
+Validated by:
+
+```text
+/tmp/stackimport-rom-gap-coverage-final-20260528-124304
+```
+
+- `manifest.yaml` is now emitted with tool version, ROM identity, row counts, phase status, validation status, and warnings.
+- `analysis.json.phase_status` and `analysis.json.warnings` now make partial phases explicit, including marker-only resources, partial linear xrefs, partial regions, and missing source overlays.
+- `resources.tsv` and `analysis.json.resources` now include `rom_id` for marker and parsed rows.
+- `functions.tsv` and `analysis.json.functions` now report `boundary_status=unknown` and leave `instruction_count` empty/null instead of implying a zero-length function.
+- `source-gaps.tsv` and `analysis.json.source_gaps` now contain high-priority function candidates, marker-only resource candidates, and an analysis-phase gap when no source overlay is available.
+- Whole-ROM disassembly regions are downgraded to `mixed` when scanner data regions exist.
+- Xrefs and traps derived from probable data regions are downgraded in confidence and tagged in their `source` string.
+
+Final validation counts:
+
+| ROM | Source-gap rows | Mixed regions | Low-confidence xrefs |
+|---|---:|---:|---:|
+| `1994-05 - B6909089 - PowerBook 520 520c 540 540c.ROM` | 156 | 2 | 62786 |
+| `1994-09 - 5BF10FD1 - Quadra 660av & 840av.ROM` | 201 | 2 | 125063 |
+| `1995-08 - 4D27039C - Powerbook 190 & 190cs.ROM` | 201 | 1 | 158599 |
+| `Quadra-900.rom` | 146 | 2 | 36945 |
+
+Remaining deep-analysis work:
+
+- Parse real ROM-resident resource maps in the tested ROMs, not just marker occurrences.
+- Emit converted assets once parsed resource records are found.
+- Infer defensible function ranges and instruction counts.
+- Add source-root correlation for SuperMario overlays.
+- Improve string and pointer-table false-positive filtering with fixture-backed tests.
+
 ## Definition of Done
 
 A feature request is complete when:

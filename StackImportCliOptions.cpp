@@ -28,6 +28,7 @@ struct ParsedFlags {
 	bool legacy_rom = false;
 	std::string input_path;
 	std::string output_path;
+	std::string media_root_path;
 	std::string atlas_output_path;
 	std::string source_root_path;
 	std::string rom_base;
@@ -48,6 +49,11 @@ void add_stack_flags(CLI::App& app, ParsedFlags& flags)
 void add_output_option(CLI::App& app, ParsedFlags& flags)
 {
 	app.add_option("-o,--output", flags.output_path, "Output package or analysis directory");
+}
+
+void add_import_options(CLI::App& app, ParsedFlags& flags)
+{
+	app.add_option("--media-root", flags.media_root_path, "Package loose external media from this directory");
 }
 
 void add_rom_options(CLI::App& app, ParsedFlags& flags)
@@ -87,6 +93,8 @@ void apply_shared_flags(const ParsedFlags& parsed, Options& options)
 
 	if(!parsed.output_path.empty())
 		options.output_path = absolute_path(parsed.output_path.c_str());
+	if(!parsed.media_root_path.empty())
+		options.media_root_path = absolute_path(parsed.media_root_path.c_str());
 	if(!parsed.atlas_output_path.empty())
 		options.atlas_output_path = absolute_path(parsed.atlas_output_path.c_str());
 	if(!parsed.source_root_path.empty())
@@ -150,6 +158,11 @@ int finalize_options(
 		stackimport_quill_diagnosticf("Error: ROM options require --rom or the rom subcommand.\n");
 		return 3;
 	}
+	if(options.mode != Mode::Import && !root.media_root_path.empty())
+	{
+		stackimport_quill_diagnosticf("Error: --media-root requires import mode.\n");
+		return 3;
+	}
 
 	const std::string romBaseText = selected->rom_base.empty() ? root.rom_base : selected->rom_base;
 	if(!parse_rom_base(romBaseText, options.rom_base_address))
@@ -190,6 +203,7 @@ int parse_arguments(int argc, char* const argv[], Options& options)
 
 	add_stack_flags(app, root);
 	add_output_option(app, root);
+	add_import_options(app, root);
 	app.add_flag("--scan", root.legacy_scan, "Legacy spelling for the scan subcommand");
 	app.add_flag("--rom", root.legacy_rom, "Legacy spelling for the rom subcommand");
 	add_rom_options(app, root);
@@ -198,6 +212,7 @@ int parse_arguments(int argc, char* const argv[], Options& options)
 	CLI::App* importCommand = app.add_subcommand("import", "Import a HyperCard stack into a .xstk package");
 	add_stack_flags(*importCommand, importFlags);
 	add_output_option(*importCommand, importFlags);
+	add_import_options(*importCommand, importFlags);
 	importCommand->add_option("input", importFlags.input_path, "Input HyperCard stack path")->required();
 
 	CLI::App* scanCommand = app.add_subcommand("scan", "Print the HyperCard block table without importing");
