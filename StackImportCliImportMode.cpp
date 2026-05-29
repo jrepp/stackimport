@@ -243,6 +243,20 @@ bool copy_asset_file(const fs::path& source, const fs::path& destination)
 	return !ec;
 }
 
+bool write_binary_file(const fs::path& path, const std::vector<uint8_t>& bytes)
+{
+	std::error_code ec;
+	fs::create_directories(path.parent_path(), ec);
+	if(ec)
+		return false;
+	FILE* file = fopen(path.string().c_str(), "wb");
+	if(!file)
+		return false;
+	const bool ok = bytes.empty() || fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size();
+	const int closeStatus = fclose(file);
+	return ok && closeStatus == 0;
+}
+
 bool read_resource_fork(const fs::path& source, std::vector<uint8_t>& out)
 {
 #if defined(__APPLE__)
@@ -261,7 +275,14 @@ std::string movie_analysis_package_path(const fs::path& relPath)
 	return path.generic_string();
 }
 
-bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, const fs::path& relPath, std::string& packagePath)
+std::string movie_audio_package_path(const fs::path& relPath, size_t trackIndex)
+{
+	fs::path path = fs::path("external-assets") / "quicktime-audio" / relPath;
+	path += ".track-" + std::to_string(trackIndex + 1u) + ".wav";
+	return path.generic_string();
+}
+
+bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, const fs::path& relPath, std::string& packagePath, std::vector<std::string>& audioPaths)
 {
 	std::vector<uint8_t> bytes;
 	if(!read_entire_file(source.string(), bytes))
@@ -277,7 +298,25 @@ bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, c
 	fs::create_directories(outputPath.parent_path(), ec);
 	if(ec)
 		return false;
-	return write_text_file(outputPath.string(), stackimport::mov2qt::analysis_to_json(analysis, 0) + "\n");
+	if(!write_text_file(outputPath.string(), stackimport::mov2qt::analysis_to_json(analysis, 0) + "\n"))
+		return false;
+	audioPaths.clear();
+	for(size_t trackIndex = 0; trackIndex < analysis.tracks.size(); trackIndex++)
+	{
+		const stackimport::mov2qt::Track& track = analysis.tracks[trackIndex];
+		if(track.handler_type != "soun")
+			continue;
+		std::vector<uint8_t> wav;
+		std::string error;
+		if(!stackimport::mov2qt::decode_pcm_track_to_wav(std::span<const uint8_t>(bytes.data(), bytes.size()), track, wav, error))
+			continue;
+		const std::string audioPath = movie_audio_package_path(relPath, trackIndex);
+		if(write_binary_file(packageRoot / fs::path(audioPath), wav))
+			audioPaths.push_back(audioPath);
+		else
+			stackimport_quill_diagnosticf("Warning: Could not write QuickTime audio export '%s'.\n", audioPath.c_str());
+	}
+	return true;
 }
 
 bool write_external_assets_manifest(const Options& options, const std::string& outputPath)
@@ -351,7 +390,8 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 		ec.clear();
 		const std::string kind = classify_external_asset(source, finderInfo, safeSize);
 		std::string quicktimeAnalysisPath;
-		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), quicktimeAnalysisPath))
+		std::vector<std::string> quicktimeAudioPaths;
+		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), quicktimeAnalysisPath, quicktimeAudioPaths))
 			stackimport_quill_diagnosticf("Warning: Could not parse QuickTime atoms for external asset '%s'.\n", source.string().c_str());
 
 		if(assetCount > 0)
@@ -369,6 +409,17 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 		manifest += "\"mediaType\":\"" + json_escape(media_type_for_asset_kind(kind)) + "\"";
 		if(!quicktimeAnalysisPath.empty())
 			manifest += ",\"quicktimeAnalysis\":\"" + json_escape(quicktimeAnalysisPath) + "\"";
+		if(!quicktimeAudioPaths.empty())
+		{
+			manifest += ",\"quicktimeAudio\":[";
+			for(size_t audioIndex = 0; audioIndex < quicktimeAudioPaths.size(); audioIndex++)
+			{
+				if(audioIndex > 0)
+					manifest += ",";
+				manifest += "\"" + json_escape(quicktimeAudioPaths[audioIndex]) + "\"";
+			}
+			manifest += "]";
+		}
 		manifest += "}";
 		assetCount++;
 	}
