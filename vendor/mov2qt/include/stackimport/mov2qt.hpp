@@ -52,6 +52,7 @@ struct SampleDescription {
 	uint16_t compression_id = 0;
 	uint16_t packet_size = 0;
 	double sample_rate_hz = 0.0;
+	std::vector<std::array<uint8_t, 4>> palette_rgba;
 };
 
 struct TimeToSampleEntry {
@@ -142,5 +143,14 @@ struct CinepakDecoderState {
 
 bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t height, RgbaFrame& frame, std::string& error, const RgbaFrame* previous = nullptr);
 bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error, CinepakDecoderState* state = nullptr);
+bool decode_qtrle_frame(
+	std::span<const uint8_t> data,
+	uint16_t width,
+	uint16_t height,
+	uint16_t depth,
+	std::span<const std::array<uint8_t, 4>> palette,
+	RgbaFrame& frame,
+	std::string& error,
+	const RgbaFrame* previous = nullptr);
 
 } // namespace stackimport::mov2qt

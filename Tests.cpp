@@ -2216,6 +2216,32 @@ void	RunTests()
 	assert(cinepakFrame.rgba[2] == 80);
 	assert(cinepakFrame.rgba[3] == 255);
 
+	const std::vector<uint8_t> qtrleFixture = {
+		0x00, 0x00, 0x00, 0x18,
+		0x00, 0x00,
+		0x01, 0x02, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x01, 0xFF,
+		0x01, 0xFE, 0x04, 0x03, 0x02, 0x01, 0xFF,
+	};
+	const std::array<std::array<uint8_t, 4>, 5> qtrlePalette = {{
+		{0, 0, 0, 255},
+		{255, 0, 0, 255},
+		{0, 255, 0, 255},
+		{0, 0, 255, 255},
+		{255, 255, 0, 255},
+	}};
+	stackimport::mov2qt::RgbaFrame qtrleFrame;
+	std::string qtrleError;
+	assert(stackimport::mov2qt::decode_qtrle_frame(std::span<const uint8_t>(qtrleFixture.data(), qtrleFixture.size()), 8, 2, 8, std::span<const std::array<uint8_t, 4>>(qtrlePalette.data(), qtrlePalette.size()), qtrleFrame, qtrleError));
+	assert(qtrleFrame.width == 8);
+	assert(qtrleFrame.height == 2);
+	assert(qtrleFrame.rgba.size() == 64);
+	assert(qtrleFrame.rgba[0] == 255);
+	assert(qtrleFrame.rgba[1] == 0);
+	assert(qtrleFrame.rgba[2] == 0);
+	assert(qtrleFrame.rgba[32] == 255);
+	assert(qtrleFrame.rgba[33] == 255);
+	assert(qtrleFrame.rgba[34] == 0);
+
 	stackimport::PlatformByteVector wavData;
 	std::string soundError;
 	const std::vector<uint8_t> multiCommandSnd = make_snd_format2_fixture(true, 22);

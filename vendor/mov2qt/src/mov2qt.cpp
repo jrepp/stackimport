@@ -216,6 +216,28 @@ struct Parser {
 			{
 				description.width = u2(pos + 32);
 				description.height = u2(pos + 34);
+				if(entry_size >= 86)
+				{
+					description.sample_size_bits = u2(pos + 82);
+					description.compression_id = u2(pos + 84);
+					if(pos + 94 <= end && entry_size >= 94)
+					{
+						const uint32_t color_count = static_cast<uint32_t>(u2(pos + 92)) + 1u;
+						uint64_t color_pos = pos + 94;
+						description.palette_rgba.assign(256, std::array<uint8_t, 4>{0, 0, 0, 255});
+						for(uint32_t color_index = 0; color_index < color_count && color_pos + 8 <= pos + entry_size; color_index++)
+						{
+							const uint16_t value = u2(color_pos);
+							const uint8_t r = static_cast<uint8_t>(u2(color_pos + 2) >> 8u);
+							const uint8_t g = static_cast<uint8_t>(u2(color_pos + 4) >> 8u);
+							const uint8_t b = static_cast<uint8_t>(u2(color_pos + 6) >> 8u);
+							const uint32_t palette_index = value < 256 ? value : color_index;
+							if(palette_index < description.palette_rgba.size())
+								description.palette_rgba[palette_index] = std::array<uint8_t, 4>{r, g, b, 255};
+							color_pos += 8;
+						}
+					}
+				}
 			}
 			if(entry_size >= 36 && track->handler_type == "soun")
 			{
@@ -755,6 +777,26 @@ void fill_rpza_block(RgbaFrame& frame, uint16_t x, uint16_t y, Rgb888 color)
 			write_rgba_pixel(frame, static_cast<uint16_t>(x + dx), static_cast<uint16_t>(y + dy), color);
 }
 
+void write_rgba_pixel(RgbaFrame& frame, uint16_t x, uint16_t y, std::array<uint8_t, 4> color)
+{
+	if(x >= frame.width || y >= frame.height)
+		return;
+	const size_t index = (static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)) * 4u;
+	if(index + 3 >= frame.rgba.size())
+		return;
+	frame.rgba[index + 0] = color[0];
+	frame.rgba[index + 1] = color[1];
+	frame.rgba[index + 2] = color[2];
+	frame.rgba[index + 3] = color[3];
+}
+
+std::array<uint8_t, 4> qtrle_palette_color(uint8_t index, std::span<const std::array<uint8_t, 4>> palette)
+{
+	if(index < palette.size())
+		return palette[index];
+	return std::array<uint8_t, 4>{index, index, index, 255};
+}
+
 void draw_rpza_indexed_block(RgbaFrame& frame, uint16_t x, uint16_t y, const std::array<Rgb888, 4>& colors, std::span<const uint8_t, 4> indices)
 {
 	for(uint16_t dy = 0; dy < 4; dy++)
@@ -1227,6 +1269,7 @@ std::string analysis_to_json(const Analysis& analysis, int indent)
 			out += ",\"packetSize\":" + std::to_string(desc.packet_size);
 			out += ",\"sampleRateHz\":";
 			append_number(out, desc.sample_rate_hz);
+			out += ",\"paletteSize\":" + std::to_string(desc.palette_rgba.size());
 			out += "}";
 		}
 		out += "]";
@@ -1447,6 +1490,113 @@ bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t h
 			for(uint16_t dx = 0; dx < 4; dx++)
 				write_rgba_pixel(frame, static_cast<uint16_t>(cursor.x + dx), static_cast<uint16_t>(cursor.y + dy), colors[static_cast<size_t>(dy) * 4u + dx]);
 		cursor.advance();
+	}
+	return true;
+}
+
+bool decode_qtrle_frame(
+	std::span<const uint8_t> data,
+	uint16_t width,
+	uint16_t height,
+	uint16_t depth,
+	std::span<const std::array<uint8_t, 4>> palette,
+	RgbaFrame& frame,
+	std::string& error,
+	const RgbaFrame* previous)
+{
+	if(width == 0 || height == 0)
+	{
+		error = "QTRLE frame dimensions are zero";
+		return false;
+	}
+	if(depth != 8)
+	{
+		error = "only 8-bit QTRLE frames are supported";
+		return false;
+	}
+	frame.width = width;
+	frame.height = height;
+	frame.rgba.assign(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u, 0);
+	if(previous && previous->width == width && previous->height == height && previous->rgba.size() == frame.rgba.size())
+		frame.rgba = previous->rgba;
+	if(data.size() < 8)
+		return true;
+
+	size_t chunk_size = read_be32(data, 0) & 0x3FFFFFFFu;
+	if(chunk_size == 0 || chunk_size > data.size())
+		chunk_size = data.size();
+	if(chunk_size < 6)
+		return true;
+	const uint16_t header = read_be16(data, 4);
+	size_t pos = 6;
+	uint16_t start_line = 0;
+	uint16_t line_count = height;
+	if((header & 0x0008u) != 0)
+	{
+		if(chunk_size < 14)
+			return true;
+		start_line = read_be16(data, 6);
+		line_count = read_be16(data, 10);
+		pos = 14;
+	}
+	if(start_line >= height)
+		return true;
+	const uint16_t end_line = static_cast<uint16_t>(std::min<uint32_t>(height, static_cast<uint32_t>(start_line) + line_count));
+	for(uint16_t y = start_line; y < end_line && pos < chunk_size; y++)
+	{
+		uint8_t skip = data[pos++];
+		if(skip == 0)
+			break;
+		uint16_t x = static_cast<uint16_t>(skip - 1u);
+		while(pos < chunk_size)
+		{
+			const int8_t code = static_cast<int8_t>(data[pos++]);
+			if(code == -1)
+				break;
+			if(code == 0)
+			{
+				if(pos >= chunk_size)
+					break;
+				skip = data[pos++];
+				if(skip == 0)
+					return true;
+				x = static_cast<uint16_t>(x + skip - 1u);
+				continue;
+			}
+			if(code > 0)
+			{
+				const uint16_t pixels = static_cast<uint16_t>(static_cast<uint8_t>(code) * 4u);
+				if(pos + pixels > chunk_size)
+				{
+					error = "truncated QTRLE literal run";
+					return false;
+				}
+				for(uint16_t i = 0; i < pixels; i++)
+				{
+					write_rgba_pixel(frame, x, y, qtrle_palette_color(data[pos++], palette));
+					x = static_cast<uint16_t>(x + 1u);
+				}
+			}
+			else
+			{
+				if(pos + 4 > chunk_size)
+				{
+					error = "truncated QTRLE repeat run";
+					return false;
+				}
+				const std::array<uint8_t, 4> indices{data[pos], data[pos + 1], data[pos + 2], data[pos + 3]};
+				pos += 4;
+				const uint16_t repetitions = static_cast<uint16_t>(-code);
+				for(uint16_t repeat = 0; repeat < repetitions; repeat++)
+				{
+					for(uint8_t index : indices)
+					{
+						write_rgba_pixel(frame, x, y, qtrle_palette_color(index, palette));
+						x = static_cast<uint16_t>(x + 1u);
+					}
+				}
+			}
+		}
 	}
 	return true;
 }

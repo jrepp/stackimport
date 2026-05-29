@@ -307,6 +307,14 @@ bool track_has_format(const stackimport::mov2qt::Track& track, const char format
 	return false;
 }
 
+const stackimport::mov2qt::SampleDescription* first_track_description_with_format(const stackimport::mov2qt::Track& track, const char format[5])
+{
+	for(const stackimport::mov2qt::SampleDescription& description : track.sample_descriptions)
+		if(description.format == format)
+			return &description;
+	return nullptr;
+}
+
 bool write_video_frame_exports(
 	const std::vector<uint8_t>& bytes,
 	const fs::path& packageRoot,
@@ -317,12 +325,14 @@ bool write_video_frame_exports(
 {
 	const bool isRpza = track_has_format(track, "rpza");
 	const bool isCinepak = track_has_format(track, "cvid");
-	if((!isRpza && !isCinepak) || track.sample_packets.empty())
+	const stackimport::mov2qt::SampleDescription* qtrleDescription = first_track_description_with_format(track, "rle ");
+	const bool isQtrle = qtrleDescription != nullptr;
+	if((!isRpza && !isCinepak && !isQtrle) || track.sample_packets.empty())
 		return true;
-	const std::string codec = isRpza ? "rpza" : "cvid";
+	const std::string codec = isRpza ? "rpza" : (isCinepak ? "cvid" : "rle ");
 	const auto trackWidth = static_cast<uint16_t>(track.width + 0.5);
 	const auto trackHeight = static_cast<uint16_t>(track.height + 0.5);
-	if(isRpza && (trackWidth == 0 || trackHeight == 0))
+	if((isRpza || isQtrle) && (trackWidth == 0 || trackHeight == 0))
 		return true;
 	const fs::path frameDir = movie_frame_package_dir(relPath, trackIndex);
 	std::string frames;
@@ -344,8 +354,10 @@ bool write_video_frame_exports(
 		bool decoded = false;
 		if(isRpza)
 			decoded = stackimport::mov2qt::decode_rpza_frame(packetBytes, trackWidth, trackHeight, frame, error, havePreviousFrame ? &previousFrame : nullptr);
-		else
+		else if(isCinepak)
 			decoded = stackimport::mov2qt::decode_cinepak_frame(packetBytes, frame, error, &cinepakState);
+		else
+			decoded = stackimport::mov2qt::decode_qtrle_frame(packetBytes, trackWidth, trackHeight, qtrleDescription->sample_size_bits, std::span<const std::array<uint8_t, 4>>(qtrleDescription->palette_rgba.data(), qtrleDescription->palette_rgba.size()), frame, error, havePreviousFrame ? &previousFrame : nullptr);
 		if(!decoded)
 			continue;
 		if(frame.width == 0 || frame.height == 0 || frame.rgba.empty())
