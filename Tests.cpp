@@ -380,10 +380,26 @@ std::vector<uint8_t> make_quicktime_fixture()
 	append_u16be(stsd, 240);
 	stsd.resize(8 + 86, 0);
 
+	std::vector<uint8_t> stts;
+	append_u32be(stts, 0);
+	append_u32be(stts, 1);
+	append_u32be(stts, 3);
+	append_u32be(stts, 20);
+
+	std::vector<uint8_t> stsc;
+	append_u32be(stsc, 0);
+	append_u32be(stsc, 1);
+	append_u32be(stsc, 1);
+	append_u32be(stsc, 2);
+	append_u32be(stsc, 1);
+
 	std::vector<uint8_t> stsz;
 	append_u32be(stsz, 0);
 	append_u32be(stsz, 0);
 	append_u32be(stsz, 3);
+	append_u32be(stsz, 12);
+	append_u32be(stsz, 14);
+	append_u32be(stsz, 16);
 
 	std::vector<uint8_t> stco;
 	append_u32be(stco, 0);
@@ -393,6 +409,8 @@ std::vector<uint8_t> make_quicktime_fixture()
 
 	std::vector<uint8_t> stbl;
 	append_atom(stbl, "stsd", stsd);
+	append_atom(stbl, "stts", stts);
+	append_atom(stbl, "stsc", stsc);
 	append_atom(stbl, "stsz", stsz);
 	append_atom(stbl, "stco", stco);
 
@@ -1971,12 +1989,22 @@ void	RunTests()
 	assert(movAnalysis.tracks[0].handler_type == "vide");
 	assert(movAnalysis.tracks[0].sample_count == 3);
 	assert(movAnalysis.tracks[0].chunk_count == 2);
+	assert(movAnalysis.tracks[0].time_to_sample.size() == 1);
+	assert(movAnalysis.tracks[0].sample_to_chunk.size() == 1);
+	assert(movAnalysis.tracks[0].sample_sizes.size() == 3);
+	assert(movAnalysis.tracks[0].sample_packets.size() == 3);
+	assert(movAnalysis.tracks[0].sample_packets[0].offset == 128);
+	assert(movAnalysis.tracks[0].sample_packets[0].size == 12);
+	assert(movAnalysis.tracks[0].sample_packets[1].offset == 140);
+	assert(movAnalysis.tracks[0].sample_packets[1].duration == 20);
+	assert(movAnalysis.tracks[0].sample_packets[2].offset == 256);
 	assert(movAnalysis.tracks[0].sample_descriptions.size() == 1);
 	assert(movAnalysis.tracks[0].sample_descriptions[0].format == "rpza");
 	assert(movAnalysis.tracks[0].sample_descriptions[0].codec_name == "Apple Video / Road Pizza");
 	assert(movAnalysis.tracks[0].sample_descriptions[0].decoder_status == "candidate_clean_room");
 	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"handlerType\":\"vide\"") != std::string::npos);
 	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"codecName\":\"Apple Video / Road Pizza\"") != std::string::npos);
+	assert(stackimport::mov2qt::analysis_to_json(movAnalysis).find("\"packetPreview\"") != std::string::npos);
 	const std::vector<uint8_t> cinepakFixture = make_cinepak_fixture();
 	stackimport::mov2qt::CinepakFrame cinepakFrame;
 	std::string cinepakError;

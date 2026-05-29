@@ -11,6 +11,8 @@ namespace stackimport::mov2qt {
 
 namespace {
 
+constexpr size_t kSamplePacketPreviewLimit = 65536;
+
 void apply_codec_mapping(SampleDescription& description, const std::string& handler_type);
 
 struct Parser {
@@ -228,9 +230,31 @@ struct Parser {
 		uint64_t sample_count = 0;
 		uint64_t pos = body + 8;
 		for(uint32_t i = 0; i < entry_count && pos + 8 <= body + body_size; i++, pos += 8)
-			sample_count += u4(pos);
+		{
+			const uint32_t count = u4(pos);
+			const uint32_t duration = u4(pos + 4);
+			track->time_to_sample.push_back(TimeToSampleEntry{count, duration});
+			sample_count += count;
+		}
 		if(sample_count > 0)
 			track->sample_count = sample_count;
+	}
+
+	void parse_stsc(uint64_t body, uint64_t body_size)
+	{
+		Track* track = current_track();
+		if(!track || body_size < 8)
+			return;
+		const uint32_t entry_count = u4(body + 4);
+		uint64_t pos = body + 8;
+		for(uint32_t i = 0; i < entry_count && pos + 12 <= body + body_size; i++, pos += 12)
+		{
+			track->sample_to_chunk.push_back(SampleToChunkEntry{
+				u4(pos),
+				u4(pos + 4),
+				u4(pos + 8),
+			});
+		}
 	}
 
 	void parse_stsz(uint64_t body, uint64_t body_size)
@@ -238,17 +262,44 @@ struct Parser {
 		Track* track = current_track();
 		if(!track || body_size < 12)
 			return;
+		track->constant_sample_size = u4(body + 4);
 		const uint32_t sample_count = u4(body + 8);
 		if(sample_count > 0)
 			track->sample_count = sample_count;
+		if(track->constant_sample_size == 0)
+		{
+			uint64_t pos = body + 12;
+			for(uint32_t i = 0; i < sample_count && pos + 4 <= body + body_size; i++, pos += 4)
+				track->sample_sizes.push_back(u4(pos));
+			track->variable_sample_size_count = track->sample_sizes.size();
+		}
 	}
 
-	void parse_chunk_offsets(uint64_t body, uint64_t body_size)
+	void parse_chunk_offsets(uint64_t body, uint64_t body_size, bool wide)
 	{
 		Track* track = current_track();
 		if(!track || body_size < 8)
 			return;
-		track->chunk_count = u4(body + 4);
+		const uint32_t entry_count = u4(body + 4);
+		track->chunk_count = entry_count;
+		uint64_t pos = body + 8;
+		for(uint32_t i = 0; i < entry_count; i++)
+		{
+			if(wide)
+			{
+				if(pos + 8 > body + body_size)
+					break;
+				track->chunk_offsets.push_back(u8(pos));
+				pos += 8;
+			}
+			else
+			{
+				if(pos + 4 > body + body_size)
+					break;
+				track->chunk_offsets.push_back(u4(pos));
+				pos += 4;
+			}
+		}
 	}
 
 	void parse_leaf(const std::string& type, uint64_t body, uint64_t body_size)
@@ -267,10 +318,14 @@ struct Parser {
 			parse_stsd(body, body_size);
 		else if(type == "stts")
 			parse_stts(body, body_size);
+		else if(type == "stsc")
+			parse_stsc(body, body_size);
 		else if(type == "stsz")
 			parse_stsz(body, body_size);
-		else if(type == "stco" || type == "co64")
-			parse_chunk_offsets(body, body_size);
+		else if(type == "stco")
+			parse_chunk_offsets(body, body_size, false);
+		else if(type == "co64")
+			parse_chunk_offsets(body, body_size, true);
 	}
 
 	bool parse_atoms(uint64_t begin, uint64_t end, uint32_t depth)
@@ -420,6 +475,83 @@ bool parse_resource_moov_atoms(Parser& parser, std::span<const uint8_t> resource
 	return true;
 }
 
+uint32_t sample_size_at(const Track& track, uint64_t sample_index)
+{
+	if(track.constant_sample_size > 0)
+		return track.constant_sample_size;
+	if(sample_index < track.sample_sizes.size())
+		return track.sample_sizes[static_cast<size_t>(sample_index)];
+	return 0;
+}
+
+uint32_t sample_duration_at(const Track& track, uint64_t sample_index)
+{
+	uint64_t base = 0;
+	for(const TimeToSampleEntry& entry : track.time_to_sample)
+	{
+		if(sample_index < base + entry.sample_count)
+			return entry.sample_duration;
+		base += entry.sample_count;
+	}
+	return 0;
+}
+
+void finalize_track_sample_packets(Track& track)
+{
+	if(track.chunk_offsets.empty() || track.sample_to_chunk.empty() || track.sample_count == 0)
+		return;
+
+	track.sample_packets.clear();
+	track.sample_packet_preview_truncated = false;
+	track.sample_packets.reserve(static_cast<size_t>(std::min<uint64_t>(track.sample_count, kSamplePacketPreviewLimit)));
+	uint64_t sample_index = 0;
+	uint64_t decode_time = 0;
+
+	for(size_t stsc_index = 0; stsc_index < track.sample_to_chunk.size(); stsc_index++)
+	{
+		const SampleToChunkEntry& entry = track.sample_to_chunk[stsc_index];
+		if(entry.first_chunk == 0 || entry.samples_per_chunk == 0)
+			continue;
+		const uint32_t next_first_chunk = stsc_index + 1 < track.sample_to_chunk.size() ?
+			track.sample_to_chunk[stsc_index + 1].first_chunk :
+			static_cast<uint32_t>(track.chunk_offsets.size() + 1u);
+		const uint32_t first_chunk = entry.first_chunk;
+		const uint32_t end_chunk = std::min<uint32_t>(next_first_chunk, static_cast<uint32_t>(track.chunk_offsets.size() + 1u));
+		for(uint32_t chunk = first_chunk; chunk < end_chunk && sample_index < track.sample_count; chunk++)
+		{
+			uint64_t sample_offset = track.chunk_offsets[static_cast<size_t>(chunk - 1u)];
+			for(uint32_t sample_in_chunk = 0; sample_in_chunk < entry.samples_per_chunk && sample_index < track.sample_count; sample_in_chunk++)
+			{
+				const uint32_t size = sample_size_at(track, sample_index);
+				const uint32_t duration = sample_duration_at(track, sample_index);
+				track.sample_packets.push_back(SamplePacket{
+					sample_index + 1u,
+					chunk,
+					sample_offset,
+					size,
+					decode_time,
+					duration,
+					entry.sample_description_id,
+				});
+				sample_offset += size;
+				decode_time += duration;
+				sample_index++;
+				if(track.sample_packets.size() >= kSamplePacketPreviewLimit)
+				{
+					track.sample_packet_preview_truncated = sample_index < track.sample_count;
+					return;
+				}
+			}
+		}
+	}
+}
+
+void finalize_analysis(Analysis& analysis)
+{
+	for(Track& track : analysis.tracks)
+		finalize_track_sample_packets(track);
+}
+
 std::string json_escape(const std::string& text)
 {
 	std::string out;
@@ -460,6 +592,12 @@ std::string json_escape(const std::string& text)
 std::string indent_text(int count)
 {
 	return std::string(static_cast<size_t>(std::max(count, 0)), ' ');
+}
+
+template <typename T>
+size_t preview_count(const std::vector<T>& values)
+{
+	return std::min<size_t>(values.size(), 16);
 }
 
 void append_number(std::string& out, double value)
@@ -755,6 +893,7 @@ Analysis analyze(std::span<const uint8_t> data, std::span<const uint8_t> resourc
 	parser.analysis.file_size = data.size();
 	parser.analysis.resource_fork_size = resource_fork.size();
 	parser.analysis.ok = parser.parse_atoms(0, data.size(), 0) && parse_resource_moov_atoms(parser, resource_fork);
+	finalize_analysis(parser.analysis);
 	if(parser.analysis.ok && parser.analysis.atoms.empty())
 	{
 		parser.analysis.ok = false;
@@ -820,6 +959,8 @@ std::string analysis_to_json(const Analysis& analysis, int indent)
 		append_number(out, track.height);
 		out += ",\"sampleCount\":" + std::to_string(track.sample_count);
 		out += ",\"chunkCount\":" + std::to_string(track.chunk_count);
+		out += ",\"constantSampleSize\":" + std::to_string(track.constant_sample_size);
+		out += ",\"variableSampleSizeCount\":" + std::to_string(track.variable_sample_size_count);
 		out += ",\"sampleDescriptions\":[";
 		for(size_t desc_idx = 0; desc_idx < track.sample_descriptions.size(); desc_idx++)
 		{
@@ -838,7 +979,64 @@ std::string analysis_to_json(const Analysis& analysis, int indent)
 			out += ",\"width\":" + std::to_string(desc.width);
 			out += ",\"height\":" + std::to_string(desc.height) + "}";
 		}
+		out += "]";
+		out += ",\"sampleTable\":{";
+		out += "\"timeToSampleEntryCount\":" + std::to_string(track.time_to_sample.size());
+		out += ",\"sampleToChunkEntryCount\":" + std::to_string(track.sample_to_chunk.size());
+		out += ",\"chunkOffsetCount\":" + std::to_string(track.chunk_offsets.size());
+		out += ",\"sampleSizeEntryCount\":" + std::to_string(track.sample_sizes.size());
+		out += ",\"packetPreviewCount\":" + std::to_string(track.sample_packets.size());
+		out += ",\"packetPreviewLimit\":" + std::to_string(kSamplePacketPreviewLimit);
+		out += ",\"packetPreviewTruncated\":" + std::string(track.sample_packet_preview_truncated ? "true" : "false");
+		out += ",\"timeToSamplePreview\":[";
+		for(size_t entry_idx = 0; entry_idx < preview_count(track.time_to_sample); entry_idx++)
+		{
+			const TimeToSampleEntry& entry = track.time_to_sample[entry_idx];
+			if(entry_idx > 0)
+				out += ",";
+			out += "{\"count\":" + std::to_string(entry.sample_count);
+			out += ",\"duration\":" + std::to_string(entry.sample_duration) + "}";
+		}
+		out += "],\"sampleToChunkPreview\":[";
+		for(size_t entry_idx = 0; entry_idx < preview_count(track.sample_to_chunk); entry_idx++)
+		{
+			const SampleToChunkEntry& entry = track.sample_to_chunk[entry_idx];
+			if(entry_idx > 0)
+				out += ",";
+			out += "{\"firstChunk\":" + std::to_string(entry.first_chunk);
+			out += ",\"samplesPerChunk\":" + std::to_string(entry.samples_per_chunk);
+			out += ",\"sampleDescriptionId\":" + std::to_string(entry.sample_description_id) + "}";
+		}
+		out += "],\"chunkOffsetPreview\":[";
+		for(size_t offset_idx = 0; offset_idx < preview_count(track.chunk_offsets); offset_idx++)
+		{
+			if(offset_idx > 0)
+				out += ",";
+			out += std::to_string(track.chunk_offsets[offset_idx]);
+		}
+		out += "],\"sampleSizePreview\":[";
+		for(size_t size_idx = 0; size_idx < preview_count(track.sample_sizes); size_idx++)
+		{
+			if(size_idx > 0)
+				out += ",";
+			out += std::to_string(track.sample_sizes[size_idx]);
+		}
+		out += "],\"packetPreview\":[";
+		for(size_t packet_idx = 0; packet_idx < preview_count(track.sample_packets); packet_idx++)
+		{
+			const SamplePacket& packet = track.sample_packets[packet_idx];
+			if(packet_idx > 0)
+				out += ",";
+			out += "{\"index\":" + std::to_string(packet.index);
+			out += ",\"chunkIndex\":" + std::to_string(packet.chunk_index);
+			out += ",\"offset\":" + std::to_string(packet.offset);
+			out += ",\"size\":" + std::to_string(packet.size);
+			out += ",\"decodeTime\":" + std::to_string(packet.decode_time);
+			out += ",\"duration\":" + std::to_string(packet.duration);
+			out += ",\"sampleDescriptionId\":" + std::to_string(packet.sample_description_id) + "}";
+		}
 		out += "]}";
+		out += "}";
 	}
 	out += "\n" + i1 + "],\n";
 	out += i1 + "\"atoms\": [\n";

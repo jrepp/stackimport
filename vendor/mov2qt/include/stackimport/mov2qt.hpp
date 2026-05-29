@@ -48,6 +48,27 @@ struct SampleDescription {
 	uint16_t height = 0;
 };
 
+struct TimeToSampleEntry {
+	uint32_t sample_count = 0;
+	uint32_t sample_duration = 0;
+};
+
+struct SampleToChunkEntry {
+	uint32_t first_chunk = 0;
+	uint32_t samples_per_chunk = 0;
+	uint32_t sample_description_id = 0;
+};
+
+struct SamplePacket {
+	uint64_t index = 0;
+	uint32_t chunk_index = 0;
+	uint64_t offset = 0;
+	uint32_t size = 0;
+	uint64_t decode_time = 0;
+	uint32_t duration = 0;
+	uint32_t sample_description_id = 0;
+};
+
 struct Track {
 	uint32_t id = 0;
 	std::string handler_type;
@@ -58,7 +79,15 @@ struct Track {
 	double height = 0.0;
 	uint64_t sample_count = 0;
 	uint64_t chunk_count = 0;
+	uint32_t constant_sample_size = 0;
+	uint64_t variable_sample_size_count = 0;
 	std::vector<SampleDescription> sample_descriptions;
+	std::vector<TimeToSampleEntry> time_to_sample;
+	std::vector<SampleToChunkEntry> sample_to_chunk;
+	std::vector<uint64_t> chunk_offsets;
+	std::vector<uint32_t> sample_sizes;
+	std::vector<SamplePacket> sample_packets;
+	bool sample_packet_preview_truncated = false;
 };
 
 struct Analysis {
