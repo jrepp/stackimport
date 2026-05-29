@@ -7,6 +7,8 @@ the public Kaitai Struct `quicktime_mov` schema.
 - Upstream gallery: <https://formats.kaitai.io/quicktime_mov/>
 - Schema license: CC0-1.0
 - RPZA format notes: <https://wiki.multimedia.cx/index.php?title=Apple_RPZA>
+- Cinepak format notes: <https://multimedia.cx/mirror/cinepak.txt> and
+  <https://wiki.multimedia.cx/index.php?title=Cinepak>
 - Local role: parse QuickTime/MOV atom structure, resource-fork `moov`
   metadata, sample tables, and clean-room legacy media decode experiments for
   Myst reverse-engineering reports.

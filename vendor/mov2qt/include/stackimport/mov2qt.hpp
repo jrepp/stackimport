@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <array>
 #include <span>
 #include <string>
 #include <vector>
@@ -121,7 +122,25 @@ struct RgbaFrame {
 
 using CinepakFrame = RgbaFrame;
 
+struct CinepakVector {
+	std::array<uint8_t, 4> y = {};
+	uint8_t u = 128;
+	uint8_t v = 128;
+	bool color = true;
+};
+
+struct CinepakStripCodebooks {
+	std::array<CinepakVector, 256> v1 = {};
+	std::array<CinepakVector, 256> v4 = {};
+};
+
+struct CinepakDecoderState {
+	std::vector<CinepakStripCodebooks> strip_codebooks;
+	RgbaFrame previous_frame;
+	bool has_previous_frame = false;
+};
+
 bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t height, RgbaFrame& frame, std::string& error, const RgbaFrame* previous = nullptr);
-bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error);
+bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error, CinepakDecoderState* state = nullptr);
 
 } // namespace stackimport::mov2qt

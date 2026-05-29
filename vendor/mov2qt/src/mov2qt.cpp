@@ -727,7 +727,7 @@ struct BlockCursor {
 	}
 };
 
-void copy_rpza_block_from_previous(RgbaFrame& frame, const RgbaFrame* previous, uint16_t x, uint16_t y)
+void copy_rgba_block_from_previous(RgbaFrame& frame, const RgbaFrame* previous, uint16_t x, uint16_t y)
 {
 	if(!previous || previous->width != frame.width || previous->height != frame.height || previous->rgba.size() != frame.rgba.size())
 		return;
@@ -741,6 +741,11 @@ void copy_rpza_block_from_previous(RgbaFrame& frame, const RgbaFrame* previous, 
 			std::copy_n(previous->rgba.data() + index, 4, frame.rgba.data() + index);
 		}
 	}
+}
+
+void copy_rpza_block_from_previous(RgbaFrame& frame, const RgbaFrame* previous, uint16_t x, uint16_t y)
+{
+	copy_rgba_block_from_previous(frame, previous, x, y);
 }
 
 void fill_rpza_block(RgbaFrame& frame, uint16_t x, uint16_t y, Rgb888 color)
@@ -763,17 +768,7 @@ void draw_rpza_indexed_block(RgbaFrame& frame, uint16_t x, uint16_t y, const std
 	}
 }
 
-struct CinepakVector {
-	std::array<uint8_t, 4> y = {};
-	int8_t u = 0;
-	int8_t v = 0;
-	bool color = true;
-};
-
-struct CinepakStripState {
-	std::array<CinepakVector, 256> v1 = {};
-	std::array<CinepakVector, 256> v4 = {};
-};
+using CinepakStripState = CinepakStripCodebooks;
 
 uint8_t clamp_u8(int value)
 {
@@ -794,8 +789,8 @@ void write_cinepak_pixel(CinepakFrame& frame, uint16_t x, uint16_t y, const Cine
 	if(vector.color)
 	{
 		const int yy = static_cast<int>(y_value);
-		const int uu = static_cast<int>(vector.u);
-		const int vv = static_cast<int>(vector.v);
+		const int uu = static_cast<int>(vector.u) - 128;
+		const int vv = static_cast<int>(vector.v) - 128;
 		frame.rgba[index + 0] = clamp_u8(yy + (2 * vv));
 		frame.rgba[index + 1] = clamp_u8(yy - (uu / 2) - vv);
 		frame.rgba[index + 2] = clamp_u8(yy + (2 * uu));
@@ -847,13 +842,13 @@ bool read_cinepak_vector(std::span<const uint8_t> data, size_t& pos, bool color,
 	vector.color = color;
 	if(color)
 	{
-		vector.u = static_cast<int8_t>(data[pos + 4]);
-		vector.v = static_cast<int8_t>(data[pos + 5]);
+		vector.u = data[pos + 4];
+		vector.v = data[pos + 5];
 	}
 	else
 	{
-		vector.u = 0;
-		vector.v = 0;
+		vector.u = 128;
+		vector.v = 128;
 	}
 	pos += vector_size;
 	return true;
@@ -914,7 +909,7 @@ struct CinepakBlockCursor {
 	}
 };
 
-bool decode_vector_chunk(std::span<const uint8_t> payload, uint16_t chunk_id, CinepakStripState& state, CinepakFrame& frame, CinepakBlockCursor cursor)
+bool decode_vector_chunk(std::span<const uint8_t> payload, uint16_t chunk_id, CinepakStripState& state, CinepakFrame& frame, CinepakBlockCursor cursor, const RgbaFrame* previous_frame)
 {
 	size_t pos = 0;
 	uint32_t flags = 0;
@@ -975,6 +970,7 @@ bool decode_vector_chunk(std::span<const uint8_t> payload, uint16_t chunk_id, Ci
 				return false;
 			if(first == 0)
 			{
+				copy_rgba_block_from_previous(frame, previous_frame, cursor.x, cursor.y);
 				cursor.advance();
 				continue;
 			}
@@ -1455,7 +1451,7 @@ bool decode_rpza_frame(std::span<const uint8_t> data, uint16_t width, uint16_t h
 	return true;
 }
 
-bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error)
+bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::string& error, CinepakDecoderState* state)
 {
 	error.clear();
 	frame = RgbaFrame{};
@@ -1482,6 +1478,15 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 		return false;
 	}
 	frame.rgba.assign(static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height) * 4u, 0);
+	const RgbaFrame* previous_frame = nullptr;
+	if(state && state->has_previous_frame &&
+		state->previous_frame.width == frame.width &&
+		state->previous_frame.height == frame.height &&
+		state->previous_frame.rgba.size() == frame.rgba.size())
+	{
+		frame.rgba = state->previous_frame.rgba;
+		previous_frame = &state->previous_frame;
+	}
 
 	CinepakStripState previous_strip;
 	uint16_t previous_bottom_y = 0;
@@ -1493,7 +1498,14 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 			error = "truncated cinepak strip header";
 			return false;
 		}
-		CinepakStripState strip_state = (flags & 0x01u) != 0 ? previous_strip : CinepakStripState{};
+		CinepakStripState strip_state;
+		if((flags & 0x01u) != 0)
+		{
+			if(strip_index > 0)
+				strip_state = previous_strip;
+			else if(state && !state->strip_codebooks.empty())
+				strip_state = state->strip_codebooks.front();
+		}
 		const uint16_t strip_id = read_be16(data, pos);
 		const uint16_t strip_size = read_be16(data, pos + 2);
 		const uint16_t top_y = read_be16(data, pos + 4);
@@ -1555,7 +1567,7 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 				case 0x3000:
 				case 0x3100:
 				case 0x3200:
-					ok = decode_vector_chunk(payload, chunk_id, strip_state, frame, CinepakBlockCursor{left_x, top_y, left_x, right_x, bottom_y});
+					ok = decode_vector_chunk(payload, chunk_id, strip_state, frame, CinepakBlockCursor{left_x, top_y, left_x, right_x, bottom_y}, previous_frame);
 					break;
 				default:
 					break;
@@ -1568,8 +1580,19 @@ bool decode_cinepak_frame(std::span<const uint8_t> data, RgbaFrame& frame, std::
 			chunk_pos += chunk_size;
 		}
 		previous_strip = strip_state;
+		if(state)
+		{
+			if(state->strip_codebooks.size() <= strip_index)
+				state->strip_codebooks.resize(static_cast<size_t>(strip_index) + 1u);
+			state->strip_codebooks[strip_index] = strip_state;
+		}
 		previous_bottom_y = bottom_y;
 		pos = strip_end;
+	}
+	if(state)
+	{
+		state->previous_frame = frame;
+		state->has_previous_frame = true;
 	}
 	return true;
 }

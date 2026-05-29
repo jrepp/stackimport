@@ -526,7 +526,7 @@ std::vector<uint8_t> make_cinepak_fixture()
 	std::vector<uint8_t> codebook;
 	append_u16be(codebook, 0x2200);
 	append_u16be(codebook, 10);
-	codebook.insert(codebook.end(), {80, 80, 80, 80, 0, 0});
+	codebook.insert(codebook.end(), {80, 80, 80, 80, 128, 128});
 
 	std::vector<uint8_t> vectors;
 	append_u16be(vectors, 0x3200);
@@ -545,6 +545,32 @@ std::vector<uint8_t> make_cinepak_fixture()
 
 	std::vector<uint8_t> frame;
 	frame.push_back(0);
+	append_u24be(frame, static_cast<uint32_t>(10 + strip.size()));
+	append_u16be(frame, 4);
+	append_u16be(frame, 4);
+	append_u16be(frame, 1);
+	frame.insert(frame.end(), strip.begin(), strip.end());
+	return frame;
+}
+
+std::vector<uint8_t> make_cinepak_inter_skip_fixture()
+{
+	std::vector<uint8_t> vectors;
+	append_u16be(vectors, 0x3100);
+	append_u16be(vectors, 8);
+	append_u32be(vectors, 0);
+
+	std::vector<uint8_t> strip;
+	append_u16be(strip, 0x1100);
+	append_u16be(strip, static_cast<uint16_t>(12 + vectors.size()));
+	append_u16be(strip, 0);
+	append_u16be(strip, 0);
+	append_u16be(strip, 4);
+	append_u16be(strip, 4);
+	strip.insert(strip.end(), vectors.begin(), vectors.end());
+
+	std::vector<uint8_t> frame;
+	frame.push_back(1);
 	append_u24be(frame, static_cast<uint32_t>(10 + strip.size()));
 	append_u16be(frame, 4);
 	append_u16be(frame, 4);
@@ -2173,11 +2199,18 @@ void	RunTests()
 
 	const std::vector<uint8_t> cinepakFixture = make_cinepak_fixture();
 	stackimport::mov2qt::CinepakFrame cinepakFrame;
+	stackimport::mov2qt::CinepakDecoderState cinepakState;
 	std::string cinepakError;
-	assert(stackimport::mov2qt::decode_cinepak_frame(std::span<const uint8_t>(cinepakFixture.data(), cinepakFixture.size()), cinepakFrame, cinepakError));
+	assert(stackimport::mov2qt::decode_cinepak_frame(std::span<const uint8_t>(cinepakFixture.data(), cinepakFixture.size()), cinepakFrame, cinepakError, &cinepakState));
 	assert(cinepakFrame.width == 4);
 	assert(cinepakFrame.height == 4);
 	assert(cinepakFrame.rgba.size() == 64);
+	assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[1] == 80);
+	assert(cinepakFrame.rgba[2] == 80);
+	assert(cinepakFrame.rgba[3] == 255);
+	const std::vector<uint8_t> cinepakInterSkipFixture = make_cinepak_inter_skip_fixture();
+	assert(stackimport::mov2qt::decode_cinepak_frame(std::span<const uint8_t>(cinepakInterSkipFixture.data(), cinepakInterSkipFixture.size()), cinepakFrame, cinepakError, &cinepakState));
 	assert(cinepakFrame.rgba[0] == 80);
 	assert(cinepakFrame.rgba[1] == 80);
 	assert(cinepakFrame.rgba[2] == 80);
