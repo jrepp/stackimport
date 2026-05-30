@@ -918,8 +918,8 @@ bool read_cinepak_vector(std::span<const uint8_t> data, size_t& pos, bool color,
 	vector.color = color;
 	if(color)
 	{
-		vector.u = data[pos + 4];
-		vector.v = data[pos + 5];
+		vector.u = static_cast<uint8_t>(128 + static_cast<int8_t>(data[pos + 4]));
+		vector.v = static_cast<uint8_t>(128 + static_cast<int8_t>(data[pos + 5]));
 	}
 	else
 	{
@@ -1567,11 +1567,11 @@ bool decode_qtrle_frame(
 	uint16_t line_count = height;
 	if((header & 0x0008u) != 0)
 	{
-		if(chunk_size < 14)
+		if(chunk_size < 12)
 			return true;
 		start_line = read_be16(data, 6);
-		line_count = read_be16(data, 10);
-		pos = 14;
+		line_count = read_be16(data, 8);
+		pos = 12;
 	}
 	if(start_line >= height)
 		return true;
@@ -1599,7 +1599,7 @@ bool decode_qtrle_frame(
 			}
 			if(code > 0)
 			{
-				const uint16_t pixels = static_cast<uint16_t>(static_cast<uint8_t>(code) * 4u);
+				const uint16_t pixels = static_cast<uint16_t>(code);
 				if(pos + pixels > chunk_size)
 				{
 					error = "truncated QTRLE literal run";
@@ -1613,21 +1613,17 @@ bool decode_qtrle_frame(
 			}
 			else
 			{
-				if(pos + 4 > chunk_size)
+				if(pos >= chunk_size)
 				{
 					error = "truncated QTRLE repeat run";
 					return false;
 				}
-				const std::array<uint8_t, 4> indices{data[pos], data[pos + 1], data[pos + 2], data[pos + 3]};
-				pos += 4;
+				const uint8_t index = data[pos++];
 				const uint16_t repetitions = static_cast<uint16_t>(-code);
 				for(uint16_t repeat = 0; repeat < repetitions; repeat++)
 				{
-					for(uint8_t index : indices)
-					{
-						write_rgba_pixel(frame, x, y, qtrle_palette_color(index, palette));
-						x = static_cast<uint16_t>(x + 1u);
-					}
+					write_rgba_pixel(frame, x, y, qtrle_palette_color(index, palette));
+					x = static_cast<uint16_t>(x + 1u);
 				}
 			}
 		}

@@ -204,11 +204,57 @@ Priority: P0
 
 Use stackimport/resource conversion code to identify and extract converted assets from ROM-resident resources.
 
+Current status, 2026-05-29:
+
+- Standard resource-fork maps embedded in ROM bytes are parsed when a full fork
+  header is present.
+- ROM-packed `Kurt` resource records are now detected from nearby type, ID,
+  flags, optional Pascal name, and payload length metadata.
+- Older inline ROM resource records are also detected from their 16-byte
+  link/payload prefix, type, ID, flags, optional Pascal name, payload offset,
+  and payload length metadata.
+- Validation runs parsed 164 ROM-packed resource records from the PowerBook
+  190/190cs ROM and 185 from the Quadra 660av/840av ROM after accepting both
+  `kc` and `ck` padding phase around `Kurt` records.
+- Inline validation runs parsed 74 resources from the PowerBook 520/540 ROM at
+  `/tmp/stackimport-rom-inline-pb520` and 48 resources from the Quadra 900 ROM
+  at `/tmp/stackimport-rom-inline-quadra900`. Both runs include named
+  `DefQDColors`, `8BitStd`, `4BitStd`, `2BitStd`, and `1BitStd` `clut`
+  resources with JSON and PNG swatch previews; the PowerBook 520/540 run also
+  converts `snd ` ID 1 `Brass Horn` to WAV.
+- `analysis.json.resources` and `resources.tsv` now carry `length`,
+  `stored_length`, `expected_length`, and `wrapper_format` so ROM-packed
+  resources remain distinguishable from ordinary resource-fork payloads.
+- `--emit-resource-index` now writes a portable `resource-index/index.json`
+  plus raw and converted artifacts under `resource-index/resources/`. This index
+  is keyed by ROM identity, resource type, resource ID, and address so later
+  converters can explicitly depend on ROM-backed resources such as default
+  palettes without global ROM discovery.
+- `snd ` resources now emit JSON metadata even when WAV conversion fails. This
+  records the format word, conversion status/error, command metadata when
+  applicable, and first bytes. Current evidence shows `Simple Beep` in the
+  PowerBook 190 and Quadra 660av ROMs has a zero format word and should remain
+  preserved until its packed/synthesized sound format is understood.
+- Compact ROM `pixs` resources now render to PNG for 11 of 12 records in each
+  PowerBook 190 and Quadra 660av validation run. The short ROM `ppat` ID 18
+  resources also render through the same compact PixMap fallback. The remaining
+  `pixs` ID `-10208` records are larger structures and still need separate
+  analysis.
+- Most DiskMode `PICT` resources in the validated ROMs render to PNG. The
+  larger DiskMode 6 variants in the PowerBook 190 and Quadra 660av ROMs remain
+  raw, as do the compact/special `cicn` ID `-20020` and 140-byte wrapped `ICON`
+  records.
+- The default Macintosh 8-bit palette source-of-truth candidate is now available
+  as ROM resource `clut` ID 8 (`8BitStd`) in the named old-world ROM runs. The
+  4-bit palette remains available as `clut` ID 4 (`4BitStd`). The remaining work
+  is to validate the selected ROM `clut` against QuickTime's default-palette
+  semantics and wire the extracted table into `mov2qt`.
+
 Requirements:
 
 - Detect resource maps, resource type lists, resource records, names, IDs, attributes, data offsets, and lengths.
 - Preserve raw resource bytes under output when `--emit-assets` is set.
-- Convert supported visual/audio/text resources where available: `CURS`, `crsr`, `ICON`, `ICN#`, `cicn`, `PICT`, `ppat`, `PAT#`, `snd `, `STR `, `STR#`, `MENU`, `ALRT`, `DITL`, `FOND`, `NFNT`, `FONT`, `DRVR`, `CODE`, `PACK`, `cfrg`, `decl`, `boot`, `ptch`.
+- Convert supported visual/audio/text resources where available: `CURS`, `crsr`, `ICON`, `ICN#`, `cicn`, `PICT`, `pixs`, `ppat`, `PAT#`, `snd `, `STR `, `STR#`, `MENU`, `ALRT`, `DITL`, `FOND`, `NFNT`, `FONT`, `DRVR`, `CODE`, `PACK`, `cfrg`, `decl`, `boot`, `ptch`.
 - For unsupported resources, emit metadata with `decode_status=preserved`.
 - Include output path, media type, dimensions/duration where known, and converter used.
 
@@ -222,7 +268,7 @@ Outputs:
 Suggested `resources.tsv` columns:
 
 ```text
-id	address	kind	resource_type	resource_id	name	media_type	output_file	confidence	source
+id	rom_id	address	kind	resource_type	resource_id	name	length	stored_length	expected_length	wrapper_format	media_type	output_file	confidence	source
 ```
 
 Acceptance:
@@ -522,8 +568,11 @@ Final validation counts:
 
 Remaining deep-analysis work:
 
-- Parse real ROM-resident resource maps in the tested ROMs, not just marker occurrences.
-- Emit converted assets once parsed resource records are found.
+- Continue improving ROM-resident resource mapping beyond the current standard
+  resource-fork, inline, and `Kurt` record coverage.
+- Extend converted assets for the remaining raw image-like payloads, especially
+  `pixs` ID `-10208`, compact/special `cicn` ID `-20020`, 140-byte wrapped
+  `ICON` records, and large DiskMode 6 `PICT` variants.
 - Infer defensible function ranges and instruction counts.
 - Add source-root correlation for SuperMario overlays.
 - Improve string and pointer-table false-positive filtering with fixture-backed tests.

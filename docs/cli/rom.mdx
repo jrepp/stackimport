@@ -59,6 +59,38 @@ warnings. Address columns are uppercase eight-digit hex without a `0x` prefix.
 All atlas TSVs are UTF-8 text. Legacy high-bit bytes found in ROM-derived names
 or strings are escaped before they reach TSV/JSON output.
 
+## Resource Index
+
+Use `--emit-resource-index` to write a portable ROM resource index alongside the
+normal ROM analysis output:
+
+```sh
+build/stackimport \
+  rom /path/to/ROM \
+  --rom-base 0x40800000 \
+  --output /tmp/rom-analysis \
+  --emit-resource-index
+```
+
+The index lives under `resource-index/` inside the output directory:
+
+| Path                        | Purpose                                                          |
+| --------------------------- | ---------------------------------------------------------------- |
+| `resource-index/index.json` | ROM identity plus normalized parsed resource records.            |
+| `resource-index/resources/` | Raw and converted resource artifacts referenced by `index.json`. |
+
+`--emit-resource-index` also emits the standard ROM resource assets used by
+`analysis.json`, so `assets/resources/` remains available for atlas-style
+inspection. The index itself is self-contained: every artifact path in
+`index.json` is relative to `resource-index/`.
+
+Resource index entries are keyed by ROM identity, resource type, resource ID,
+and address. Each entry records the resource name, ROM addresses, flags,
+`length`, `stored_length`, `expected_length`, `wrapper_format`, source,
+confidence, raw artifact path, and converted artifact list. This makes ROM data
+usable by later converters that need historically ROM-backed resources such as
+default QuickDraw/QuickTime palettes.
+
 ## Analysis Coverage
 
 Current ROM mode emits deterministic rows for these analysis areas:
@@ -87,16 +119,25 @@ data region are downgraded in confidence so downstream tools can filter them.
 Resource support distinguishes marker-only hits from parsed resource-map records.
 When a standard Classic Mac resource fork is found inside the ROM, StackImport
 emits `parsed` resource rows with type, ID, name, flags, data address, byte
-length, decode status, confidence, and source. `data-regions.tsv` also receives
-`resource_fork_header`, `resource_data`, and `resource_map` rows.
+length, decode status, confidence, and source. ROM mode also maps older inline
+ROM resources and ROM-packed `Kurt` resources when their local metadata and
+payload layout can be validated. Parsed rows include `length`, `stored_length`,
+`expected_length`, and `wrapper_format` fields so packed ROM records can be
+audited separately from ordinary resource-fork records. `data-regions.tsv` also
+receives resource-oriented data rows such as `resource_fork_header`,
+`resource_data`, `resource_map`, `rom_inline_resources`, and
+`rom_kurt_resources`.
 Marker-only resource rows still appear in `resources.tsv` and source-gap output
 so partial resource coverage is visible instead of silently absent.
 
 When `--emit-assets` is set, parsed resource payload bytes are preserved under
 `assets/resources/`. Supported built-in conversions are emitted next to the raw
 payload; `STR ` resources produce UTF-8 `.txt` derivatives, decoded RGBA
-resources such as `ICON`, `CURS`, and icon-family resources are written as PNG,
-sampled `snd ` resources are written as WAV, and parsed 68K code-bearing
+resources such as `ICON`, `CURS`, icon-family resources, compact ROM `pixs`
+payloads, short-form ROM `ppat` payloads, and color-table swatch previews are
+written as PNG. Sampled `snd ` resources are written as WAV, while non-converted
+`snd ` resources still emit JSON metadata that records the format word,
+conversion status, conversion error, and leading bytes. Parsed 68K code-bearing
 resources such as `CODE`, `DRVR`, `dcmp`, `PACK`, `boot`, and `ptch` include
 assembly text artifacts when the built-in converter supports the resource.
 Bitmap font resources (`FONT` and `NFNT`) emit JSON header metadata and a PNG

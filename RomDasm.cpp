@@ -301,6 +301,8 @@ bool parse_resource_map_at(
       record.id = id;
       record.flags = flags;
       record.length = resource_size;
+      record.stored_length = resource_size;
+      record.expected_length = resource_size;
       record.order = order++;
       record.confidence = 0.90;
       record.source = "resource-map";
@@ -320,6 +322,221 @@ bool parse_resource_map_at(
   for(auto& record : records)
     analysis.resources.push_back(std::move(record));
   return true;
+}
+
+uint32_t read_u32be(const uint8_t* data) {
+  return (static_cast<uint32_t>(data[0]) << 24u) |
+         (static_cast<uint32_t>(data[1]) << 16u) |
+         (static_cast<uint32_t>(data[2]) << 8u) |
+         static_cast<uint32_t>(data[3]);
+}
+
+uint16_t read_u16be(const uint8_t* data) {
+  return static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8u) | data[1]);
+}
+
+bool is_kckc_padding(std::span<const uint8_t> data, size_t start, size_t end) {
+  if(start > end || end > data.size())
+    return false;
+  if(start == end)
+    return true;
+  if(data[start] != static_cast<uint8_t>('k') && data[start] != static_cast<uint8_t>('c'))
+    return false;
+  for(size_t i = start; i < end; i++) {
+    const uint8_t expected = ((i - start) % 2u) == 0 ? data[start] :
+      (data[start] == static_cast<uint8_t>('k') ? static_cast<uint8_t>('c') : static_cast<uint8_t>('k'));
+    if(data[i] != expected)
+      return false;
+  }
+  return true;
+}
+
+bool parse_rom_kurt_resource_at(
+    RomAnalysis& analysis,
+    std::span<const uint8_t> data,
+    uint32_t base_address,
+    size_t kurt_offset,
+    size_t order) {
+  if(kurt_offset < 8 || kurt_offset + 16 > data.size())
+    return false;
+  if(data[kurt_offset] != 'K' || data[kurt_offset + 1] != 'u' ||
+     data[kurt_offset + 2] != 'r' || data[kurt_offset + 3] != 't')
+    return false;
+
+  const uint32_t packed_length = read_u32be(data.data() + kurt_offset + 8);
+  const uint32_t unpacked_length = read_u32be(data.data() + kurt_offset + 12);
+  if(packed_length == 0 || unpacked_length == 0 || packed_length > 16u * 1024u * 1024u)
+    return false;
+  if(static_cast<uint64_t>(kurt_offset) + 16u + packed_length > data.size())
+    return false;
+
+  const size_t search_start = kurt_offset > 64 ? kurt_offset - 64 : 0;
+  size_t metadata_offset = data.size();
+  for(size_t candidate = kurt_offset >= 8 ? kurt_offset - 8 : 0;; candidate--) {
+    if(candidate < search_start || candidate + 8 > kurt_offset)
+      break;
+    if(!resource_type_is_plausible(data.data() + candidate))
+      continue;
+    const uint8_t name_length = data[candidate + 7];
+    const size_t name_start = candidate + 8u;
+    const size_t padding_start = name_start + name_length;
+    if(padding_start > kurt_offset)
+      continue;
+    if(!is_kckc_padding(data, padding_start, kurt_offset))
+      continue;
+    metadata_offset = candidate;
+    break;
+  }
+  if(metadata_offset == data.size())
+    return false;
+
+  (void)unpacked_length;
+  ResourceRecord record;
+  record.address = base_address + static_cast<uint32_t>(kurt_offset + 16u);
+  record.map_address = base_address + static_cast<uint32_t>(metadata_offset);
+  record.data_address = base_address + static_cast<uint32_t>(kurt_offset);
+  record.type = safe_ascii_bytes(data.data() + metadata_offset, 4);
+  record.id = static_cast<int16_t>(read_u16be(data.data() + metadata_offset + 4));
+  record.flags = data[metadata_offset + 6];
+  record.length = packed_length;
+  record.stored_length = packed_length;
+  record.expected_length = unpacked_length;
+  record.wrapper_format = "Kurt";
+  record.order = order;
+  record.confidence = 0.82;
+  record.source = "rom-kurt-resource";
+  const uint8_t name_length = data[metadata_offset + 7];
+  if(name_length != 0 && metadata_offset + 8u + name_length <= kurt_offset)
+    record.name = safe_ascii_bytes(data.data() + metadata_offset + 8u, name_length);
+
+  analysis.resources.push_back(std::move(record));
+  return true;
+}
+
+bool resource_record_already_exists(
+    const RomAnalysis& analysis,
+    const std::string& type,
+    int32_t id,
+    uint32_t address) {
+  for(const auto& record : analysis.resources) {
+    if(record.type == type && record.id == id && record.address == address)
+      return true;
+  }
+  return false;
+}
+
+bool parse_rom_inline_resource_at(
+    RomAnalysis& analysis,
+    std::span<const uint8_t> data,
+    uint32_t base_address,
+    size_t type_offset,
+    size_t order) {
+  if(type_offset < 16 || type_offset + 8 > data.size())
+    return false;
+  const size_t prefix_offset = type_offset - 16u;
+  const uint8_t prefix_flags = data[prefix_offset];
+  if(prefix_flags != 0x08u && prefix_flags != 0x78u)
+    return false;
+  for(size_t i = 1; i < 8; i++) {
+    if(data[prefix_offset + i] != 0)
+      return false;
+  }
+  if(!resource_type_is_plausible(data.data() + type_offset))
+    return false;
+
+  const uint32_t previous_payload_offset = read_u32be(data.data() + prefix_offset + 8u);
+  const uint32_t payload_offset = read_u32be(data.data() + prefix_offset + 12u);
+  if(payload_offset < type_offset + 8u || payload_offset > data.size())
+    return false;
+  if(previous_payload_offset != 0 && previous_payload_offset >= payload_offset)
+    return false;
+  if(payload_offset - type_offset > 512u)
+    return false;
+  if(payload_offset + 4u <= data.size() &&
+     data[payload_offset] == 'K' && data[payload_offset + 1] == 'u' &&
+     data[payload_offset + 2] == 'r' && data[payload_offset + 3] == 't')
+    return false;
+  if(payload_offset < 8u)
+    return false;
+
+  const uint8_t name_length = data[type_offset + 7u];
+  if(name_length > 63u || type_offset + 8u + name_length > payload_offset)
+    return false;
+  const uint32_t length = read_u32be(data.data() + payload_offset - 8u);
+  if(length == 0 || length > 16u * 1024u * 1024u)
+    return false;
+  if(static_cast<uint64_t>(payload_offset) + length > data.size())
+    return false;
+
+  ResourceRecord record;
+  record.address = base_address + payload_offset;
+  record.map_address = base_address + static_cast<uint32_t>(type_offset);
+  record.data_address = base_address + payload_offset;
+  record.type = safe_ascii_bytes(data.data() + type_offset, 4);
+  record.id = static_cast<int16_t>(read_u16be(data.data() + type_offset + 4u));
+  record.flags = data[type_offset + 6u];
+  record.length = length;
+  record.stored_length = length;
+  record.expected_length = length;
+  record.order = order;
+  record.confidence = 0.78;
+  record.source = "rom-inline-resource";
+  if(name_length != 0)
+    record.name = safe_ascii_bytes(data.data() + type_offset + 8u, name_length);
+
+  if(resource_record_already_exists(analysis, record.type, record.id, record.address))
+    return false;
+  analysis.resources.push_back(std::move(record));
+  return true;
+}
+
+void parse_rom_inline_resources(
+    RomAnalysis& analysis,
+    std::span<const uint8_t> data,
+    uint32_t base_address) {
+  const size_t first_resource_index = analysis.resources.size();
+  size_t order = first_resource_index;
+  for(size_t offset = 16; offset + 8 <= data.size(); offset++) {
+    if(!resource_type_is_plausible(data.data() + offset))
+      continue;
+    if(parse_rom_inline_resource_at(analysis, data, base_address, offset, order))
+      order++;
+  }
+  if(analysis.resources.size() > first_resource_index) {
+    const size_t count = analysis.resources.size() - first_resource_index;
+    uint32_t start = analysis.resources[first_resource_index].map_address;
+    uint32_t end = analysis.resources[first_resource_index].address;
+    for(size_t i = first_resource_index; i < analysis.resources.size(); i++) {
+      start = std::min(start, analysis.resources[i].map_address);
+      end = std::max(end, analysis.resources[i].address + static_cast<uint32_t>(analysis.resources[i].length));
+    }
+    analysis.data_regions.push_back({start, end, "rom_inline_resources", count, 0.78});
+  }
+}
+
+void parse_rom_kurt_resources(
+    RomAnalysis& analysis,
+    std::span<const uint8_t> data,
+    uint32_t base_address) {
+  const size_t first_resource_index = analysis.resources.size();
+  size_t order = first_resource_index;
+  for(size_t offset = 0; offset + 16 <= data.size(); offset++) {
+    if(data[offset] != 'K' || data[offset + 1] != 'u' ||
+       data[offset + 2] != 'r' || data[offset + 3] != 't')
+      continue;
+    if(parse_rom_kurt_resource_at(analysis, data, base_address, offset, order))
+      order++;
+  }
+  if(analysis.resources.size() > first_resource_index) {
+    const size_t count = analysis.resources.size() - first_resource_index;
+    uint32_t start = analysis.resources[first_resource_index].data_address;
+    uint32_t end = analysis.resources[first_resource_index].data_address;
+    for(size_t i = first_resource_index; i < analysis.resources.size(); i++) {
+      start = std::min(start, analysis.resources[i].map_address);
+      end = std::max(end, analysis.resources[i].address + static_cast<uint32_t>(analysis.resources[i].length));
+    }
+    analysis.data_regions.push_back({start, end, "rom_kurt_resources", count, 0.72});
+  }
 }
 
 bool address_in_data_region(const RomAnalysis& analysis, uint32_t address) {
@@ -852,6 +1069,9 @@ void classify_rom_structure(
       offset += std::max<size_t>(32, map.map_address - base_address - offset);
     }
   }
+
+  parse_rom_inline_resources(analysis, data, base_address);
+  parse_rom_kurt_resources(analysis, data, base_address);
 
   if(!analysis.data_regions.empty()) {
     for(auto& region : analysis.code_regions) {

@@ -7,14 +7,14 @@ Myst movie assets currently use classic QuickTime split media: `mdat` sample
 data in the data fork and `moov` metadata in the resource fork. The vendored
 `mov2qt` parser records a codec mapping for each `stsd` sample description.
 
-| FourCC | Name                                          | Kind  | Current path                      | Permissive decoder status                                                                                 |
-| ------ | --------------------------------------------- | ----- | --------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `cvid` | Cinepak                                       | Video | Research before implementation    | No permissive C/C++ decoder found yet; FFmpeg has an LGPL decoder and encoder.                            |
-| `rpza` | Apple Video / Road Pizza                      | Video | Good clean-room candidate         | No permissive C/C++ decoder found yet; public format notes describe the 4x4 RGB555 block stream.          |
-| `rle ` | QuickTime Animation / QTRLE                   | Video | Good clean-room candidate         | No permissive C/C++ decoder found yet; public format notes describe the RLE packet stream and bit depths. |
-| `raw ` | Unsigned 8-bit PCM, when used on sound tracks | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
-| `twos` | Signed big-endian PCM                         | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
-| `sowt` | Signed little-endian PCM                      | Audio | Internal WAV conversion candidate | Third-party decoder not required.                                                                         |
+| FourCC | Name                                          | Kind  | Current path                      | Permissive decoder status                                                                                   |
+| ------ | --------------------------------------------- | ----- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `cvid` | Cinepak                                       | Video | Clean-room PNG previews landed    | No permissive C/C++ decoder found yet; StackImport uses an independently written decoder from public notes. |
+| `rpza` | Apple Video / Road Pizza                      | Video | Clean-room PNG previews landed    | No permissive C/C++ decoder found yet; StackImport uses an independently written decoder from public notes. |
+| `rle ` | QuickTime Animation / QTRLE                   | Video | 8-bit indexed PNG previews landed | No permissive C/C++ decoder found yet; public format notes describe the RLE packet stream and bit depths.   |
+| `raw ` | Unsigned 8-bit PCM, when used on sound tracks | Audio | WAV export landed                 | Third-party decoder not required.                                                                           |
+| `twos` | Signed big-endian PCM                         | Audio | WAV export landed                 | Third-party decoder not required.                                                                           |
+| `sowt` | Signed little-endian PCM                      | Audio | WAV export landed                 | Third-party decoder not required.                                                                           |
 
 Initial source checks:
 
@@ -27,14 +27,34 @@ Initial source checks:
   are better inputs for clean-room implementation planning than copying LGPL
   decoder code.
 
-Implementation priority:
+Current conversion status:
 
-1. Finish sample-table extraction for sample sizes, sample-to-chunk mappings,
-   time-to-sample runs, and chunk offsets.
-2. Implement internal PCM extraction for `raw ` and `twos` sound tracks.
-3. Implement `rpza` and `rle ` as small clean-room video decoders.
-4. Revisit `cvid` after sample extraction is solid; it is the largest Myst
-   codec by count and has more state than RPZA/QTRLE.
+- `mov2qt` parses the sample tables needed by the importer: sample sizes,
+  sample-to-chunk mappings, decode timing runs, 32-bit and 64-bit chunk offsets,
+  and video/audio sample-description fields.
+- PCM sound tracks using `raw `, `twos`, and `sowt` export WAV files without a
+  third-party codec dependency.
+- `rpza` tracks export capped PNG frame previews with frame timing manifests.
+- `cvid` tracks export capped PNG frame previews with state carried across
+  strips and samples; manifests retain `samplePacketCount`, `exportLimit`, and
+  `truncated` so preview caps do not hide the source packet count.
+- `rle ` tracks export 8-bit indexed PNG frame previews. Embedded color tables
+  are used when present. Nonzero QuickTime default color-table IDs currently use
+  StackImport's generated default Macintosh 8-bit palette as a fallback until
+  ROM extraction provides the source-of-truth table.
+
+Trajectory:
+
+1. Extract the default Macintosh 8-bit color table directly from known-good ROM
+   resource data and use that as the authoritative `rle ` fallback palette.
+2. Preserve per-track raw packet manifests with source offsets, byte sizes,
+   timestamps, durations, keyframe/sync metadata when present, and hashes.
+3. Extend QTRLE beyond the Myst-observed 8-bit path to 1, 2, 4, 16, 24, and
+   32 bpp variants.
+4. Broaden synthetic and corpus-derived fixtures for Cinepak codebook updates,
+   skipped inter blocks, multi-strip frames, and QTRLE partial updates.
+5. Decide whether modern movie assembly belongs in-tree or remains an optional
+   external workflow over the existing WAV/PNG/timing outputs.
 
 See [QuickTime Decoder Implementation Plan](../quicktime-decoder-implementation-plan/)
 for the implementation sequence and acceptance criteria.

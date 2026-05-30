@@ -6,6 +6,9 @@
 #include "stackimport_version.h"
 #include "stackimport/mov2qt.hpp"
 
+#include <array>
+#include <cctype>
+#include <climits>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
@@ -23,8 +26,7 @@ namespace stackimport::cli {
 namespace {
 
 namespace fs = std::filesystem;
-
-constexpr size_t kQuickTimeFramePreviewLimit = 16;
+using QuickTimePalette = std::vector<std::array<uint8_t, 4>>;
 
 void* cli_allocate(size_t size, size_t alignment, void*)
 {
@@ -315,12 +317,100 @@ const stackimport::mov2qt::SampleDescription* first_track_description_with_forma
 	return nullptr;
 }
 
+uint8_t clut_channel_to_u8(uint32_t value)
+{
+	return static_cast<uint8_t>(std::min<uint32_t>(255u, (value + 128u) / 257u));
+}
+
+bool parse_generated_json_uint(const std::string& text, size_t objectStart, const char* key, uint32_t& value)
+{
+	const std::string needle = std::string("\"") + key + "\"";
+	size_t pos = text.find(needle, objectStart);
+	if(pos == std::string::npos)
+		return false;
+	pos = text.find(':', pos + needle.size());
+	if(pos == std::string::npos)
+		return false;
+	pos++;
+	while(pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+		pos++;
+	if(pos >= text.size() || !std::isdigit(static_cast<unsigned char>(text[pos])))
+		return false;
+	uint32_t parsed = 0;
+	while(pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos])))
+	{
+		const uint32_t digit = static_cast<uint32_t>(text[pos] - '0');
+		if(parsed > (UINT32_MAX - digit) / 10u)
+			return false;
+		parsed = parsed * 10u + digit;
+		pos++;
+	}
+	value = parsed;
+	return true;
+}
+
+bool load_quicktime_palette(const std::string& path, QuickTimePalette& palette, std::string& error)
+{
+	palette.clear();
+	if(path.empty())
+		return true;
+	std::vector<uint8_t> bytes;
+	if(!read_entire_file(path, bytes))
+	{
+		error = "could not read palette JSON";
+		return false;
+	}
+	const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+	size_t pos = text.find("\"entries\"");
+	if(pos == std::string::npos)
+	{
+		error = "palette JSON is not a stackimport clut export";
+		return false;
+	}
+	pos = text.find('[', pos);
+	if(pos == std::string::npos)
+	{
+		error = "palette JSON entries array is missing";
+		return false;
+	}
+	palette.reserve(256);
+	while(palette.size() < 256)
+	{
+		const size_t objectStart = text.find('{', pos);
+		if(objectStart == std::string::npos)
+		{
+			error = "QuickTime default palette requires exactly 256 entries";
+			return false;
+		}
+		uint32_t red = 0;
+		uint32_t green = 0;
+		uint32_t blue = 0;
+		if(!parse_generated_json_uint(text, objectStart, "red", red) ||
+			!parse_generated_json_uint(text, objectStart, "green", green) ||
+			!parse_generated_json_uint(text, objectStart, "blue", blue))
+		{
+			error = "palette entry is missing red/green/blue channels";
+			return false;
+		}
+		palette.push_back({
+			clut_channel_to_u8(red),
+			clut_channel_to_u8(green),
+			clut_channel_to_u8(blue),
+			0xFF,
+		});
+		pos = objectStart + 1u;
+	}
+	return true;
+}
+
 bool write_video_frame_exports(
 	const std::vector<uint8_t>& bytes,
 	const fs::path& packageRoot,
 	const fs::path& relPath,
 	size_t trackIndex,
 	const stackimport::mov2qt::Track& track,
+	uint32_t frameLimit,
+	const QuickTimePalette& defaultPalette,
 	std::string& manifestPath)
 {
 	const bool isRpza = track_has_format(track, "rpza");
@@ -344,7 +434,7 @@ bool write_video_frame_exports(
 	stackimport::mov2qt::CinepakDecoderState cinepakState;
 	for(const stackimport::mov2qt::SamplePacket& packet : track.sample_packets)
 	{
-		if(frameCount >= kQuickTimeFramePreviewLimit)
+		if(frameLimit != 0 && frameCount >= frameLimit)
 			break;
 		std::span<const uint8_t> packetBytes;
 		std::string error;
@@ -357,7 +447,12 @@ bool write_video_frame_exports(
 		else if(isCinepak)
 			decoded = stackimport::mov2qt::decode_cinepak_frame(packetBytes, frame, error, &cinepakState);
 		else
-			decoded = stackimport::mov2qt::decode_qtrle_frame(packetBytes, trackWidth, trackHeight, qtrleDescription->sample_size_bits, std::span<const std::array<uint8_t, 4>>(qtrleDescription->palette_rgba.data(), qtrleDescription->palette_rgba.size()), frame, error, havePreviousFrame ? &previousFrame : nullptr);
+		{
+			const QuickTimePalette& palette = (!defaultPalette.empty() && qtrleDescription->compression_id != 0) ?
+				defaultPalette :
+				qtrleDescription->palette_rgba;
+			decoded = stackimport::mov2qt::decode_qtrle_frame(packetBytes, trackWidth, trackHeight, qtrleDescription->sample_size_bits, std::span<const std::array<uint8_t, 4>>(palette.data(), palette.size()), frame, error, havePreviousFrame ? &previousFrame : nullptr);
+		}
 		if(!decoded)
 			continue;
 		if(frame.width == 0 || frame.height == 0 || frame.rgba.empty())
@@ -393,9 +488,10 @@ bool write_video_frame_exports(
 	manifest += "  \"trackIndex\": " + std::to_string(trackIndex + 1u) + ",\n";
 	manifest += "  \"width\": " + std::to_string(manifestWidth) + ",\n";
 	manifest += "  \"height\": " + std::to_string(manifestHeight) + ",\n";
+	manifest += "  \"timeScale\": " + std::to_string(track.time_scale) + ",\n";
 	manifest += "  \"samplePacketCount\": " + std::to_string(track.sample_packets.size()) + ",\n";
-	manifest += "  \"exportLimit\": " + std::to_string(kQuickTimeFramePreviewLimit) + ",\n";
-	manifest += "  \"truncated\": " + std::string(track.sample_packets.size() > frameCount ? "true" : "false") + ",\n";
+	manifest += "  \"exportLimit\": " + std::to_string(frameLimit) + ",\n";
+	manifest += "  \"truncated\": " + std::string(frameLimit != 0 && track.sample_packets.size() > frameCount ? "true" : "false") + ",\n";
 	manifest += "  \"frames\": [\n";
 	manifest += frames;
 	manifest += "\n  ],\n";
@@ -412,7 +508,15 @@ bool write_video_frame_exports(
 	return true;
 }
 
-bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, const fs::path& relPath, std::string& packagePath, std::vector<std::string>& audioPaths, std::vector<std::string>& frameManifestPaths)
+bool write_movie_analysis(
+	const fs::path& source,
+	const fs::path& packageRoot,
+	const fs::path& relPath,
+	uint32_t quicktimeFrameLimit,
+	const QuickTimePalette& defaultPalette,
+	std::string& packagePath,
+	std::vector<std::string>& audioPaths,
+	std::vector<std::string>& frameManifestPaths)
 {
 	std::vector<uint8_t> bytes;
 	if(!read_entire_file(source.string(), bytes))
@@ -450,7 +554,7 @@ bool write_movie_analysis(const fs::path& source, const fs::path& packageRoot, c
 	for(size_t trackIndex = 0; trackIndex < analysis.tracks.size(); trackIndex++)
 	{
 		std::string frameManifestPath;
-		if(!write_video_frame_exports(bytes, packageRoot, relPath, trackIndex, analysis.tracks[trackIndex], frameManifestPath))
+		if(!write_video_frame_exports(bytes, packageRoot, relPath, trackIndex, analysis.tracks[trackIndex], quicktimeFrameLimit, defaultPalette, frameManifestPath))
 			stackimport_quill_diagnosticf("Warning: Could not write QuickTime frame exports for '%s' track %zu.\n", source.string().c_str(), trackIndex + 1u);
 		if(!frameManifestPath.empty())
 			frameManifestPaths.push_back(frameManifestPath);
@@ -475,11 +579,24 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 
 	const fs::path assetRoot = packageRoot / "external-assets";
 	const fs::path assetFilesRoot = assetRoot / "files";
-	fs::create_directories(assetFilesRoot, ec);
-	if(ec)
+	QuickTimePalette quickTimeDefaultPalette;
+	std::string paletteError;
+	if(!load_quicktime_palette(options.quicktime_default_palette_path, quickTimeDefaultPalette, paletteError))
 	{
-		stackimport_quill_diagnosticf("Error: Could not create external asset directory '%s'.\n", assetFilesRoot.string().c_str());
+		stackimport_quill_diagnosticf(
+			"Error: Could not load --quicktime-default-palette '%s': %s.\n",
+			options.quicktime_default_palette_path.c_str(),
+			paletteError.c_str());
 		return false;
+	}
+	if(!options.media_reference_only)
+	{
+		fs::create_directories(assetFilesRoot, ec);
+		if(ec)
+		{
+			stackimport_quill_diagnosticf("Error: Could not create external asset directory '%s'.\n", assetFilesRoot.string().c_str());
+			return false;
+		}
 	}
 
 	std::string manifest = "{\n";
@@ -488,6 +605,7 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 	manifest += "  \"generator\": \"stackimport " STACKIMPORT_VERSION_STRING "\",\n";
 	manifest += "  \"sourceStack\": \"" + json_escape(options.input_path) + "\",\n";
 	manifest += "  \"mediaRoot\": \"" + json_escape(options.media_root_path) + "\",\n";
+	manifest += "  \"mediaReferenceOnly\": " + std::string(options.media_reference_only ? "true" : "false") + ",\n";
 	manifest += "  \"assets\": [\n";
 
 	size_t assetCount = 0;
@@ -516,12 +634,15 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 
 		const std::string relPath = relative_path_string(mediaRoot, source);
 		const fs::path packagedRelPath = fs::path("external-assets") / "files" / fs::path(relPath);
-		const fs::path destination = packageRoot / packagedRelPath;
-		if(!copy_asset_file(source, destination))
+		if(!options.media_reference_only)
 		{
-			stackimport_quill_diagnosticf("Warning: Could not package external asset '%s'.\n", source.string().c_str());
-			ok = false;
-			continue;
+			const fs::path destination = packageRoot / packagedRelPath;
+			if(!copy_asset_file(source, destination))
+			{
+				stackimport_quill_diagnosticf("Warning: Could not package external asset '%s'.\n", source.string().c_str());
+				ok = false;
+				continue;
+			}
 		}
 
 		const uintmax_t size = fs::file_size(source, ec);
@@ -531,7 +652,7 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 		std::string quicktimeAnalysisPath;
 		std::vector<std::string> quicktimeAudioPaths;
 		std::vector<std::string> quicktimeFrameManifestPaths;
-		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), quicktimeAnalysisPath, quicktimeAudioPaths, quicktimeFrameManifestPaths))
+		if(kind == "movie" && !write_movie_analysis(source, packageRoot, fs::path(relPath), options.quicktime_frame_limit, quickTimeDefaultPalette, quicktimeAnalysisPath, quicktimeAudioPaths, quicktimeFrameManifestPaths))
 			stackimport_quill_diagnosticf("Warning: Could not parse QuickTime atoms for external asset '%s'.\n", source.string().c_str());
 
 		if(assetCount > 0)
@@ -539,7 +660,10 @@ bool write_external_assets_manifest(const Options& options, const std::string& o
 		manifest += "    {";
 		manifest += "\"sourcePath\":\"" + json_escape(source.string()) + "\",";
 		manifest += "\"relativePath\":\"" + json_escape(relPath) + "\",";
-		manifest += "\"packagePath\":\"" + json_escape(packagedRelPath.generic_string()) + "\",";
+		if(options.media_reference_only)
+			manifest += "\"packagePath\":null,\"packaged\":false,";
+		else
+			manifest += "\"packagePath\":\"" + json_escape(packagedRelPath.generic_string()) + "\",\"packaged\":true,";
 		manifest += "\"bytes\":" + std::to_string(safeSize) + ",";
 		manifest += "\"sha256\":\"" + sha256_for_file(source) + "\",";
 		manifest += "\"finderType\":\"" + json_escape(finderInfo.type) + "\",";

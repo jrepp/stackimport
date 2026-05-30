@@ -6,6 +6,33 @@ description: Plan for turning mov2qt analysis into modern media outputs.
 This plan covers the QuickTime sample formats found in the Myst import runs:
 `cvid`, `rpza`, `rle `, `raw `, and `twos`.
 
+## Current Status
+
+The Myst conversion path now has enough shared QuickTime structure to emit
+usable modern media artifacts:
+
+- Sample tables are parsed into importer-facing packet maps with offsets, sizes,
+  and timing.
+- `raw `, `twos`, and `sowt` audio tracks export WAV files.
+- `rpza`, `cvid`, and 8-bit indexed `rle ` video tracks export capped PNG frame
+  previews plus timing manifests under `quicktimeFrames`.
+- Large video tracks record `samplePacketCount`, `exportLimit`, and `truncated`
+  in their manifests.
+- Embedded `rle ` color tables are honored. Nonzero default color-table IDs use
+  the generated default Macintosh 8-bit palette for now; ROM resource extraction
+  should replace that fallback with an extracted source-of-truth palette.
+
+Near-term trajectory:
+
+1. Finish ROM-backed extraction of the default Macintosh 8-bit color table and
+   wire that data into the QTRLE default-palette path.
+2. Add per-track raw packet manifests for reproducible external conversion and
+   decoder comparison.
+3. Parse and preserve sync sample/keyframe metadata when present.
+4. Extend QTRLE coverage beyond 8-bit indexed samples.
+5. Add more focused clean-room fixtures for Cinepak and QTRLE stateful update
+   behavior.
+
 ## Shared Foundation
 
 1. Complete sample-table extraction in `mov2qt`.

@@ -99,6 +99,9 @@ struct ResourceRecord {
   std::string name;
   uint8_t flags;
   size_t length;
+  size_t stored_length;
+  size_t expected_length;
+  std::string wrapper_format;
   size_t order;
   double confidence;
   std::string source;

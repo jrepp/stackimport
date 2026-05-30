@@ -9,35 +9,36 @@ callbacks. Native resource metadata is recorded in `source-manifest.json`.
 
 ## Image And Cursor Resources
 
-| Type                                           | Conversion                                                                  | Internal path                                               |
-| ---------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `ICON`                                         | 32x32 monochrome icon to RGBA32 payload when size is 128 bytes.             | `emit_builtin_resource_transforms`, `decode_icon_bw`        |
-| `ICN#`                                         | 32x32 monochrome icon/mask pair to RGBA32 payload.                          | `decode_icn_bw`                                             |
-| `SICN`                                         | 16x16 small icon list entries to RGBA32 payload variants.                   | `decode_icon_1bit_list_image`                               |
-| `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8` | Indexed color icons to RGBA32 payloads.                                     | `indexed_icon_spec`, `decode_icon_4bit`, `decode_icon_8bit` |
-| `icm#`, `ics#`                                 | Monochrome icon lists to RGBA32 payload variants.                           | `monochrome_icon_list_spec`, `decode_icon_1bit_masked_pair` |
-| `CURS`                                         | Cursor image to RGBA32 plus JSON hotspot metadata.                          | `emit_curs_transform`                                       |
-| `crsr`                                         | Color cursor to RGBA32 plus JSON metadata.                                  | `emit_crsr_transform`                                       |
-| `PICT`                                         | PICT to PNG binary payload when resource_dasm-backed decoding is available. | `emit_pict_transform`, `DecodePictWithResourceDasmToPng`    |
-| `cicn`                                         | Color icon to RGBA32 plus JSON metadata.                                    | `emit_cicn_transform`                                       |
-| `PAT `                                         | Single QuickDraw pattern to RGBA32.                                         | `decode_pat`                                                |
-| `PAT#`                                         | Pattern list to RGBA32 payload variants.                                    | `patlist::pattern_at`, `decode_pat`                         |
-| `ppat`                                         | Pixel pattern to RGBA32 plus JSON metadata.                                 | `emit_ppat_transform`                                       |
-| `ppt#`                                         | Pixel pattern list to RGBA32 payload variants.                              | `emit_ppt_list_transform`                                   |
+| Type                                           | Conversion                                                                                                                    | Internal path                                                  |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `ICON`                                         | 32x32 monochrome icon to RGBA32 payload when size is 128 bytes.                                                               | `emit_builtin_resource_transforms`, `decode_icon_bw`           |
+| `ICN#`                                         | 32x32 monochrome icon/mask pair to RGBA32 payload.                                                                            | `decode_icn_bw`                                                |
+| `SICN`                                         | 16x16 small icon list entries to RGBA32 payload variants.                                                                     | `decode_icon_1bit_list_image`                                  |
+| `icl4`, `icl8`, `icm4`, `icm8`, `ics4`, `ics8` | Indexed color icons to RGBA32 payloads.                                                                                       | `indexed_icon_spec`, `decode_icon_4bit`, `decode_icon_8bit`    |
+| `icm#`, `ics#`                                 | Monochrome icon lists to RGBA32 payload variants.                                                                             | `monochrome_icon_list_spec`, `decode_icon_1bit_masked_pair`    |
+| `CURS`                                         | Cursor image to RGBA32 plus JSON hotspot metadata.                                                                            | `emit_curs_transform`                                          |
+| `crsr`                                         | Color cursor to RGBA32 plus JSON metadata.                                                                                    | `emit_crsr_transform`                                          |
+| `PICT`                                         | PICT to PNG binary payload when resource_dasm-backed decoding is available.                                                   | `emit_pict_transform`, `DecodePictWithResourceDasmToPng`       |
+| `cicn`                                         | Color icon to RGBA32 plus JSON metadata.                                                                                      | `emit_cicn_transform`                                          |
+| `PAT `                                         | Single QuickDraw pattern to RGBA32.                                                                                           | `decode_pat`                                                   |
+| `PAT#`                                         | Pattern list to RGBA32 payload variants.                                                                                      | `patlist::pattern_at`, `decode_pat`                            |
+| `ppat`                                         | Pixel pattern to RGBA32 plus JSON metadata; ROM compact PixMap fallback to RGBA32 when the full `ppat` parser does not apply. | `emit_ppat_transform`, `emit_compact_indexed_pixmap_transform` |
+| `ppt#`                                         | Pixel pattern list to RGBA32 payload variants.                                                                                | `emit_ppt_list_transform`                                      |
+| `pixs`                                         | ROM compact indexed PixMap payloads to RGBA32 when bounds/depth are recognized.                                               | `emit_compact_indexed_pixmap_transform`                        |
 
 ## Audio And Code Resources
 
-| Type           | Conversion                                                      | Internal path                                                    |
-| -------------- | --------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `snd `         | Converted to WAV binary payload.                                | `emit_snd_transform`, `ConvertSndResourceToWav`                  |
-| `XCMD`, `XFCN` | 68K code resource disassembly as UTF-8 text payload.            | `emit_code_resource_transform`, `DisassembleMac68kCodeResource`  |
-| `xcmd`, `xfcn` | PowerPC code resource disassembly as UTF-8 text payload.        | `emit_code_resource_transform`, `DisassemblePowerPCCodeResource` |
-| `CODE`         | Segment metadata as JSON plus 68K disassembly for segment code. | `emit_code_transform`                                            |
-| `DRVR`         | Driver metadata as JSON plus 68K disassembly for driver code.   | `emit_drvr_transform`                                            |
-| `dcmp`         | Decompressor metadata as JSON plus 68K disassembly for code.    | `emit_dcmp_transform`                                            |
-| `PACK`         | Inline 68K disassembly as UTF-8 text payload.                   | `emit_inline_mac68k_resource_transform`                          |
-| `boot`         | Inline 68K disassembly as UTF-8 text payload.                   | `emit_inline_mac68k_resource_transform`                          |
-| `ptch`         | Inline 68K disassembly as UTF-8 text payload.                   | `emit_inline_mac68k_resource_transform`                          |
+| Type           | Conversion                                                                                                                                      | Internal path                                                    |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `snd `         | Converted to WAV binary payload when sampled-sound conversion succeeds; always emits JSON metadata for recognized and non-converted containers. | `emit_snd_transform`, `ConvertSndResourceToWav`                  |
+| `XCMD`, `XFCN` | 68K code resource disassembly as UTF-8 text payload.                                                                                            | `emit_code_resource_transform`, `DisassembleMac68kCodeResource`  |
+| `xcmd`, `xfcn` | PowerPC code resource disassembly as UTF-8 text payload.                                                                                        | `emit_code_resource_transform`, `DisassemblePowerPCCodeResource` |
+| `CODE`         | Segment metadata as JSON plus 68K disassembly for segment code.                                                                                 | `emit_code_transform`                                            |
+| `DRVR`         | Driver metadata as JSON plus 68K disassembly for driver code.                                                                                   | `emit_drvr_transform`                                            |
+| `dcmp`         | Decompressor metadata as JSON plus 68K disassembly for code.                                                                                    | `emit_dcmp_transform`                                            |
+| `PACK`         | Inline 68K disassembly as UTF-8 text payload.                                                                                                   | `emit_inline_mac68k_resource_transform`                          |
+| `boot`         | Inline 68K disassembly as UTF-8 text payload.                                                                                                   | `emit_inline_mac68k_resource_transform`                          |
+| `ptch`         | Inline 68K disassembly as UTF-8 text payload.                                                                                                   | `emit_inline_mac68k_resource_transform`                          |
 
 ## Text, Color, And Structured Metadata
 
@@ -46,7 +47,7 @@ callbacks. Native resource metadata is recorded in `source-manifest.json`.
 | `STR `, `TEXT`                                                                                         | Mac text to UTF-8 text payload.                                          | `emit_text_transform`                                                                                                                                           |
 | `STR#`, `TwCS`                                                                                         | String list to UTF-8/JSON payload.                                       | `emit_string_list_transform`                                                                                                                                    |
 | `vers`                                                                                                 | Version resource to JSON.                                                | `emit_vers_transform`                                                                                                                                           |
-| `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, `wctb`                                                 | Color table to JSON.                                                     | `emit_color_table_transform`                                                                                                                                    |
+| `clut`, `CTBL`, `actb`, `cctb`, `dctb`, `fctb`, `wctb`                                                 | Color table to JSON plus PNG swatch preview.                             | `emit_color_table_transform`                                                                                                                                    |
 | `pltt`, `PLTE`                                                                                         | Palette metadata to JSON.                                                | `emit_pltt_transform`, `emit_plte_transform`                                                                                                                    |
 | `HCbg`, `HCcd`                                                                                         | AddColor background/card data to JSON.                                   | `emit_addcolor_transform`                                                                                                                                       |
 | `cfrg`                                                                                                 | Code Fragment Manager metadata to JSON.                                  | `emit_cfrg_transform`                                                                                                                                           |
@@ -61,3 +62,42 @@ Unsupported resource types are still preserved in native resource metadata and
 raw package artifacts when resource-fork extraction sees them. New conversions
 should be added through the transform layer so package output and C API payload
 callbacks stay aligned.
+
+## ROM Resource Mapping Notes
+
+ROM mode reuses this conversion layer after it maps ROM-resident resources. The
+current mapper recognizes three resource sources:
+
+- Standard embedded resource forks, when a full resource-fork header/map is
+  present.
+- Older inline ROM resources, using the 16-byte link/payload prefix plus
+  adjacent type, ID, flags, optional Pascal name, payload offset, and payload
+  length fields.
+- ROM-packed `Kurt` resources, using nearby type, ID, flags, optional Pascal
+  name, alternating `kc`/`ck` padding, wrapper lengths, and payload bytes.
+
+`analysis.json.resources` and `resources.tsv` record `length`,
+`stored_length`, `expected_length`, and `wrapper_format` so packed/wrapped ROM
+records remain distinguishable from ordinary resource-fork records.
+
+ROM mode can also write a self-contained resource index with
+`--emit-resource-index`. The index is emitted as `resource-index/index.json`
+with raw and converted files under `resource-index/resources/`. Artifact paths
+inside that index are relative to the `resource-index/` directory so the folder
+can be reused by later conversion tools without requiring the full ROM analysis
+tree.
+
+Recent ROM fixture coverage:
+
+| Resource family        | Current result                                                                                                                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clut`, `cctb`, `wctb` | JSON plus PNG swatch previews. These include named ROM color tables such as `DefQDColors`, `8BitStd`, `4BitStd`, `2BitStd`, and `1BitStd`.                                                                     |
+| `PICT`                 | Most small DiskMode PICT resources render to PNG; the larger DiskMode 6 variants in the PowerBook 190 and Quadra 660av ROMs remain preserved raw.                                                              |
+| `pixs`                 | Compact indexed PixMap resources now render to PNG for 11 of 12 `pixs` records in each PowerBook 190 and Quadra 660av validation run. `pixs` ID `-10208` is a different larger structure and remains raw.      |
+| `ppat`                 | Full `ppat` resources emit JSON plus PNG variants; short ROM `ppat` ID 18 records render through the compact PixMap fallback.                                                                                  |
+| `cicn`                 | Standard color icons emit JSON plus PNG; compact/special `cicn` ID `-20020` remains raw.                                                                                                                       |
+| `snd `                 | Standard sampled `Brass Horn` resources convert to WAV; `Simple Beep` ROM-packed resources are preserved with JSON metadata because their format word is zero rather than a standard sampled `snd ` container. |
+
+The latest local validation outputs for compact PixMap conversion were written
+under `/tmp/stackimport-rom-pixs-pb190-v2` and
+`/tmp/stackimport-rom-pixs-quadra660av-v2`.

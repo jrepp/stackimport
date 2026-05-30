@@ -7,6 +7,7 @@
 #include "StackImportSoundConverter.h"
 #include "stackimport_rapidjson_allocator.h"
 
+#include <array>
 #include <cstring>
 #include <span>
 #include <string>
@@ -1923,7 +1924,15 @@ auto emit_color_table_transform(
 		rsrcd::Bytes{nullptr, 0},
 		"application/json",
 		"parsed color table metadata");
-	if(!output.wants_resource_payload(descriptor))
+	ResourcePayload image_descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		"decoded color table swatch preview");
+	const bool wants_json = output.wants_resource_payload(descriptor);
+	const bool wants_image = output.wants_resource_payload(image_descriptor);
+	if(!wants_json && !wants_image)
 		return true;
 
 	rsrcd::color_table::Table<256> table;
@@ -1931,31 +1940,72 @@ auto emit_color_table_transform(
 	if(!table_result)
 		return output.on_resource_error(ref, table_result.message());
 
-	StackImportRapidJsonAllocator base_alloc;
-	JsonPoolAllocator pool(1024, &base_alloc);
-	JsonDocument doc(&pool, 1024, &base_alloc);
-	doc.SetObject();
-	JsonPoolAllocator& allocator = doc.GetAllocator();
-	doc.AddMember("seed", table.seed, allocator);
-	doc.AddMember("flags", table.flags, allocator);
-
-	JsonValue entries(rapidjson::kArrayType);
-	for(const rsrcd::color_table::Entry& entry : table)
+	if(wants_json)
 	{
-		JsonValue item(rapidjson::kObjectType);
-		item.AddMember("value", entry.value, allocator);
-		item.AddMember("red", entry.red, allocator);
-		item.AddMember("green", entry.green, allocator);
-		item.AddMember("blue", entry.blue, allocator);
-		entries.PushBack(item, allocator);
-	}
-	doc.AddMember("entries", entries, allocator);
+		StackImportRapidJsonAllocator base_alloc;
+		JsonPoolAllocator pool(1024, &base_alloc);
+		JsonDocument doc(&pool, 1024, &base_alloc);
+		doc.SetObject();
+		JsonPoolAllocator& allocator = doc.GetAllocator();
+		doc.AddMember("seed", table.seed, allocator);
+		doc.AddMember("flags", table.flags, allocator);
 
-	JsonStringBuffer json_buffer(&base_alloc);
-	JsonWriter writer(json_buffer, &base_alloc);
-	doc.Accept(writer);
-	descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
-	return output.on_resource_payload(descriptor);
+		JsonValue entries(rapidjson::kArrayType);
+		for(const rsrcd::color_table::Entry& entry : table)
+		{
+			JsonValue item(rapidjson::kObjectType);
+			item.AddMember("value", entry.value, allocator);
+			item.AddMember("red", entry.red, allocator);
+			item.AddMember("green", entry.green, allocator);
+			item.AddMember("blue", entry.blue, allocator);
+			entries.PushBack(item, allocator);
+		}
+		doc.AddMember("entries", entries, allocator);
+
+		JsonStringBuffer json_buffer(&base_alloc);
+		JsonWriter writer(json_buffer, &base_alloc);
+		doc.Accept(writer);
+		descriptor.data = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(json_buffer.GetString()), json_buffer.GetSize()};
+		if(!output.on_resource_payload(descriptor))
+			return false;
+	}
+
+	if(wants_image)
+	{
+		constexpr uint32_t tile_size = 16;
+		constexpr uint32_t columns = 16;
+		const uint32_t rows = static_cast<uint32_t>((table.count() + columns - 1u) / columns);
+		const uint32_t width = columns * tile_size;
+		const uint32_t height = std::max<uint32_t>(1u, rows) * tile_size;
+		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4u, 0xFF);
+		for(size_t i = 0; i < table.count(); i++)
+		{
+			const rsrcd::color_table::Entry& entry = table[i];
+			const uint32_t x0 = static_cast<uint32_t>(i % columns) * tile_size;
+			const uint32_t y0 = static_cast<uint32_t>(i / columns) * tile_size;
+			const uint8_t red = static_cast<uint8_t>(entry.red >> 8u);
+			const uint8_t green = static_cast<uint8_t>(entry.green >> 8u);
+			const uint8_t blue = static_cast<uint8_t>(entry.blue >> 8u);
+			for(uint32_t y = 0; y < tile_size; y++)
+			{
+				for(uint32_t x = 0; x < tile_size; x++)
+				{
+					const size_t offset = (static_cast<size_t>(y0 + y) * width + x0 + x) * 4u;
+					pixels[offset + 0] = red;
+					pixels[offset + 1] = green;
+					pixels[offset + 2] = blue;
+					pixels[offset + 3] = 0xFF;
+				}
+			}
+		}
+		image_descriptor.width = width;
+		image_descriptor.height = height;
+		image_descriptor.row_bytes = width * 4u;
+		image_descriptor.data = rsrcd::Bytes{pixels.data(), pixels.size()};
+		if(!output.on_resource_payload(image_descriptor))
+			return false;
+	}
+	return true;
 }
 
 auto emit_pltt_transform(
@@ -2172,6 +2222,169 @@ auto emit_rgba_payload(
 	return output.on_resource_payload(descriptor);
 }
 
+struct CompactIndexedPixmap
+{
+	uint16_t row_bytes = 0;
+	uint16_t width = 0;
+	uint16_t height = 0;
+	uint16_t pixel_size = 0;
+	size_t pixel_data_offset = 0;
+	size_t pixel_data_size = 0;
+};
+
+uint16_t read_be_u16(const rsrcd::Bytes& data, size_t offset)
+{
+	return static_cast<uint16_t>(
+		(static_cast<uint16_t>(data.data[offset]) << 8u) |
+		static_cast<uint16_t>(data.data[offset + 1u]));
+}
+
+auto parse_compact_indexed_pixmap(const rsrcd::Bytes& data, CompactIndexedPixmap& pixmap) -> bool
+{
+	if(data.size < 10u)
+		return false;
+	const uint16_t row_bytes_word = read_be_u16(data, 0);
+	const uint16_t row_bytes = static_cast<uint16_t>(row_bytes_word & 0x3FFFu);
+	const int16_t top = static_cast<int16_t>(read_be_u16(data, 2));
+	const int16_t left = static_cast<int16_t>(read_be_u16(data, 4));
+	const int16_t bottom = static_cast<int16_t>(read_be_u16(data, 6));
+	const int16_t right = static_cast<int16_t>(read_be_u16(data, 8));
+	if(row_bytes == 0 || bottom <= top || right <= left)
+		return false;
+	const uint16_t width = static_cast<uint16_t>(right - left);
+	const uint16_t height = static_cast<uint16_t>(bottom - top);
+	if(width > 512u || height > 512u)
+		return false;
+	const size_t pixel_data_size = static_cast<size_t>(row_bytes) * height;
+	size_t pixel_data_offset = 10u;
+	uint16_t pixel_size = 0;
+	if(data.size >= 12u)
+	{
+		const uint16_t explicit_pixel_size = read_be_u16(data, 10);
+		if((explicit_pixel_size == 1u || explicit_pixel_size == 2u ||
+				explicit_pixel_size == 4u || explicit_pixel_size == 8u) &&
+			12u + pixel_data_size <= data.size)
+		{
+			pixel_data_offset = 12u;
+			pixel_size = explicit_pixel_size;
+		}
+	}
+	if(pixel_size == 0)
+	{
+		if(10u + pixel_data_size > data.size)
+			return false;
+		static constexpr std::array<uint16_t, 4> kCandidatePixelSizes = {8u, 4u, 2u, 1u};
+		for(uint16_t candidate : kCandidatePixelSizes)
+		{
+			const uint16_t minimum_row_bytes = static_cast<uint16_t>((static_cast<uint32_t>(width) * candidate + 7u) / 8u);
+			if(row_bytes >= minimum_row_bytes && row_bytes <= minimum_row_bytes + 1u)
+			{
+				pixel_size = candidate;
+				break;
+			}
+		}
+		if(pixel_size == 0)
+			return false;
+	}
+
+	pixmap.row_bytes = row_bytes;
+	pixmap.width = width;
+	pixmap.height = height;
+	pixmap.pixel_size = pixel_size;
+	pixmap.pixel_data_offset = pixel_data_offset;
+	pixmap.pixel_data_size = pixel_data_size;
+	return true;
+}
+
+std::array<uint8_t, 4> compact_pixmap_color(uint16_t index, uint16_t pixel_size)
+{
+	static constexpr uint8_t kMac4BitSystemPalette[16][3] = {
+		{0xFF, 0xFF, 0xFF}, {0xFC, 0xF3, 0x05}, {0xFF, 0x64, 0x02}, {0xDD, 0x08, 0x06},
+		{0xF2, 0x08, 0x84}, {0x46, 0x00, 0xA5}, {0x00, 0x00, 0xD4}, {0x02, 0xAB, 0xEA},
+		{0x1F, 0xB7, 0x14}, {0x00, 0x64, 0x11}, {0x56, 0x2C, 0x05}, {0x90, 0x71, 0x3A},
+		{0xC0, 0xC0, 0xC0}, {0x80, 0x80, 0x80}, {0x40, 0x40, 0x40}, {0x00, 0x00, 0x00},
+	};
+	if(pixel_size == 1u)
+	{
+		const uint8_t value = index == 0 ? 0xFF : 0x00;
+		return {value, value, value, 0xFF};
+	}
+	if(pixel_size == 2u)
+	{
+		const uint8_t value = static_cast<uint8_t>(0xFFu - index * 0x55u);
+		return {value, value, value, 0xFF};
+	}
+	if(pixel_size == 4u && index < 16u)
+		return {kMac4BitSystemPalette[index][0], kMac4BitSystemPalette[index][1], kMac4BitSystemPalette[index][2], 0xFF};
+	if(pixel_size == 8u)
+	{
+		const uint8_t value = static_cast<uint8_t>(index);
+		return {value, value, value, 0xFF};
+	}
+	return {0, 0, 0, 0xFF};
+}
+
+auto decode_compact_indexed_pixmap_rgba(
+	const rsrcd::Bytes& resource_data,
+	const CompactIndexedPixmap& pixmap,
+	uint8_t* rgba,
+	size_t rgba_size) -> rsrcd::Result
+{
+	const size_t pixel_count = static_cast<size_t>(pixmap.width) * pixmap.height;
+	if(rgba_size < pixel_count * 4u)
+		return rsrcd::Error::bounds();
+	if(!rsrcd::range_in_bounds(pixmap.pixel_data_offset, pixmap.pixel_data_size, resource_data.size))
+		return rsrcd::Error::unexpected_end();
+	rsrcd::Bytes pixel_data{resource_data.data + pixmap.pixel_data_offset, pixmap.pixel_data_size};
+	for(uint32_t y = 0; y < pixmap.height; ++y)
+	{
+		for(uint32_t x = 0; x < pixmap.width; ++x)
+		{
+			uint16_t index = 0;
+			if(auto r = rsrcd::color_icon::lookup_index(pixel_data, pixmap.row_bytes, pixmap.pixel_size, static_cast<int32_t>(x), static_cast<int32_t>(y), index); !r)
+				return r;
+			const std::array<uint8_t, 4> color = compact_pixmap_color(index, pixmap.pixel_size);
+			const size_t offset = (static_cast<size_t>(y) * pixmap.width + x) * 4u;
+			rgba[offset + 0] = color[0];
+			rgba[offset + 1] = color[1];
+			rgba[offset + 2] = color[2];
+			rgba[offset + 3] = color[3];
+		}
+	}
+	return rsrcd::Result::ok();
+}
+
+auto emit_compact_indexed_pixmap_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	const char* description) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::Rgba32,
+		rsrcd::Bytes{nullptr, 0},
+		"image/x-rgba32",
+		description);
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	CompactIndexedPixmap pixmap;
+	if(!parse_compact_indexed_pixmap(resource.data, pixmap))
+		return true;
+	const size_t pixel_count = static_cast<size_t>(pixmap.width) * pixmap.height;
+	std::vector<uint8_t> rgba(pixel_count * 4u);
+	rsrcd::Result decode_result = decode_compact_indexed_pixmap_rgba(resource.data, pixmap, rgba.data(), rgba.size());
+	if(!decode_result)
+		return output.on_resource_error(ref, decode_result.message());
+
+	descriptor.width = pixmap.width;
+	descriptor.height = pixmap.height;
+	descriptor.row_bytes = static_cast<uint32_t>(pixmap.width) * 4u;
+	descriptor.data = rsrcd::Bytes{rgba.data(), rgba.size()};
+	return output.on_resource_payload(descriptor);
+}
+
 auto emit_pixel_pattern_images(
 	const rsrcd::Bytes& resource_data,
 	const rsrcd::pixel_pattern::Pattern& pattern,
@@ -2261,7 +2474,7 @@ auto emit_ppat_transform(
 	rsrcd::pixel_pattern::Pattern pattern{};
 	auto parse_result = rsrcd::pixel_pattern::parse_ppat(resource.data, pattern);
 	if(!parse_result)
-		return output.on_resource_error(ref, parse_result.message());
+		return emit_compact_indexed_pixmap_transform(resource, ref, output, "decoded compact ppat pixels");
 
 	if(wants_json)
 	{
@@ -2617,6 +2830,126 @@ auto emit_finf_transform(
 	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
 }
 
+uint16_t read_snd_u16(const rsrcd::Bytes& data, size_t offset)
+{
+	return static_cast<uint16_t>(
+		(static_cast<uint16_t>(data.data[offset]) << 8u) |
+		static_cast<uint16_t>(data.data[offset + 1u]));
+}
+
+uint32_t read_snd_u32(const rsrcd::Bytes& data, size_t offset)
+{
+	return (static_cast<uint32_t>(data.data[offset]) << 24u) |
+		(static_cast<uint32_t>(data.data[offset + 1u]) << 16u) |
+		(static_cast<uint32_t>(data.data[offset + 2u]) << 8u) |
+		static_cast<uint32_t>(data.data[offset + 3u]);
+}
+
+const char* snd_command_name(uint16_t command)
+{
+	switch(command)
+	{
+		case 0x0000:
+			return "null";
+		case 0x8050:
+			return "bufferCmd";
+		case 0x8051:
+			return "soundCmd";
+		default:
+			return "unknown";
+	}
+}
+
+auto emit_snd_metadata_transform(
+	const rsrcd::ResRef& resource,
+	const ResourceRef& ref,
+	IResourceOutput& output,
+	bool wav_converted,
+	const std::string& wav_error) -> bool
+{
+	ResourcePayload descriptor = make_converted_resource_payload(
+		ref,
+		ResourcePayloadFormat::JsonUtf8,
+		rsrcd::Bytes{nullptr, 0},
+		"application/json",
+		"parsed 'snd ' resource metadata");
+	if(!output.wants_resource_payload(descriptor))
+		return true;
+
+	StackImportRapidJsonAllocator base_alloc;
+	JsonPoolAllocator pool(1024, &base_alloc);
+	JsonDocument doc(&pool, 1024, &base_alloc);
+	doc.SetObject();
+	JsonPoolAllocator& allocator = doc.GetAllocator();
+	doc.AddMember("byteLength", static_cast<uint64_t>(resource.data.size), allocator);
+	if(resource.data.size >= 2)
+	{
+		const uint16_t format = read_snd_u16(resource.data, 0);
+		doc.AddMember("format", format, allocator);
+		doc.AddMember("recognizedContainer", format == 1 || format == 2, allocator);
+		doc.AddMember("wavConversionStatus", json_string(wav_converted ? "converted" : "notConverted", allocator), allocator);
+		if(!wav_converted && !wav_error.empty())
+			doc.AddMember("wavConversionError", json_string(wav_error, allocator), allocator);
+		if(format == 1 && resource.data.size >= 20)
+		{
+			const uint16_t data_type_count = read_snd_u16(resource.data, 2);
+			doc.AddMember("dataTypeCount", data_type_count, allocator);
+			if(data_type_count == 1)
+			{
+				doc.AddMember("dataTypeId", read_snd_u16(resource.data, 4), allocator);
+				doc.AddMember("initializationOptions", read_snd_u32(resource.data, 6), allocator);
+				doc.AddMember("commandCount", read_snd_u16(resource.data, 10), allocator);
+			}
+		}
+		else if(format == 2 && resource.data.size >= 6)
+		{
+			doc.AddMember("referenceCount", read_snd_u16(resource.data, 2), allocator);
+			doc.AddMember("commandCount", read_snd_u16(resource.data, 4), allocator);
+		}
+		else if(format == 0)
+		{
+			doc.AddMember("parseNote", json_string("format word is zero; this is likely a ROM-packed or synthesized sound payload, not a standard sampled 'snd ' container", allocator), allocator);
+		}
+
+		const size_t command_count_offset = format == 1 ? 10u : (format == 2 ? 4u : 0u);
+		const size_t command_start = format == 1 ? 12u : (format == 2 ? 6u : 0u);
+		if((format == 1 || format == 2) && resource.data.size >= command_start)
+		{
+			const uint16_t command_count = read_snd_u16(resource.data, command_count_offset);
+			JsonValue commands(rapidjson::kArrayType);
+			const size_t bounded_count = command_count < 32u ? command_count : 32u;
+			for(size_t i = 0; i < bounded_count; i++)
+			{
+				const size_t offset = command_start + i * 8u;
+				if(offset + 8u > resource.data.size)
+					break;
+				const uint16_t command = read_snd_u16(resource.data, offset);
+				JsonValue item(rapidjson::kObjectType);
+				item.AddMember("index", static_cast<uint64_t>(i), allocator);
+				item.AddMember("command", command, allocator);
+				item.AddMember("commandName", json_string(snd_command_name(command), allocator), allocator);
+				item.AddMember("param1", read_snd_u16(resource.data, offset + 2u), allocator);
+				item.AddMember("param2", read_snd_u32(resource.data, offset + 4u), allocator);
+				commands.PushBack(item, allocator);
+			}
+			doc.AddMember("commands", commands, allocator);
+			if(command_count > bounded_count)
+				doc.AddMember("commandsTruncated", true, allocator);
+		}
+	}
+	else
+	{
+		doc.AddMember("recognizedContainer", false, allocator);
+		doc.AddMember("wavConversionStatus", json_string("notConverted", allocator), allocator);
+		doc.AddMember("wavConversionError", json_string("resource is too short to contain a sound format word", allocator), allocator);
+	}
+
+	const size_t prefix_length = resource.data.size < 32u ? resource.data.size : 32u;
+	std::string prefix_hex = bytes_to_hex(rsrcd::Bytes{resource.data.data, prefix_length});
+	doc.AddMember("firstBytesHex", json_string(prefix_hex, allocator), allocator);
+	return finish_json_resource_payload(descriptor, doc, base_alloc, output);
+}
+
 auto emit_snd_transform(
 	const rsrcd::ResRef& resource,
 	const ResourceRef& ref,
@@ -2628,16 +2961,16 @@ auto emit_snd_transform(
 		rsrcd::Bytes{nullptr, 0},
 		"audio/wav",
 		"converted 'snd ' resource audio");
-	if(!output.wants_resource_payload(descriptor))
-		return true;
-
 	PlatformByteVector wav_data;
 	std::string error;
-	if(!ConvertSndResourceToWav(resource.data, wav_data, error))
-		return output.on_resource_error(ref, error.c_str());
-
-	descriptor.data = rsrcd::Bytes{wav_data.data(), wav_data.size()};
-	return output.on_resource_payload(descriptor);
+	const bool converted = ConvertSndResourceToWav(resource.data, wav_data, error);
+	if(converted && output.wants_resource_payload(descriptor))
+	{
+		descriptor.data = rsrcd::Bytes{wav_data.data(), wav_data.size()};
+		if(!output.on_resource_payload(descriptor))
+			return false;
+	}
+	return emit_snd_metadata_transform(resource, ref, output, converted, error);
 }
 
 auto emit_code_resource_transform(
@@ -3140,6 +3473,9 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "ppat"))
 		return emit_ppat_transform(resource, ref, output);
+
+	if(resource_type_is(resource, "pixs"))
+		return emit_compact_indexed_pixmap_transform(resource, ref, output, "decoded compact pixs pixels");
 
 	if(resource_type_is(resource, "ppt#"))
 		return emit_ppt_list_transform(resource, ref, output);

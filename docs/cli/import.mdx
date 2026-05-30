@@ -6,7 +6,7 @@ description: Convert a stack to a .xstk package.
 Import mode is the default mode:
 
 ```sh
-stackimport import [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] [--media-root <dir>] <originalStackPath>
+stackimport import [--nodumprawblocks] [--dumprawblocks] [--nostatus] [--noprogress] [--rawgraphics] [--output <packagePath>] [--media-root <dir>] [--media-reference-only] <originalStackPath>
 ```
 
 For compatibility, the input path can still be supplied without the `import`
@@ -24,6 +24,7 @@ the input stack.
 | `--noprogress`           | Suppress progress messages.                                   |
 | `--rawgraphics`          | Export raw bitmap data instead of decoded graphics.           |
 | `--media-root <dir>`     | Package loose external media from a nearby directory.         |
+| `--media-reference-only` | Reference loose media without copying the source bytes.       |
 
 The package contains JSON metadata, decoded media where supported, raw resource
 data where preservation is safer than conversion, and raw block evidence by
@@ -42,9 +43,11 @@ card/stack/movie/sound/picture references inferred from script context.
 When `--media-root` is provided, StackImport copies regular files under that
 directory into `external-assets/files/` in the `.xstk` package and writes
 `external-assets/manifest.json`. The manifest records source path, package path,
-byte size, SHA-256, Finder type/creator when available, extension, coarse asset
-kind, and media type. The source stack itself, `.xstk` directories, and
-`.DS_Store` files are skipped.
+copy status, byte size, SHA-256, Finder type/creator when available, extension,
+coarse asset kind, and media type. The source stack itself, `.xstk` directories,
+and `.DS_Store` files are skipped. Use `--media-reference-only` for dry index or
+conversion runs that should preserve stable source links without duplicating the
+source media bytes.
 
 QuickTime movie assets also receive `external-assets/quicktime-analysis/*.json`
 reports from the vendored `mov2qt` parser. These reports record data-fork atoms,

@@ -29,12 +29,16 @@ struct ParsedFlags {
 	std::string input_path;
 	std::string output_path;
 	std::string media_root_path;
+	std::string quicktime_default_palette_path;
+	uint32_t quicktime_frame_limit = 16;
+	bool media_reference_only = false;
 	std::string atlas_output_path;
 	std::string source_root_path;
 	std::string rom_base;
 	bool emit_atlas = false;
 	bool emit_json = false;
 	bool emit_assets = false;
+	bool emit_resource_index = false;
 };
 
 void add_stack_flags(CLI::App& app, ParsedFlags& flags)
@@ -54,6 +58,9 @@ void add_output_option(CLI::App& app, ParsedFlags& flags)
 void add_import_options(CLI::App& app, ParsedFlags& flags)
 {
 	app.add_option("--media-root", flags.media_root_path, "Package loose external media from this directory");
+	app.add_flag("--media-reference-only", flags.media_reference_only, "Reference loose media in the manifest without copying source bytes");
+	app.add_option("--quicktime-default-palette", flags.quicktime_default_palette_path, "ROM clut JSON to use for default-palette 8-bit QuickTime video");
+	app.add_option("--quicktime-frame-limit", flags.quicktime_frame_limit, "Maximum decoded QuickTime video frames per track; 0 exports all frames");
 }
 
 void add_rom_options(CLI::App& app, ParsedFlags& flags)
@@ -64,6 +71,7 @@ void add_rom_options(CLI::App& app, ParsedFlags& flags)
 	app.add_flag("--emit-atlas", flags.emit_atlas, "Emit atlas TSV interchange files");
 	app.add_flag("--emit-json", flags.emit_json, "Emit machine-readable JSON analysis output");
 	app.add_flag("--emit-assets", flags.emit_assets, "Emit converted or preserved asset outputs when supported");
+	app.add_flag("--emit-resource-index", flags.emit_resource_index, "Emit a portable ROM resource index for converter lookups");
 }
 
 bool parse_rom_base(const std::string& text, uint32_t& out)
@@ -95,6 +103,10 @@ void apply_shared_flags(const ParsedFlags& parsed, Options& options)
 		options.output_path = absolute_path(parsed.output_path.c_str());
 	if(!parsed.media_root_path.empty())
 		options.media_root_path = absolute_path(parsed.media_root_path.c_str());
+	if(!parsed.quicktime_default_palette_path.empty())
+		options.quicktime_default_palette_path = absolute_path(parsed.quicktime_default_palette_path.c_str());
+	options.quicktime_frame_limit = parsed.quicktime_frame_limit;
+	options.media_reference_only = parsed.media_reference_only;
 	if(!parsed.atlas_output_path.empty())
 		options.atlas_output_path = absolute_path(parsed.atlas_output_path.c_str());
 	if(!parsed.source_root_path.empty())
@@ -102,6 +114,7 @@ void apply_shared_flags(const ParsedFlags& parsed, Options& options)
 	options.emit_atlas = parsed.emit_atlas;
 	options.emit_json = parsed.emit_json;
 	options.emit_assets = parsed.emit_assets;
+	options.emit_resource_index = parsed.emit_resource_index;
 }
 
 int finalize_options(
@@ -153,14 +166,15 @@ int finalize_options(
 	}
 
 	if(options.mode != Mode::Rom && (!root.rom_base.empty() || root.emit_atlas || root.emit_json || root.emit_assets ||
+		root.emit_resource_index ||
 		!root.atlas_output_path.empty() || !root.source_root_path.empty()))
 	{
 		stackimport_quill_diagnosticf("Error: ROM options require --rom or the rom subcommand.\n");
 		return 3;
 	}
-	if(options.mode != Mode::Import && !root.media_root_path.empty())
+	if(options.mode != Mode::Import && (!root.media_root_path.empty() || !root.quicktime_default_palette_path.empty()))
 	{
-		stackimport_quill_diagnosticf("Error: --media-root requires import mode.\n");
+		stackimport_quill_diagnosticf("Error: QuickTime import options require import mode.\n");
 		return 3;
 	}
 

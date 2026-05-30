@@ -21,11 +21,15 @@ struct Options {
 	std::string input_path;
 	std::string output_path;
 	std::string media_root_path;
+	std::string quicktime_default_palette_path;
+	uint32_t quicktime_frame_limit = 16;
+	bool media_reference_only = false;
 	std::string atlas_output_path;
 	std::string source_root_path;
 	bool emit_atlas = false;
 	bool emit_json = false;
 	bool emit_assets = false;
+	bool emit_resource_index = false;
 	bool exit_after_parse = false;
 	uint32_t rom_base_address = 0;
 };
