@@ -1,590 +1,313 @@
-# Stackimport Feature Requests for Mac ROM Atlas
+# Mac ROM Atlas Feature Surface
 
-This document defines requested `stackimport` capabilities for using it as the native analysis backend for `mac-rom-atlas`.
+This document records the ROM-analysis capabilities that `stackimport` exposes
+for Mac ROM Atlas and related tooling. It replaces the earlier feature-request
+backlog with a stable description of what lives in this repository, what output
+contracts downstream tools can rely on, and which analysis areas remain
+hypotheses or partial coverage.
 
-The goal is not only better disassembly. The goal is a continuously improving map of each ROM: what is present, where it lives, how it relates to SuperMario source, and what appears to be missing from the available source snapshot.
+The canonical CLI user documentation is `docs/cli/rom.mdx`. This file is the
+engineering closeout and status reference for the original Mac ROM Atlas feature
+request set.
 
-## Integration Principles
+## Ownership Boundary
 
-- `stackimport` owns binary-heavy work: ROM scanning, disassembly, resource parsing, xref extraction, control-flow analysis, and converted assets.
-- `mac-rom-atlas` owns orchestration, MCP/REST APIs, browser workflows, notes, and long-lived atlas publication.
-- All outputs must be deterministic for the same input bytes, CLI options, and tool version.
-- Every generated claim must carry provenance, confidence, and enough evidence to be reviewed.
-- Raw ROM bytes, full memory pages, and full disassembly listings remain outside Git by default.
-- Atlas files are the stable interchange surface. JSON can be richer, but TSV/Markdown/YAML files are the diffable public contract.
+- `stackimport` owns binary-heavy work: ROM identity, scanning, disassembly,
+  resource parsing, xref extraction, converted assets, and machine-readable
+  atlas exports.
+- Mac ROM Atlas owns orchestration, browser workflows, notes, MCP/REST APIs,
+  publication policy, and long-lived analyst-authored overlays.
+- Generated claims must include confidence, source/provenance, or phase status
+  so downstream tools can distinguish confirmed data from hypotheses.
+- Raw ROM bytes, full memory pages, full disassembly listings, and generated
+  assets are not intended for public Git storage by default.
 
-## Common CLI Contract
+## ROM CLI Contract
 
-All ROM-focused features should compose under the existing ROM mode:
+ROM mode is available through the `rom` subcommand and the legacy `--rom` flag:
 
 ```sh
-stackimport \
-  --rom /path/to/input.ROM \
+stackimport rom \
   --rom-base 0x40800000 \
   --output data/disassembly/<dataset>/<rom-slug> \
   --atlas-output atlas/maps/<dataset> \
   --source-root data/sources/SuperMarioProj.1994-02-09 \
   --emit-atlas \
   --emit-json \
-  --emit-assets
+  --emit-assets \
+  --emit-resource-index \
+  /path/to/input.ROM
 ```
 
-Required behavior:
+Required behavior for the implemented surface:
 
-- Exit `0` only when all requested outputs were written and validated.
-- Exit non-zero when input bytes cannot be read, output files cannot be written, or a requested analysis phase fails.
-- Print human logs to stdout/stderr, but never require log parsing for machine data.
-- Use repo-relative paths in emitted machine data when paths are under the current working tree.
-- Emit unsigned uppercase 8-digit CRC32 and uppercase SHA256.
-- Include `tool.name`, `tool.version`, `tool.commit`, `input.path`, `input.size`, `input.crc32`, `input.sha256`, `base_address`, and `generated_at` in `analysis.json`.
+- Exit `0` only when requested output files are written successfully.
+- Exit non-zero when input bytes cannot be read, output directories or files
+  cannot be written, or an enabled output phase fails.
+- Print human logs to stdout/stderr, while machine consumers use JSON, TSV, YAML,
+  and resource-index files.
+- Use current-working-directory-relative paths when an emitted path is under the
+  current working tree.
+- Emit unsigned uppercase 8-digit CRC32 values and uppercase SHA-256 values.
+- Preserve phase status and warnings for partial analyses that intentionally
+  still exit successfully.
 
-## Output File Contract
+## Primary Outputs
 
-When `--emit-atlas` is set, write or update these files. If a file has no rows, still write the header.
+Every successful ROM run writes:
+
+| Path | Purpose |
+|---|---|
+| `analysis.json` | Machine-readable ROM identity, counts, regions, functions, xrefs, resources, strings, source overlays, source gaps, warnings, and phase status. |
+| `disassembly.s` | Annotated linear 68K disassembly when `resource_dasm` is available, or fallback word output when it is not. |
+
+`analysis.json` includes `schema_version`, `tool`, `input`, `generated_at`,
+`base_address`, `identity`, `disassembly`, `phase_status`, `counts`, atlas-like
+arrays, and `warnings`.
+
+## Atlas TSV Contract
+
+When `--emit-atlas` or `--atlas-output` is supplied, ROM mode writes these
+interchange files. Headers are written even when a phase has no rows.
 
 | File | Purpose |
 |---|---|
-| `roms.tsv` | ROM identity, stable path, hashes, size, base address. |
-| `inventory.tsv` | Per-ROM mapped inventory counts and current SuperMario match status. |
-| `regions.tsv` | Broad address map of code, data, tables, resources, and mixed regions. |
-| `functions.tsv` | Confirmed and candidate function starts/ranges. |
-| `xrefs.tsv` | Address-level code, data, branch, call, trap, and table references. |
-| `pointer-tables.tsv` | Pointer table ranges and decoded target counts. |
-| `data-regions.tsv` | Strings, tables, packed data, resource forks, jump tables, and unknown data islands. |
-| `resources.tsv` | Resource map entries, markers, assets, converted outputs, and decode status. |
-| `labels.tsv` | Address labels suitable for IDA-like overlay display. |
-| `strings.tsv` | ASCII/Pascal strings with ROM addresses and source hints. |
-| `traps.tsv` | A-line trap calls/sites with decoded trap names when known. |
-| `source-overlays.tsv` | ROM-to-SuperMario and function-to-source correlation evidence. |
-| `source-gaps.tsv` | High-priority regions/functions/resources with no confirmed source coverage. |
+| `roms.tsv` | ROM identity, stable path, hashes, size, base address, and model tokens. |
+| `inventory.tsv` | Per-ROM mapped inventory counts and source status. |
+| `regions.tsv` | Broad address map of code, data, table, resource, and mixed regions. |
+| `functions.tsv` | Confirmed or candidate function starts/ranges. Current rows are hypotheses. |
+| `xrefs.tsv` | Address-level code, data, branch, call, jump, memory, and table references. |
+| `pointer-tables.tsv` | Pointer table ranges, decoded target counts, confidence, and evidence. |
+| `data-regions.tsv` | String clusters, resource maps, resource data, packed resource regions, and similar non-code islands. |
+| `resources.tsv` | Marker and parsed resource rows with type, ID, name, lengths, wrapper format, media type, output path, confidence, and source. |
+| `labels.tsv` | Address labels suitable for overlay display. |
+| `strings.tsv` | Filtered ASCII/Pascal string candidates with confidence scores. |
+| `traps.tsv` | A-line trap sites with decoded trap names when available. |
+| `source-overlays.tsv` | High-confidence ROM string matches against `--source-root` source files. |
+| `source-gaps.tsv` | Prioritized gaps for unmapped function candidates, marker-only resources, and missing source overlay phases. |
+| `manifest.yaml` | Tool version, ROM identity, row counts, validation status, phase status, and warnings. |
 
-All address columns must be uppercase 8-digit hex without `0x`.
+Address columns use uppercase eight-digit hexadecimal without `0x`.
 
-## FR-001: Deterministic ROM Identity and Header Analysis
+## Resource Index
 
-Priority: P0
+`--emit-resource-index` writes a portable resource lookup tree under
+`resource-index/`:
 
-Add a stable ROM identity pass that runs before any deeper analysis.
+| Path | Purpose |
+|---|---|
+| `resource-index/index.json` | ROM identity plus normalized parsed resource records. |
+| `resource-index/resources/` | Preserved raw resources and converted artifacts referenced by `index.json`. |
 
-Requirements:
+Resource index entries are keyed by ROM identity, resource type, resource ID,
+and ROM address. Entries record name, addresses, flags, length fields,
+`wrapper_format`, source, confidence, raw artifact path, and converted artifact
+list. This lets later tools depend on ROM-backed resources such as default
+QuickDraw or QuickTime palettes without rediscovering the whole ROM.
 
-- Compute CRC32 as unsigned 32-bit uppercase hex.
-- Compute SHA256 uppercase hex.
-- Record file size, base address, input path, inferred model/date/checksum tokens, and possible machine family.
-- Parse known Old World ROM header fields when present.
-- Report whether the first bytes are header/data/code/mixed as a hypothesis with confidence.
+## Implemented Analysis Surface
 
-Outputs:
+### Identity
 
-- `analysis.json.identity`
-- `roms.tsv`
-- `inventory.tsv`
-- `regions.tsv` header/data rows when recognizable
+Status: implemented.
 
-Acceptance:
+- Computes CRC32 and SHA-256.
+- Records input path, byte size, base address, machine family hypothesis, model
+  tokens where available, and first-byte kind hypothesis.
+- Emits identity to `analysis.json`, `roms.tsv`, `inventory.tsv`, and
+  `manifest.yaml`.
+- Validated local fixture CRC32 examples include PowerBook 190/190cs
+  `9C71C823` and Quadra 900 `88EA2081`.
 
-- PowerBook 190/190cs ROM emits CRC32 `9C71C823`, not a signed value.
-- Quadra 900 reference ROM emits CRC32 `88EA2081`, not a signed value.
-- Repeated runs produce byte-identical TSV rows except `generated_at` in JSON.
+### Disassembly
 
-## FR-002: Real 68k Disassembly Backend
+Status: implemented with linear-disassembly caveats.
 
-Priority: P0
+- Uses vendored `resource_dasm` for real 68K disassembly when available.
+- Records `analysis.json.disassembly.mode` as `m68k` or `fallback_words`.
+- Emits annotated `disassembly.s`.
+- Extracted xrefs and trap rows from linear disassembly are marked with phase
+  status and confidence because ROM data islands can decode as plausible code.
 
-Enable real 68k disassembly by default when vendored `resource_dasm` is available.
+### References And Traps
 
-Requirements:
+Status: partially implemented.
 
-- Build `STACKIMPORT_HAS_RESOURCE_DASM` in the normal CMake path when dependencies are available.
-- Fallback `dc.w` output must be explicitly marked as `disassembly_mode=fallback_words`.
-- Real disassembly rows must include address, opcode bytes, mnemonic, operands, and optional comment.
-- Preserve linear disassembly warnings: tables/data can decode as plausible instructions.
-- Emit trap mnemonics or comments for A-line instructions where possible.
+- Extracts direct branch, jump, call, memory, trap, and table references where
+  they can be inferred from disassembly comments or pointer scans.
+- Emits stable xref IDs, source/target addresses, mnemonic, kind, line index,
+  confidence, and source string.
+- Downgrades confidence when a reference originates in or points into probable
+  data regions.
+- Does not yet construct full control-flow graphs or prove fallthrough/return
+  ownership across mixed code/data regions.
 
-Outputs:
+### Function Candidates
 
-- `disassembly.s`
-- `analysis.json.disassembly`
-- `functions.tsv`
-- `xrefs.tsv`
-- `traps.tsv`
+Status: hypothesis output implemented; exact boundaries remain partial.
 
-Acceptance:
+- Emits function candidates from inbound calls, jumps, and references.
+- Rows include kind, label, inbound/outbound/reference counts, confidence, and
+  evidence.
+- When adjacent candidate starts and parsed instruction addresses support a
+  bounded range, rows use `boundary_status=bounded_by_next_candidate` and include
+  provisional `end` and `instruction_count`.
+- Otherwise rows use `boundary_status=unknown` and leave range/count fields empty
+  or null.
 
-- `disassembly.s` for a known 2 MB ROM contains real mnemonics such as `MOVE`, `JSR`, `BRA`, not only `dc.w`.
-- `analysis.json.disassembly.mode` is `m68k` when real disassembly is active.
-- `mac-rom-atlas` can browse the output without reparsing logs.
+### Region And Table Classification
 
-## FR-003: Xref and Control-Flow Extraction
+Status: partial but useful for atlas overlays.
 
-Priority: P0
+- Emits mixed code/data regions when scanner-derived data overlays exist.
+- Emits data regions for string clusters, standard resource forks, resource data,
+  ROM inline resources, and ROM `Kurt` resources.
+- Emits pointer table rows with decoded target counts, confidence, and evidence
+  including unique-target counts.
+- Region classification remains conservative. Some unknown islands and jump
+  tables still need deeper evidence-driven analysis.
 
-Emit machine-readable references and control-flow facts.
+### Strings And Source String Correlation
 
-Requirements:
+Status: implemented for filtered string inventory and source string matches.
 
-- Decode direct branch, jump, call, trap, and absolute memory references.
-- Distinguish `call`, `jump`, `branch`, `return`, `trap`, `memory`, `table`, and `fallthrough`.
-- Include source address, target address, mnemonic, line/index, confidence, and evidence.
-- Group xrefs by function candidate where known.
-- Mark references that point into likely data/resource/table regions.
+- Scans ASCII and Pascal strings.
+- Drops short punctuation-heavy fragments before export to improve default atlas
+  browsing.
+- Emits string confidence scores in TSV and JSON.
+- When `--source-root` is supplied, scans relevant source file types and emits
+  high-confidence ROM string matches to `source-overlays.tsv` and
+  `analysis.json.source_overlays` with source path, line, symbol, confidence, and
+  evidence.
+- Correlation is currently string-only. Function, resource, trap-neighborhood,
+  Rez, and byte-signature source overlays remain future work.
 
-Outputs:
+### Source Gaps
 
-- `analysis.json.xrefs`
-- `xrefs.tsv`
-- `functions.tsv` reference/call/jump counts
+Status: coarse gap output implemented.
 
-TSV columns:
+- Emits high-priority unmapped function candidates.
+- Emits marker-only resource candidates.
+- Emits a phase gap when no source root is supplied or no source overlays match.
+- Does not yet distinguish all "not analyzed" cases from "probably absent from
+  source" with source-aware confidence.
+
+## Resource Mapping And Conversion Surface
+
+### Resource Mapping
+
+Status: implemented for current known ROM layouts.
+
+- Parses standard Classic Mac resource-fork maps embedded in ROM bytes when a
+  full fork header is present.
+- Detects ROM-packed `Kurt` resource records from nearby type, ID, flags,
+  optional Pascal name, and payload length metadata.
+- Detects older inline ROM resource records from their 16-byte link/payload
+  prefix, type, ID, flags, optional Pascal name, payload offset, and payload
+  length metadata.
+- Emits marker-only rows when a resource-looking marker is found but a full
+  record cannot be validated.
+- Emits `length`, `stored_length`, `expected_length`, and `wrapper_format` for
+  parsed resources so packed/wrapped resources can be audited separately.
+
+### Converted Resource Families
+
+Status: broad resource conversion coverage is implemented; unsupported payloads
+remain preserved.
+
+Implemented conversion families include:
+
+- Visual/image: `ICON`, 12-byte-wrapped ROM `ICON`, `ICN#`, `CURS`, `crsr`,
+  `cicn`, `PAT `, `PAT#`, `ppat`, compact ROM `pixs`, guarded PICT-like larger
+  `pixs`, `PICT`, color tables (`clut`, `cctb`, `wctb`), icon-list families, and
+  bitmap font strikes where bounds are valid.
+- Text/UI metadata: `STR `, `TEXT`, `STR#`, `MENU`, `DITL`, `ALRT`, `MBAR`,
+  `FREF`, `BNDL`, `ROv#`, `RSSC`, `TxSt`, `styl`, `KCHR`, `RECT`, `TOOL`,
+  `PICK`, `KBDN`, `PAPA`, `LAYO`, `FOND`, and simple raw metadata resources
+  such as `decl`.
+- Audio: sampled `snd ` resources convert to WAV when the standard sampled-sound
+  format is recognized; non-converted `snd ` resources still emit JSON metadata
+  with format word, conversion status/error, command metadata where available,
+  and leading bytes.
+- Code: `CODE`, `DRVR`, `dcmp`, `PACK`, `boot`, `ptch`, `XCMD`, and `XFCN`
+  emit disassembly artifacts when the built-in converter supports the payload.
+
+Recent local fixture observations:
+
+- PowerBook 190/190cs and Quadra 660av/840av ROM-packed resources are parsed and
+  asset outputs are emitted under `assets/resources/` and `resource-index/`.
+- Compact ROM `pixs` records and `pixs` ID `-10208` render to PNG in the
+  PowerBook 190/190cs and Quadra 660av/840av validation runs.
+- 140-byte wrapped ROM `ICON` records render to PNG.
+- Most DiskMode `PICT` resources in the validated ROMs render to PNG.
+- `clut` ID 8 (`8BitStd`) and `clut` ID 4 (`4BitStd`) are available as ROM
+  default-palette candidates in named Old World ROM runs.
+
+## Known Limitations
+
+The original Mac ROM Atlas backlog is closeable as a feature-request document.
+Remaining work should be tracked as ordinary implementation issues or docs
+updates:
+
+- Compact/special `cicn` ID `-20020` remains preserved raw until its compact
+  layout is documented and fixture-backed.
+- Large DiskMode 6 `PICT` variants in the PowerBook 190/190cs and Quadra
+  660av/840av ROMs remain preserved raw until their wrapper or opcode coverage is
+  understood.
+- Function ranges are hypotheses. `bounded_by_next_candidate` does not prove
+  exact function exits, jump-table ownership, or embedded data boundaries.
+- Source correlation is currently high-confidence string matching only.
+  Function/resource/trap/Rez correlation remains future work.
+- Region classification is still partial. Unknown data islands, checksums,
+  packed tables, and jump tables need evidence-driven refinements.
+- `--range`, `--phase`, cache-aware incremental analysis, and `--merge-atlas`
+  are not part of the current stable CLI surface.
+- Full determinism is defined for the same input bytes, current working
+  directory, CLI options, and tool version. `analysis.json.generated_at` is
+  intentionally time-varying.
+
+## Validation Workflow
+
+For C++ or ROM-mode changes, run the normal and strict CMake workflows:
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+
+cmake -S . -B build-cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSTACKIMPORT_STRICT_WARNINGS=ON \
+  -DSTACKIMPORT_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -Wdev --warn-uninitialized
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+```
+
+For docs changes under `docs/` or `website/`, run from `website/`:
+
+```sh
+pnpm lint
+pnpm build
+```
+
+Private ROM smoke testing uses manifest-verified local fixtures from:
 
 ```text
-id	from	to	kind	source_node	target_node	line	confidence	source
+/Users/jrepp/d/hype-import-tests/roms/manifest.tsv
 ```
 
-Acceptance:
-
-- High-fan-in targets such as current `40944A20` get stable inbound call counts.
-- The same ROM analyzed twice emits the same xref IDs and ordering.
-- Invalid targets outside ROM address space are emitted only with `confidence=low` or excluded with a warning count.
-
-## FR-004: Function Boundary Hypotheses
-
-Priority: P0
-
-Produce better function candidates while clearly labeling them as hypotheses.
-
-Requirements:
-
-- Use labels, inbound calls, prologues, returns, branch targets, trap setup patterns, and table references.
-- Emit start address, optional end address, instruction count, inbound/outbound counts, confidence, and evidence summary.
-- Do not overclaim exact boundaries when data islands or jump tables interrupt code.
-- Support reanalysis that preserves manually confirmed names supplied via label overlays.
-
-Outputs:
-
-- `analysis.json.functions`
-- `functions.tsv`
-- `labels.tsv`
-- `source-gaps.tsv` for high-priority unnamed candidates
-
-Acceptance:
-
-- Candidate rows include `confidence` and `evidence`.
-- Confirmed and candidate functions are distinguishable by `kind` or ID prefix.
-- Function IDs remain stable across runs unless the start address changes.
-
-## FR-005: Code/Data/Table Region Classification
-
-Priority: P0
-
-Classify ROM address ranges so linear disassembly can be overlaid with data islands.
-
-Requirements:
-
-- Identify string clusters, pointer tables, jump tables, resource maps, packed data, headers, checksums, and unknown data.
-- Emit `mixed` when a range likely contains both executable code and embedded data.
-- Include start, end, kind, item count, confidence, and evidence.
-- Avoid overlapping high-confidence regions unless one is nested and explicitly marked.
-
-Outputs:
-
-- `regions.tsv`
-- `data-regions.tsv`
-- `pointer-tables.tsv`
-- `analysis.json.regions`
-
-Acceptance:
-
-- The dashboard can color rows as code/data/table/resource without server-side heuristics.
-- Known pointer table candidates include decoded target lists in JSON and counts in TSV.
-
-## FR-006: Classic Mac Resource Map and Asset Extraction
-
-Priority: P0
-
-Use stackimport/resource conversion code to identify and extract converted assets from ROM-resident resources.
-
-Current status, 2026-05-29:
-
-- Standard resource-fork maps embedded in ROM bytes are parsed when a full fork
-  header is present.
-- ROM-packed `Kurt` resource records are now detected from nearby type, ID,
-  flags, optional Pascal name, and payload length metadata.
-- Older inline ROM resource records are also detected from their 16-byte
-  link/payload prefix, type, ID, flags, optional Pascal name, payload offset,
-  and payload length metadata.
-- Validation runs parsed 164 ROM-packed resource records from the PowerBook
-  190/190cs ROM and 185 from the Quadra 660av/840av ROM after accepting both
-  `kc` and `ck` padding phase around `Kurt` records.
-- Inline validation runs parsed 74 resources from the PowerBook 520/540 ROM at
-  `/tmp/stackimport-rom-inline-pb520` and 48 resources from the Quadra 900 ROM
-  at `/tmp/stackimport-rom-inline-quadra900`. Both runs include named
-  `DefQDColors`, `8BitStd`, `4BitStd`, `2BitStd`, and `1BitStd` `clut`
-  resources with JSON and PNG swatch previews; the PowerBook 520/540 run also
-  converts `snd ` ID 1 `Brass Horn` to WAV.
-- `analysis.json.resources` and `resources.tsv` now carry `length`,
-  `stored_length`, `expected_length`, and `wrapper_format` so ROM-packed
-  resources remain distinguishable from ordinary resource-fork payloads.
-- `--emit-resource-index` now writes a portable `resource-index/index.json`
-  plus raw and converted artifacts under `resource-index/resources/`. This index
-  is keyed by ROM identity, resource type, resource ID, and address so later
-  converters can explicitly depend on ROM-backed resources such as default
-  palettes without global ROM discovery.
-- `snd ` resources now emit JSON metadata even when WAV conversion fails. This
-  records the format word, conversion status/error, command metadata when
-  applicable, and first bytes. Current evidence shows `Simple Beep` in the
-  PowerBook 190 and Quadra 660av ROMs has a zero format word and should remain
-  preserved until its packed/synthesized sound format is understood.
-- Compact ROM `pixs` resources now render to PNG for 11 of 12 records in each
-  PowerBook 190 and Quadra 660av validation run. The short ROM `ppat` ID 18
-  resources also render through the same compact PixMap fallback. The remaining
-  `pixs` ID `-10208` records are larger structures and still need separate
-  analysis.
-- Most DiskMode `PICT` resources in the validated ROMs render to PNG. The
-  larger DiskMode 6 variants in the PowerBook 190 and Quadra 660av ROMs remain
-  raw, as do the compact/special `cicn` ID `-20020` and 140-byte wrapped `ICON`
-  records.
-- The default Macintosh 8-bit palette source-of-truth candidate is now available
-  as ROM resource `clut` ID 8 (`8BitStd`) in the named old-world ROM runs. The
-  4-bit palette remains available as `clut` ID 4 (`4BitStd`). The remaining work
-  is to validate the selected ROM `clut` against QuickTime's default-palette
-  semantics and wire the extracted table into `mov2qt`.
-
-Requirements:
-
-- Detect resource maps, resource type lists, resource records, names, IDs, attributes, data offsets, and lengths.
-- Preserve raw resource bytes under output when `--emit-assets` is set.
-- Convert supported visual/audio/text resources where available: `CURS`, `crsr`, `ICON`, `ICN#`, `cicn`, `PICT`, `pixs`, `ppat`, `PAT#`, `snd `, `STR `, `STR#`, `MENU`, `ALRT`, `DITL`, `FOND`, `NFNT`, `FONT`, `DRVR`, `CODE`, `PACK`, `cfrg`, `decl`, `boot`, `ptch`.
-- For unsupported resources, emit metadata with `decode_status=preserved`.
-- Include output path, media type, dimensions/duration where known, and converter used.
-
-Outputs:
-
-- `resources.tsv`
-- `data-regions.tsv`
-- converted files under `assets/`
-- `analysis.json.resources`
-
-Suggested `resources.tsv` columns:
-
-```text
-id	rom_id	address	kind	resource_type	resource_id	name	length	stored_length	expected_length	wrapper_format	media_type	output_file	confidence	source
-```
-
-Acceptance:
-
-- Resource rows distinguish marker-only hits from parsed resource records.
-- Converted asset files are referenced by repo-relative paths.
-- Decode failures are visible as rows, not silent omissions.
-
-## FR-007: String Inventory and Source String Correlation
-
-Priority: P1
-
-Emit a durable string inventory and compare it with SuperMario source text.
-
-Requirements:
-
-- Scan ASCII C strings and Pascal strings.
-- Record address, kind, value, length, containing region, and ROM ID.
-- De-duplicate identical strings while preserving every address occurrence.
-- If `--source-root` is supplied, match strings against source files with path/line/evidence.
-- Weight matches by specificity: long unique strings score higher than generic UI fragments.
-
-Outputs:
-
-- `strings.tsv`
-- `source-overlays.tsv`
-- `inventory.tsv` source overlap fields
-- `analysis.json.source_string_matches`
-
-Acceptance:
-
-- Candidate ROM string-overlap scores are reproducible.
-- Generic strings can be filtered or down-weighted.
-- The PowerBook/Quadra candidate scores can be recomputed without using notes as source data.
-
-## FR-008: SuperMario Function and Symbol Overlay
-
-Priority: P1
-
-Correlate ROM functions/resources with SuperMario source symbols.
-
-Requirements:
-
-- Index source files under `--source-root` without committing source contents.
-- Extract candidate symbols from C, Pascal, Rez, and 68k assembly files.
-- Match ROM labels/functions/resources to source symbols via strings, resource IDs, trap neighborhoods, and optional byte signatures.
-- Emit status values: `confirmed`, `candidate`, `hypothesis`, `rejected`, `missing_from_source`.
-- Include source path, line, symbol, score, and evidence.
-
-Outputs:
-
-- `source-overlays.tsv`
-- `source-gaps.tsv`
-- `labels.tsv`
-- `analysis.json.source_overlays`
-
-Acceptance:
-
-- Manual names such as startup/trap setup can be represented as provisional overlays.
-- High-priority unmapped function candidates appear in `source-gaps.tsv`.
-- A later run can promote an overlay from `candidate` to `confirmed` without changing the target ID.
-
-## FR-009: Missing-from-Source Analysis
-
-Priority: P1
-
-Identify ROM inventory that does not appear to map to the available SuperMario source snapshot.
-
-Requirements:
-
-- Compare mapped ROM regions to source overlays.
-- Emit source gaps for important functions, resources, strings, traps, and data regions.
-- Include why the gap matters: high fan-in, boot path, resource type, machine-specific marker, unique string, or unavailable source category.
-- Distinguish "not yet analyzed" from "probably absent from source."
-
-Outputs:
-
-- `source-gaps.tsv`
-- `inventory.tsv`
-- `analysis.json.source_gaps`
-
-Acceptance:
-
-- `source-gaps.tsv` is sorted by priority and address.
-- Each gap has `gap_kind`, `evidence`, `priority`, and `status`.
-- The dashboard can show "what should we investigate next?" directly from the file.
-
-## FR-010: Atlas Export Mode
-
-Priority: P1
-
-Let stackimport write atlas-compatible files directly.
-
-Requirements:
-
-- Add `--emit-atlas` and `--atlas-output <dir>`.
-- Write headers even when there are no rows.
-- Preserve existing analyst-authored rows if explicitly requested with `--merge-atlas`; otherwise write to a fresh output directory.
-- Sort rows by address, then stable ID.
-- Validate all TSV files before exit.
-
-Outputs:
-
-- All atlas TSVs listed in the output contract.
-- `manifest.yaml`
-
-Acceptance:
-
-- `mac-rom-atlas/scripts/validate_project_data.js` accepts stackimport-emitted maps without post-processing.
-- Repeated stackimport runs do not cause noisy diffs.
-
-## FR-011: Analysis JSON Schema
-
-Priority: P1
-
-Stabilize a richer `analysis.json` contract for server import.
-
-Top-level shape:
-
-```json
-{
-  "schema_version": 1,
-  "tool": {
-    "name": "stackimport",
-    "version": "0.0.0",
-    "commit": "unknown"
-  },
-  "input": {
-    "path": "data/roms/old-world/2mb/example.ROM",
-    "size": 2097152,
-    "crc32": "9C71C823",
-    "sha256": "..."
-  },
-  "base_address": "40800000",
-  "identity": {},
-  "regions": [],
-  "functions": [],
-  "xrefs": [],
-  "resources": [],
-  "strings": [],
-  "source_overlays": [],
-  "source_gaps": [],
-  "warnings": []
-}
-```
-
-Requirements:
-
-- Keep schema versioned.
-- Use strings for hex addresses.
-- Avoid absolute paths when an equivalent repo-relative path exists.
-- Include warnings for skipped/failed phases.
-
-Acceptance:
-
-- MCP server can import this JSON without parsing `disassembly.s`.
-- Unknown future fields do not break existing import.
-
-## FR-012: Incremental and Selective Analysis
-
-Priority: P2
-
-Support focused reanalysis for fast iteration.
-
-Requirements:
-
-- Add `--range <start:end>` to analyze a bounded ROM range.
-- Add `--phase identity,strings,disasm,xrefs,resources,source` or equivalent.
-- Add `--max-rows`/`--samples` only for debug output; full atlas exports should not silently sample unless requested.
-- Cache source index and ROM scan data when safe.
-
-Acceptance:
-
-- A single function/resource neighborhood can be reanalyzed quickly.
-- Partial runs mark outputs as partial in JSON/manifest metadata.
-
-## FR-013: Test Corpus and Golden Outputs
-
-Priority: P1
-
-Add regression tests for ROM analysis outputs.
-
-Requirements:
-
-- Use small synthetic ROM fixtures committed to stackimport, not copyrighted ROM bytes.
-- Test CRC32 unsigned formatting.
-- Test 68k disassembly mode selection.
-- Test pointer table detection.
-- Test resource map parsing on synthetic resource forks.
-- Test atlas TSV headers and stable sort order.
-
-Acceptance:
-
-- `ctest` covers all core output contracts without needing private ROMs.
-- Real ROM smoke tests can run locally when `STACKIMPORT_ROM_FIXTURES_DIR` is set.
-
-## FR-014: Open-Source Tool Integration
-
-Priority: P2
-
-Use existing reverse-engineering tools through adapters where they materially improve analysis.
-
-Candidates:
-
-- `resource_dasm` for 68k/PPC disassembly, resource parsing, PICT/icon/audio handling.
-- Deark for old binary/resource format decoding where useful.
-- Existing Classic Mac resource parsers already vendored in stackimport.
-
-Requirements:
-
-- Keep tool usage behind stackimport adapters.
-- Record converter/disassembler name and version/commit in output provenance.
-- Do not require `mac-rom-atlas` to know vendor-specific output formats.
-
-Acceptance:
-
-- Swapping or upgrading a vendor library changes stackimport internals, not atlas file schemas.
-
-## Current ROM Scan Evaluation
-
-Observed run:
-
-```text
-/tmp/stackimport-rom-scan-20260528-115621
-```
-
-Inputs:
-
-| ROM | Size | CRC32 | Exit | Atlas TSVs |
-|---|---:|---|---:|---|
-| `1994-05 - B6909089 - PowerBook 520 520c 540 540c.ROM` | 2097152 | `66CF9F2F` | 0 | written |
-| `1994-09 - 5BF10FD1 - Quadra 660av & 840av.ROM` | 2097152 | `6973886C` | 0 | written |
-| `1995-08 - 4D27039C - Powerbook 190 & 190cs.ROM` | 2097152 | `9C71C823` | 0 | written |
-| `Quadra-900.rom` | 1048576 | `88EA2081` | 0 | written |
-
-What works now:
-
-- ROM mode exits `0` for all four manifest-verified inputs.
-- `analysis.json`, `disassembly.s`, and every expected atlas TSV file are emitted.
-- CRC32 and SHA256 values are uppercase and match the local fixture manifest.
-- `analysis.json.disassembly.mode` reports `m68k`, and `disassembly.s` contains real mnemonics rather than fallback-only `dc.w` rows.
-- `xrefs.tsv`, `traps.tsv`, `functions.tsv`, `labels.tsv`, `strings.tsv`, and region files are populated enough for first-pass atlas browsing.
-- Empty source correlation files still include headers, which is good for stable ingestion.
-
-Important gaps found:
-
-- Output paths are absolute in `analysis.json.input.path`, `analysis.json.identity.path`, `analysis.json.output_path`, and `roms.tsv`. Atlas publication needs repo-relative paths when possible.
-- Atlas output does not include `manifest.yaml`, despite FR-010 requiring it.
-- `resources.tsv` rows are marker-only. Inventory reports `resource_maps=0` and `resource_records=0` for all four ROMs, even though marker scans find `DRVR`, `CODE`, `PACK`, `boot`, `ptch`, `decl`, `MENU`, `DITL`, `ALRT`, `STR `, and `STR#` candidates.
-- No assets directory or converted resource payloads are emitted by this run, so FR-006 remains mostly unimplemented beyond marker discovery.
-- `source-overlays.tsv` and `source-gaps.tsv` contain only headers. `inventory.tsv` reports `source_status=unmatched`, but no machine-readable "what to investigate next" rows are produced.
-- Region classification is still too coarse: every ROM has one high-confidence whole-ROM code region, while `data-regions.tsv` only reports string clusters. This makes the atlas overpaint data/resource/table islands as code.
-- Function candidates are overbroad and under-specified. For example, Quadra 900 emits 7,490 candidates, with sample rows having empty `end` and `instruction_count=0`. These are useful labels, but not yet function boundaries.
-- Trap counts are very high for linear disassembly (`10,186` to `18,356` per 1-2 MB ROM). Without data-island suppression or function context, many are probably false positives from decoding non-code bytes.
-- String extraction is noisy. Early Quadra 900 strings include short low-confidence fragments such as `.T(h` and `"HBa`; atlas users need filtering, scoring, and better defaults for browseable string views.
-- Pointer table detection varies sharply across similar ROMs: 71 entries for PowerBook 520, 2,267 for Quadra 660av/840av, 147 for PowerBook 190, and 122 for Quadra 900. That may be real, but it needs validation evidence and false-positive controls.
-- Some TSV schemas are missing useful join columns. `resources.tsv` currently lacks `rom_id`, unlike most other atlas files, which complicates multi-ROM aggregation.
-- Warnings are empty even when phases are clearly partial, such as marker-only resources, no source root, no parsed resource maps, and whole-ROM linear code classification.
-
-Recommended updates to this feature backlog:
-
-- Keep FR-001 and FR-002 near done but require repo-relative path emission and deterministic re-run comparison before marking complete.
-- Treat FR-003 as partially implemented. Add acceptance that xrefs derived from linear disassembly must carry a region-aware confidence downgrade when the source address is inside probable data.
-- Treat FR-004 as not complete until candidates have non-empty ranges or explicitly report `boundary_status=unknown`. A zero instruction count should not appear for a function candidate unless the row is clearly a pure label.
-- Raise FR-005 implementation priority within P0. Region quality is now the main blocker for trustworthy functions, traps, strings, and xrefs.
-- Treat FR-006 as marker-discovery only. Parsed resource-map support, resource records, and asset extraction are the next concrete improvements.
-- Treat FR-007 as partially implemented. Add minimum browse filters such as length threshold, printable ratio, duplicate handling, and confidence bands.
-- Treat FR-009 as blocked on source overlays and region quality. In the meantime, emit coarse gap rows for high-fan-in candidates, marker-only resources, and major unknown regions instead of empty files.
-- Update FR-010 to require a generated manifest with command, input hashes, stackimport version, atlas schema version, row counts, and validation status.
-- Update FR-011 to require phase status objects, not just `warnings`, so partial analyses are visible even when the CLI exits successfully.
-- Add a TSV schema consistency requirement: every per-ROM atlas TSV should include `rom_id`, stable row IDs, confidence, and source/provenance where applicable.
-
-Coverage pass implemented after this evaluation:
-
-Validated by:
-
-```text
-/tmp/stackimport-rom-gap-coverage-final-20260528-124304
-```
-
-- `manifest.yaml` is now emitted with tool version, ROM identity, row counts, phase status, validation status, and warnings.
-- `analysis.json.phase_status` and `analysis.json.warnings` now make partial phases explicit, including marker-only resources, partial linear xrefs, partial regions, and missing source overlays.
-- `resources.tsv` and `analysis.json.resources` now include `rom_id` for marker and parsed rows.
-- `functions.tsv` and `analysis.json.functions` now report `boundary_status=unknown` and leave `instruction_count` empty/null instead of implying a zero-length function.
-- `source-gaps.tsv` and `analysis.json.source_gaps` now contain high-priority function candidates, marker-only resource candidates, and an analysis-phase gap when no source overlay is available.
-- Whole-ROM disassembly regions are downgraded to `mixed` when scanner data regions exist.
-- Xrefs and traps derived from probable data regions are downgraded in confidence and tagged in their `source` string.
-
-Final validation counts:
-
-| ROM | Source-gap rows | Mixed regions | Low-confidence xrefs |
-|---|---:|---:|---:|
-| `1994-05 - B6909089 - PowerBook 520 520c 540 540c.ROM` | 156 | 2 | 62786 |
-| `1994-09 - 5BF10FD1 - Quadra 660av & 840av.ROM` | 201 | 2 | 125063 |
-| `1995-08 - 4D27039C - Powerbook 190 & 190cs.ROM` | 201 | 1 | 158599 |
-| `Quadra-900.rom` | 146 | 2 | 36945 |
-
-Remaining deep-analysis work:
-
-- Continue improving ROM-resident resource mapping beyond the current standard
-  resource-fork, inline, and `Kurt` record coverage.
-- Extend converted assets for the remaining raw image-like payloads, especially
-  `pixs` ID `-10208`, compact/special `cicn` ID `-20020`, 140-byte wrapped
-  `ICON` records, and large DiskMode 6 `PICT` variants.
-- Infer defensible function ranges and instruction counts.
-- Add source-root correlation for SuperMario overlays.
-- Improve string and pointer-table false-positive filtering with fixture-backed tests.
-
-## Definition of Done
-
-A feature request is complete when:
-
-- CLI behavior is documented in stackimport.
-- CMake builds it in the normal developer path or gracefully reports that the phase is unavailable.
-- Unit or fixture tests cover the output contract.
-- `analysis.json` and atlas TSVs validate.
-- `mac-rom-atlas` can consume the output through existing import/export paths.
-- Generated claims include source, evidence, and confidence.
-- The change avoids committing raw ROMs, full disassemblies, or generated assets to the public atlas repository.
+Do not commit ROM bytes, full disassemblies, or generated resource assets.
+
+## Closeout Determination
+
+The original Mac ROM Atlas feature-request list has served its purpose. The
+implemented repository surface now includes ROM identity, real 68K disassembly,
+atlas TSV export, manifest output, phase status/warnings, resource parsing,
+resource asset/index emission, broad conversion coverage, string filtering,
+source string overlays, coarse source gaps, and fixture-backed regression tests.
+
+This document should be maintained as a stable feature/status reference. New
+work should be filed against the specific implementation area rather than added
+as another open-ended feature request list.

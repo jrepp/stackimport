@@ -108,9 +108,13 @@ Current ROM mode emits deterministic rows for these analysis areas:
 
 Xrefs are derived from direct disassembly comment targets and scanner-detected
 pointer tables. Xref `kind` values include `call`, `jump`, `branch`, `memory`,
-and `table`. Function rows remain hypotheses unless another tool supplies a
-confirmed overlay. Candidate rows report `boundary_status=unknown` and leave
-`instruction_count` blank until a boundary pass can infer a defensible range.
+and `table`. Pointer table rows include a confidence score and evidence summary
+based on aligned in-ROM targets and unique target counts. Function rows remain
+hypotheses unless another tool supplies a confirmed overlay. Candidate rows use
+`boundary_status=bounded_by_next_candidate` when a provisional range can be
+formed from neighboring candidate starts and parsed instruction addresses;
+otherwise they report `boundary_status=unknown` and leave `instruction_count`
+blank.
 
 Whole-ROM linear disassembly is emitted as a mixed region when scanner-derived
 data overlays exist. Xrefs and traps whose source or target is inside a probable
@@ -133,7 +137,8 @@ so partial resource coverage is visible instead of silently absent.
 When `--emit-assets` is set, parsed resource payload bytes are preserved under
 `assets/resources/`. Supported built-in conversions are emitted next to the raw
 payload; `STR ` resources produce UTF-8 `.txt` derivatives, decoded RGBA
-resources such as `ICON`, `CURS`, icon-family resources, compact ROM `pixs`
+resources such as standard and 12-byte-wrapped `ICON`, `CURS`, icon-family
+resources, compact ROM `pixs` payloads, guarded PICT-like larger `pixs`
 payloads, short-form ROM `ppat` payloads, and color-table swatch previews are
 written as PNG. Sampled `snd ` resources are written as WAV, while non-converted
 `snd ` resources still emit JSON metadata that records the format word,
@@ -149,6 +154,16 @@ preserved native byte path. `analysis.json.resources` also records converter,
 variant index, width, height, and row-byte metadata when a transform supplies
 those fields, plus an `output_artifacts` array listing each preserved or
 converted file emitted for the resource.
+
+When `--source-root` is supplied, ROM mode performs a bounded source-correlation
+pass for high-confidence ROM strings. Matches are written to
+`source-overlays.tsv` and `analysis.json.source_overlays` with source path, line,
+matched string symbol, confidence, and evidence. This is a string-correlation
+overlay only; function/resource correlation remains a future analysis phase.
+
+String inventory rows are filtered for browseability before export. Short
+punctuation-heavy fragments are dropped, while accepted rows include a confidence
+score that downstream atlas views can use as a default filter.
 
 ## Determinism
 

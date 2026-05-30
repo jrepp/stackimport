@@ -40,6 +40,8 @@ void RunTests()
 	assert(analysis.pointer_table_regions[0].address == baseAddress + 0x20);
 	assert(analysis.pointer_table_regions[0].entry_count == 4);
 	assert(analysis.pointer_table_regions[0].targets[0] == baseAddress + 0x40);
+	assert(analysis.pointer_table_regions[0].confidence > 0.60);
+	assert(analysis.pointer_table_regions[0].evidence.find("unique_targets=4") != std::string::npos);
 
 	bool sawBootRom = false;
 	bool sawPascalHello = false;
@@ -55,6 +57,12 @@ void RunTests()
 	assert(sawBootRom);
 	assert(sawPascalHello);
 	assert(sawTableMap);
+	const uint8_t noisyStringBytes[] = {'.', 'T', '(', 'h', 0, 'R', 'e', 'a', 'l', 'N', 'a', 'm', 'e', 0};
+	const auto filteredStrings = stackimport::RomDasm::scan_strings(
+		std::span<const uint8_t>(noisyStringBytes, sizeof(noisyStringBytes)), 4, true, false);
+	assert(filteredStrings.size() == 1);
+	assert(filteredStrings[0].value == "RealName");
+	assert(filteredStrings[0].confidence > 0.70);
 
 	bool sawDriverMarker = false;
 	bool sawCodeMarker = false;
@@ -138,10 +146,15 @@ void RunTests()
 	codeRegion.confidence = 0.95;
 	codeRegion.text =
 		"40800000  6100 001E                bsr        +0x20 /* 40800020 */\n"
+		"40800002  6100 002C                bsr        +0x30 /* 40800030 */\n"
 		"40800004  60FA                     bra        -0x4 /* 40800000 */\n"
 		"40800006  4EFA 0018                jmp        [PC + 0x18 /* 40800020 */]\n"
 		"4080000A  41FA 0020                lea.l      A0, [PC + 0x20 /* 4080002C */]\n"
-		"4080000E  A9F0                     syscall    SysBeep\n";
+		"4080000E  A9F0                     syscall    SysBeep\n"
+		"40800020  4E71                     nop\n"
+		"40800022  4E75                     rts\n"
+		"40800030  4E71                     nop\n"
+		"40800032  4E75                     rts\n";
 	controlFlow.code_regions.push_back(codeRegion);
 	std::vector<uint8_t> controlFlowBytes(0x100, 0);
 	stackimport::RomDasm::classify_rom_structure(
@@ -170,11 +183,16 @@ void RunTests()
 	assert(controlFlow.traps[0].address == baseAddress + 0x0E);
 	assert(controlFlow.traps[0].trap_number == 0x09F0);
 	bool sawCallCandidate = false;
+	bool sawBoundedCandidate = false;
 	for(const auto& fn : controlFlow.function_candidates) {
 		if(fn.address == baseAddress + 0x20 && fn.calls == 1)
 			sawCallCandidate = true;
+		if(fn.address == baseAddress + 0x20 && fn.end_address == baseAddress + 0x30 &&
+		   fn.instruction_count == 2 && fn.boundary_status == "bounded_by_next_candidate")
+			sawBoundedCandidate = true;
 	}
 	assert(sawCallCandidate);
+	assert(sawBoundedCandidate);
 }
 
 }

@@ -42,6 +42,7 @@ struct StringRegion {
   std::string value;
   size_t length;
   bool is_pascal;
+  double confidence;
 };
 
 struct PointerTableEntry {
@@ -54,15 +55,21 @@ struct PointerTableRegion {
   uint32_t address;
   size_t entry_count;
   std::vector<uint32_t> targets;
+  double confidence;
+  std::string evidence;
 };
 
 struct FunctionCandidate {
   uint32_t address;
+  uint32_t end_address;
   std::string label;
   size_t calls;
   size_t jumps;
   size_t references;
+  size_t instruction_count;
   double confidence;
+  std::string boundary_status;
+  std::string evidence;
 };
 
 struct DataRegion {

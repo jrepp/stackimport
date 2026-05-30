@@ -13,6 +13,10 @@ namespace TestResourceTransforms {
 void test_resource_image_transforms()
 {
 	TestShared::assert_rgba_resource("ICON", 128, TestShared::make_icon_payload(), 32, 32);
+	std::vector<uint8_t> wrappedIconPayload(12, 0);
+	const std::vector<uint8_t> iconPayload = TestShared::make_icon_payload();
+	wrappedIconPayload.insert(wrappedIconPayload.end(), iconPayload.begin(), iconPayload.end());
+	TestShared::assert_rgba_resource("ICON", 129, wrappedIconPayload, 32, 32);
 
 	std::vector<uint8_t> icnPayload(256);
 	icnPayload[0] = 0x80;

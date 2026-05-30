@@ -2385,6 +2385,20 @@ auto emit_compact_indexed_pixmap_transform(
 	return output.on_resource_payload(descriptor);
 }
 
+bool looks_like_sized_rect_picture(const rsrcd::Bytes& data)
+{
+	if(data.size < 12u)
+		return false;
+	const uint16_t declared_size = read_be_u16(data, 0);
+	if(static_cast<size_t>(declared_size) + 12u != data.size)
+		return false;
+	const int16_t top = static_cast<int16_t>(read_be_u16(data, 2));
+	const int16_t left = static_cast<int16_t>(read_be_u16(data, 4));
+	const int16_t bottom = static_cast<int16_t>(read_be_u16(data, 6));
+	const int16_t right = static_cast<int16_t>(read_be_u16(data, 8));
+	return top == 0 && left == 0 && bottom > top && right > left && bottom <= 1024 && right <= 1024;
+}
+
 auto emit_pixel_pattern_images(
 	const rsrcd::Bytes& resource_data,
 	const rsrcd::pixel_pattern::Pattern& pattern,
@@ -3138,14 +3152,16 @@ auto emit_builtin_resource_transforms(
 	if(resource_type_is(resource, "PICT"))
 		return emit_pict_transform(resource, ref, output);
 
-	if(resource_type_is(resource, "ICON") && resource.data.size == 128)
+	if(resource_type_is(resource, "ICON") && (resource.data.size == 128 || resource.data.size == 140))
 	{
+		const size_t icon_offset = resource.data.size == 140 ? 12u : 0u;
+		const rsrcd::Bytes icon_data{resource.data.data + icon_offset, 128u};
 		ResourcePayload descriptor = make_converted_resource_payload(
 			ref,
 			ResourcePayloadFormat::Rgba32,
 			rsrcd::Bytes{nullptr, 32u * 32u * 4u},
 			"image/x-rgba32",
-			"decoded 32x32 ICON pixels");
+			icon_offset == 0 ? "decoded 32x32 ICON pixels" : "decoded wrapped 32x32 ICON pixels");
 		descriptor.width = 32;
 		descriptor.height = 32;
 		descriptor.row_bytes = 32 * 4;
@@ -3154,7 +3170,7 @@ auto emit_builtin_resource_transforms(
 
 		uint8_t rgba[32 * 32 * 4];
 		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
-		if(!rsrcd::img::decode_icon_bw(resource.data, dst))
+		if(!rsrcd::img::decode_icon_bw(icon_data, dst))
 			return true;
 		swap_bgra_to_rgba(rgba, 32u * 32u);
 		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
@@ -3475,7 +3491,11 @@ auto emit_builtin_resource_transforms(
 		return emit_ppat_transform(resource, ref, output);
 
 	if(resource_type_is(resource, "pixs"))
+	{
+		if(looks_like_sized_rect_picture(resource.data))
+			return emit_pict_transform(resource, ref, output);
 		return emit_compact_indexed_pixmap_transform(resource, ref, output, "decoded compact pixs pixels");
+	}
 
 	if(resource_type_is(resource, "ppt#"))
 		return emit_ppt_list_transform(resource, ref, output);

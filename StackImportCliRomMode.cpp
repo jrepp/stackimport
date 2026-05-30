@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <span>
 
@@ -26,6 +28,16 @@ struct RomResourceAsset {
 	uint32_t height = 0;
 	uint32_t row_bytes = 0;
 	std::vector<uint8_t> data;
+};
+
+struct SourceOverlay {
+	std::string id;
+	uint32_t address = 0;
+	std::string source_path;
+	size_t source_line = 0;
+	std::string symbol;
+	double confidence = 0.0;
+	std::string evidence;
 };
 
 class RomResourceTransformOutput final : public IResourceOutput {
@@ -336,10 +348,106 @@ bool write_resource_index(
 	return fclose(jsonFile) == 0;
 }
 
+bool source_file_extension_is_relevant(const std::filesystem::path& path)
+{
+	std::string extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+	return extension == ".c" || extension == ".h" || extension == ".p" ||
+		extension == ".pas" || extension == ".a" || extension == ".s" ||
+		extension == ".asm" || extension == ".r" || extension == ".rez" ||
+		extension == ".txt";
+}
+
+std::string clipped_symbol_text(const std::string& text)
+{
+	constexpr size_t maxLength = 48;
+	if(text.size() <= maxLength)
+		return text;
+	return text.substr(0, maxLength);
+}
+
+std::vector<SourceOverlay> correlate_source_strings(
+	const std::string& sourceRoot,
+	const RomDasm::RomAnalysis& analysis)
+{
+	std::vector<SourceOverlay> overlays;
+	if(sourceRoot.empty())
+		return overlays;
+	std::error_code ec;
+	const std::filesystem::path root(sourceRoot);
+	if(!std::filesystem::exists(root, ec) || !std::filesystem::is_directory(root, ec))
+		return overlays;
+
+	std::vector<const RomDasm::StringRegion*> candidateStrings;
+	for(const auto& stringRegion : analysis.strings)
+	{
+		if(stringRegion.length >= 6 && stringRegion.confidence >= 0.70)
+			candidateStrings.push_back(&stringRegion);
+	}
+	if(candidateStrings.empty())
+		return overlays;
+
+	constexpr size_t maxOverlays = 250;
+	constexpr uintmax_t maxSourceFileSize = 2u * 1024u * 1024u;
+	for(std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, ec), end;
+		!ec && it != end && overlays.size() < maxOverlays;
+		it.increment(ec))
+	{
+		if(!it->is_regular_file(ec) || !source_file_extension_is_relevant(it->path()))
+			continue;
+		const uintmax_t fileSize = it->file_size(ec);
+		if(ec || fileSize > maxSourceFileSize)
+		{
+			ec.clear();
+			continue;
+		}
+		std::ifstream input(it->path());
+		if(!input)
+			continue;
+		std::string relativePath = relative_to_cwd(it->path().string());
+		std::string line;
+		size_t lineNumber = 0;
+		while(std::getline(input, line) && overlays.size() < maxOverlays)
+		{
+			lineNumber++;
+			for(const RomDasm::StringRegion* stringRegion : candidateStrings)
+			{
+				if(line.find(stringRegion->value) == std::string::npos)
+					continue;
+				const uint32_t address = analysis.info.base_address + stringRegion->address;
+				SourceOverlay overlay;
+				overlay.id = "overlay-str-" + RomDasm::format_address(address) + "-" + std::to_string(overlays.size());
+				overlay.address = address;
+				overlay.source_path = relativePath;
+				overlay.source_line = lineNumber;
+				overlay.symbol = "string:" + clipped_symbol_text(stringRegion->value);
+				overlay.confidence = std::min(0.95, stringRegion->confidence + 0.10);
+				overlay.evidence = "ROM string matched source line " + std::to_string(lineNumber);
+				overlays.push_back(std::move(overlay));
+				if(overlays.size() >= maxOverlays)
+					break;
+			}
+		}
+	}
+	std::sort(overlays.begin(), overlays.end(),
+		[](const SourceOverlay& a, const SourceOverlay& b) {
+			if(a.address != b.address)
+				return a.address < b.address;
+			if(a.source_path != b.source_path)
+				return a.source_path < b.source_path;
+			return a.source_line < b.source_line;
+		});
+	for(size_t i = 0; i < overlays.size(); i++)
+		overlays[i].id = "overlay-str-" + RomDasm::format_address(overlays[i].address) + "-" + std::to_string(i);
+	return overlays;
+}
+
 bool write_atlas_outputs(
 	const std::string& atlasDir,
 	const std::string& inputPath,
 	const std::string& outputDir,
+	const std::string& sourceRoot,
 	const std::vector<uint8_t>& buf,
 	const RomDasm::RomAnalysis& analysis,
 	bool emitAssets)
@@ -355,7 +463,9 @@ bool write_atlas_outputs(
 	const char* firstBytesKind = initial_bytes_hypothesis(buf, firstBytesConfidence);
 	const bool hasParsedResources = !analysis.resources.empty();
 	const bool hasMarkerOnlyResources = !analysis.resource_markers.empty() && analysis.resources.empty();
-	const bool hasSourceOverlays = false;
+	const std::vector<SourceOverlay> sourceOverlaysData = correlate_source_strings(sourceRoot, analysis);
+	const bool hasSourceRoot = !sourceRoot.empty();
+	const bool hasSourceOverlays = !sourceOverlaysData.empty();
 
 	std::string roms = "id\tpath\tsize\tcrc32\tsha256\tbase_address\tmachine_family\tmodel_tokens\n";
 	roms += romId + "\t" + tsv_escape(inputRel) + "\t" + std::to_string(analysis.info.size) + "\t";
@@ -405,10 +515,14 @@ bool write_atlas_outputs(
 	{
 		const std::string id = "fn-" + RomDasm::format_address(fn.address);
 		const std::string label = fn.label.empty() ? ("sub_" + RomDasm::format_address(fn.address)) : fn.label;
-		functions += id + "\t" + romId + "\t" + RomDasm::format_address(fn.address) + "\t\tunknown\tcandidate\t";
-		functions += tsv_escape(label) + "\t\t" + std::to_string(fn.calls) + "\t";
+		functions += id + "\t" + romId + "\t" + RomDasm::format_address(fn.address) + "\t";
+		functions += (fn.end_address != 0 ? RomDasm::format_address(fn.end_address) : "") + "\t";
+		functions += tsv_escape(fn.boundary_status.empty() ? "unknown" : fn.boundary_status) + "\tcandidate\t";
+		functions += tsv_escape(label) + "\t";
+		functions += (fn.instruction_count != 0 ? std::to_string(fn.instruction_count) : "") + "\t";
+		functions += std::to_string(fn.calls) + "\t";
 		functions += std::to_string(fn.jumps) + "\t" + std::to_string(fn.references) + "\t";
-		functions += std::to_string(fn.confidence) + "\tinbound references from linear disassembly; boundary not inferred\n";
+		functions += std::to_string(fn.confidence) + "\t" + tsv_escape(fn.evidence) + "\n";
 	}
 
 	std::string pointerTables = "id\trom_id\taddress\tentry_count\tdecoded_target_count\tconfidence\tsource\n";
@@ -416,7 +530,8 @@ bool write_atlas_outputs(
 	{
 		pointerTables += "ptrtab-" + RomDasm::format_address(table.address) + "\t" + romId + "\t";
 		pointerTables += RomDasm::format_address(table.address) + "\t" + std::to_string(table.entry_count) + "\t";
-		pointerTables += std::to_string(table.targets.size()) + "\t0.75\tscanner:aligned-absolute-addresses\n";
+		pointerTables += std::to_string(table.targets.size()) + "\t" + std::to_string(table.confidence) + "\t";
+		pointerTables += tsv_escape(table.evidence.empty() ? "scanner:aligned-absolute-addresses" : table.evidence) + "\n";
 	}
 
 	std::string dataRegions = "id\trom_id\tstart\tend\tkind\titem_count\tconfidence\tsource\n";
@@ -465,7 +580,8 @@ bool write_atlas_outputs(
 		strings += "str-" + RomDasm::format_address(address) + "\t" + romId + "\t";
 		strings += RomDasm::format_address(address) + "\t";
 		strings += s.is_pascal ? "pascal" : "ascii";
-		strings += "\t" + std::to_string(s.length) + "\t" + tsv_escape(s.value) + "\t0.65\tstring-scanner\n";
+		strings += "\t" + std::to_string(s.length) + "\t" + tsv_escape(s.value) + "\t";
+		strings += std::to_string(s.confidence) + "\tstring-scanner\n";
 	}
 
 	std::string xrefs = "id\tfrom\tto\tkind\tsource_node\ttarget_node\tline\tconfidence\tsource\n";
@@ -490,7 +606,15 @@ bool write_atlas_outputs(
 		traps += address + "\t" + trapNumber + "\t" + tsv_escape(trap.trap_name) + "\t";
 		traps += tsv_escape(trap.space) + "\t" + std::to_string(trap.confidence) + "\t" + tsv_escape(trap.source) + "\n";
 	}
-	std::string sourceOverlays = "id\trom_id\taddress\tsource_path\tsymbol\tconfidence\tevidence\n";
+	std::string sourceOverlays = "id\trom_id\taddress\tsource_path\tsource_line\tsymbol\tconfidence\tevidence\n";
+	for(const auto& overlay : sourceOverlaysData)
+	{
+		sourceOverlays += tsv_escape(overlay.id) + "\t" + romId + "\t" + RomDasm::format_address(overlay.address) + "\t";
+		sourceOverlays += tsv_escape(overlay.source_path) + "\t" + std::to_string(overlay.source_line) + "\t";
+		sourceOverlays += tsv_escape(overlay.symbol) + "\t";
+		sourceOverlays += std::to_string(overlay.confidence) + "\t";
+		sourceOverlays += tsv_escape(overlay.evidence + "; source_path=" + overlay.source_path) + "\n";
+	}
 	std::string sourceGaps = "id\trom_id\taddress\tkind\tpriority\tconfidence\tevidence\n";
 	size_t emittedFunctionGaps = 0;
 	for(const auto& fn : analysis.function_candidates)
@@ -516,7 +640,8 @@ bool write_atlas_outputs(
 		emittedResourceGaps++;
 	}
 	if(!hasSourceOverlays)
-		sourceGaps += "gap-source-overlay-missing-" + romId + "\t" + romId + "\t\tanalysis_phase\tmedium\t0.50\tno source root overlay supplied or matched for this run\n";
+		sourceGaps += "gap-source-overlay-missing-" + romId + "\t" + romId + "\t\tanalysis_phase\tmedium\t0.50\t" +
+			std::string(hasSourceRoot ? "source root supplied but no source overlays matched for this run" : "no source root overlay supplied or matched for this run") + "\n";
 
 	std::string manifest = "schema_version: 1\n";
 	manifest += "tool:\n";
@@ -536,7 +661,7 @@ bool write_atlas_outputs(
 	manifest += "  xrefs: partial_linear\n";
 	manifest += "  regions: partial\n";
 	manifest += std::string("  resources: ") + (hasParsedResources ? "partial_parsed\n" : "marker_only\n");
-	manifest += "  source_overlays: not_run\n";
+	manifest += std::string("  source_overlays: ") + (hasSourceRoot ? (hasSourceOverlays ? "partial_string_matches\n" : "no_matches\n") : "not_run\n");
 	manifest += "row_counts:\n";
 	manifest += "  functions: " + std::to_string(analysis.function_candidates.size()) + "\n";
 	manifest += "  xrefs: " + std::to_string(analysis.xrefs.size()) + "\n";
@@ -547,12 +672,13 @@ bool write_atlas_outputs(
 	manifest += "  resource_markers: " + std::to_string(analysis.resource_markers.size()) + "\n";
 	manifest += "  resource_maps: " + std::to_string(analysis.resource_maps.size()) + "\n";
 	manifest += "  resource_records: " + std::to_string(analysis.resources.size()) + "\n";
+	manifest += "  source_overlays: " + std::to_string(sourceOverlaysData.size()) + "\n";
 	manifest += "warnings:\n";
 	manifest += "  - whole-ROM linear disassembly is region-overlay input, not confirmed code coverage\n";
 	if(hasMarkerOnlyResources)
 		manifest += "  - resource scan found markers but no parsed resource map records\n";
 	if(!hasSourceOverlays)
-		manifest += "  - source overlay phase did not produce matches\n";
+		manifest += std::string("  - ") + (hasSourceRoot ? "source root supplied but no source overlay matches were found\n" : "source overlay phase did not produce matches\n");
 
 	return write_text_file(path_join(atlasDir, "roms.tsv"), roms) &&
 		write_text_file(path_join(atlasDir, "inventory.tsv"), inventory) &&
@@ -575,6 +701,7 @@ bool write_analysis_json(
 	const std::string& filename,
 	const std::string& inputPath,
 	const std::string& outputDir,
+	const std::string& sourceRoot,
 	const std::vector<uint8_t>& buf,
 	const RomDasm::RomAnalysis& analysis,
 	bool emitAssets)
@@ -591,7 +718,9 @@ bool write_analysis_json(
 	const std::string romId = rom_id_from_info(analysis);
 	const bool hasParsedResources = !analysis.resources.empty();
 	const bool hasMarkerOnlyResources = !analysis.resource_markers.empty() && analysis.resources.empty();
-	const bool hasSourceOverlays = false;
+	const std::vector<SourceOverlay> sourceOverlaysData = correlate_source_strings(sourceRoot, analysis);
+	const bool hasSourceRoot = !sourceRoot.empty();
+	const bool hasSourceOverlays = !sourceOverlaysData.empty();
 
 	fprintf(jsonFile, "{\n");
 	fprintf(jsonFile, "  \"schema_version\": 1,\n");
@@ -620,8 +749,9 @@ bool write_analysis_json(
 	fprintf(jsonFile, "  \"disassembly\": {\"mode\": \"%s\", \"linear_warning\": true, \"instruction_count\": %zu},\n",
 		rom_disassembly_mode(),
 		analysis.total_instructions);
-	fprintf(jsonFile, "  \"phase_status\": {\"identity\":\"complete\",\"disassembly\":\"complete\",\"xrefs\":\"partial_linear\",\"regions\":\"partial\",\"resources\":\"%s\",\"source_overlays\":\"not_run\"},\n",
-		hasParsedResources ? "partial_parsed" : "marker_only");
+	fprintf(jsonFile, "  \"phase_status\": {\"identity\":\"complete\",\"disassembly\":\"complete\",\"xrefs\":\"partial_linear\",\"regions\":\"partial\",\"resources\":\"%s\",\"source_overlays\":\"%s\"},\n",
+		hasParsedResources ? "partial_parsed" : "marker_only",
+		hasSourceRoot ? (hasSourceOverlays ? "partial_string_matches" : "no_matches") : "not_run");
 	fprintf(jsonFile, "  \"machine_family\": \"%s\",\n", json_escape(analysis.info.machine_family).c_str());
 	fprintf(jsonFile, "  \"counts\": {\"code_regions\": %zu, \"strings\": %zu, \"pointer_entries\": %zu, \"pointer_table_regions\": %zu, \"function_candidates\": %zu, \"data_regions\": %zu, \"resource_markers\": %zu, \"resource_maps\": %zu, \"resource_records\": %zu, \"xrefs\": %zu, \"traps\": %zu},\n",
 		analysis.code_regions.size(),
@@ -677,15 +807,21 @@ bool write_analysis_json(
 	for(size_t i = 0; i < analysis.function_candidates.size(); i++)
 	{
 		const auto& fn = analysis.function_candidates[i];
+		const std::string endAddress = fn.end_address != 0 ? ("\"" + RomDasm::format_address(fn.end_address) + "\"") : "null";
+		const std::string instructionCount = fn.instruction_count != 0 ? std::to_string(fn.instruction_count) : "null";
 		fprintf(jsonFile,
-			"    {\"id\":\"fn-%08X\",\"start\":\"%08X\",\"end\":null,\"boundary_status\":\"unknown\",\"kind\":\"candidate\",\"label\":\"%s\",\"instruction_count\":null,\"inbound_calls\":%zu,\"outbound_calls\":%zu,\"references\":%zu,\"confidence\":%.2f,\"evidence\":\"inbound references from linear disassembly; boundary not inferred\"}%s\n",
+			"    {\"id\":\"fn-%08X\",\"start\":\"%08X\",\"end\":%s,\"boundary_status\":\"%s\",\"kind\":\"candidate\",\"label\":\"%s\",\"instruction_count\":%s,\"inbound_calls\":%zu,\"outbound_calls\":%zu,\"references\":%zu,\"confidence\":%.2f,\"evidence\":\"%s\"}%s\n",
 			static_cast<unsigned>(fn.address),
 			static_cast<unsigned>(fn.address),
+			endAddress.c_str(),
+			json_escape(fn.boundary_status.empty() ? "unknown" : fn.boundary_status).c_str(),
 			json_escape(fn.label.empty() ? ("sub_" + RomDasm::format_address(fn.address)) : fn.label).c_str(),
+			instructionCount.c_str(),
 			fn.calls,
 			fn.jumps,
 			fn.references,
 			fn.confidence,
+			json_escape(fn.evidence).c_str(),
 			(i + 1 < analysis.function_candidates.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
@@ -718,11 +854,13 @@ bool write_analysis_json(
 	{
 		const auto& table = analysis.pointer_table_regions[i];
 		fprintf(jsonFile,
-			"    {\"id\":\"ptrtab-%08X\",\"address\":\"%08X\",\"entry_count\":%zu,\"decoded_target_count\":%zu,\"confidence\":0.75,\"source\":\"scanner:aligned-absolute-addresses\",\"targets\":[",
+			"    {\"id\":\"ptrtab-%08X\",\"address\":\"%08X\",\"entry_count\":%zu,\"decoded_target_count\":%zu,\"confidence\":%.2f,\"source\":\"%s\",\"targets\":[",
 			static_cast<unsigned>(table.address),
 			static_cast<unsigned>(table.address),
 			table.entry_count,
-			table.targets.size());
+			table.targets.size(),
+			table.confidence,
+			json_escape(table.evidence.empty() ? "scanner:aligned-absolute-addresses" : table.evidence).c_str());
 		for(size_t j = 0; j < table.targets.size(); j++)
 			fprintf(jsonFile, "%s\"%08X\"", j ? "," : "", static_cast<unsigned>(table.targets[j]));
 		fprintf(jsonFile, "]}%s\n", (i + 1 < analysis.pointer_table_regions.size()) ? "," : "");
@@ -833,12 +971,13 @@ bool write_analysis_json(
 		const auto& s = analysis.strings[i];
 		const uint32_t address = analysis.info.base_address + s.address;
 		fprintf(jsonFile,
-			"    {\"id\":\"str-%08X\",\"address\":\"%08X\",\"kind\":\"%s\",\"length\":%zu,\"text\":\"%s\",\"confidence\":0.65,\"source\":\"string-scanner\"}%s\n",
+			"    {\"id\":\"str-%08X\",\"address\":\"%08X\",\"kind\":\"%s\",\"length\":%zu,\"text\":\"%s\",\"confidence\":%.2f,\"source\":\"string-scanner\"}%s\n",
 			static_cast<unsigned>(address),
 			static_cast<unsigned>(address),
 			s.is_pascal ? "pascal" : "ascii",
 			s.length,
 			json_escape(s.value).c_str(),
+			s.confidence,
 			(i + 1 < analysis.strings.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
@@ -862,7 +1001,23 @@ bool write_analysis_json(
 			(i + 1 < analysis.traps.size()) ? "," : "");
 	}
 	fprintf(jsonFile, "  ],\n");
-	fprintf(jsonFile, "  \"source_overlays\": [],\n");
+	fprintf(jsonFile, "  \"source_overlays\": [\n");
+	for(size_t i = 0; i < sourceOverlaysData.size(); i++)
+	{
+		const auto& overlay = sourceOverlaysData[i];
+		fprintf(jsonFile,
+			"    {\"id\":\"%s\",\"rom_id\":\"%s\",\"address\":\"%08X\",\"source_path\":\"%s\",\"source_line\":%zu,\"symbol\":\"%s\",\"confidence\":%.2f,\"evidence\":\"%s\"}%s\n",
+			json_escape(overlay.id).c_str(),
+			json_escape(romId).c_str(),
+			static_cast<unsigned>(overlay.address),
+			json_escape(overlay.source_path).c_str(),
+			overlay.source_line,
+			json_escape(overlay.symbol).c_str(),
+			overlay.confidence,
+			json_escape(overlay.evidence).c_str(),
+			(i + 1 < sourceOverlaysData.size()) ? "," : "");
+	}
+	fprintf(jsonFile, "  ],\n");
 	fprintf(jsonFile, "  \"source_gaps\": [\n");
 	size_t sourceGapIndex = 0;
 	for(const auto& fn : analysis.function_candidates)
@@ -903,9 +1058,10 @@ bool write_analysis_json(
 		if(sourceGapIndex > 0)
 			fprintf(jsonFile, ",\n");
 		fprintf(jsonFile,
-			"    {\"id\":\"gap-source-overlay-missing-%s\",\"rom_id\":\"%s\",\"address\":null,\"kind\":\"analysis_phase\",\"priority\":\"medium\",\"confidence\":0.50,\"evidence\":\"no source root overlay supplied or matched for this run\"}",
+			"    {\"id\":\"gap-source-overlay-missing-%s\",\"rom_id\":\"%s\",\"address\":null,\"kind\":\"analysis_phase\",\"priority\":\"medium\",\"confidence\":0.50,\"evidence\":\"%s\"}",
 			json_escape(romId).c_str(),
-			json_escape(romId).c_str());
+			json_escape(romId).c_str(),
+			hasSourceRoot ? "source root supplied but no source overlays matched for this run" : "no source root overlay supplied or matched for this run");
 		sourceGapIndex++;
 	}
 	if(sourceGapIndex > 0)
@@ -916,7 +1072,7 @@ bool write_analysis_json(
 	if(hasMarkerOnlyResources)
 		fprintf(jsonFile, ",\n    \"resource scan found markers but no parsed resource map records\"");
 	if(!hasSourceOverlays)
-		fprintf(jsonFile, ",\n    \"source overlay phase did not produce matches\"");
+		fprintf(jsonFile, ",\n    \"%s\"", hasSourceRoot ? "source root supplied but no source overlay matches were found" : "source overlay phase did not produce matches");
 	fprintf(jsonFile, "\n  ]\n");
 	fprintf(jsonFile, "}\n");
 	return fclose(jsonFile) == 0;
@@ -996,7 +1152,7 @@ int run_rom_mode(const Options& options)
 	}
 
 	const std::string jsonPath = path_join(outputDir, "analysis.json");
-	if(!write_analysis_json(jsonPath, filename, options.input_path, outputDir, buf, analysis, emitResourceAssets))
+	if(!write_analysis_json(jsonPath, filename, options.input_path, outputDir, options.source_root_path, buf, analysis, emitResourceAssets))
 	{
 		stackimport_quill_diagnosticf("Error: Failed to write '%s'.\n", jsonPath.c_str());
 		return 5;
@@ -1006,7 +1162,7 @@ int run_rom_mode(const Options& options)
 	if(options.emit_atlas || !options.atlas_output_path.empty())
 	{
 		const std::string atlasDir = !options.atlas_output_path.empty() ? options.atlas_output_path : path_join(outputDir, "atlas");
-		if(!write_atlas_outputs(atlasDir, options.input_path, outputDir, buf, analysis, emitResourceAssets))
+		if(!write_atlas_outputs(atlasDir, options.input_path, outputDir, options.source_root_path, buf, analysis, emitResourceAssets))
 		{
 			stackimport_quill_diagnosticf("Error: Failed to write atlas outputs under '%s'.\n", atlasDir.c_str());
 			return 5;
@@ -1014,7 +1170,6 @@ int run_rom_mode(const Options& options)
 		stackimport_quill_diagnosticf("Wrote atlas outputs: %s\n", atlasDir.c_str());
 	}
 
-	(void)options.source_root_path;
 	(void)options.emit_json;
 	stackimport_quill_diagnosticf("ROM analysis complete. Output: %s\n", outputDir.c_str());
 	return 0;

@@ -547,6 +547,37 @@ bool address_in_data_region(const RomAnalysis& analysis, uint32_t address) {
   return false;
 }
 
+bool plausible_rom_string(const std::string& value, bool is_pascal, double& confidence) {
+  if(value.empty())
+    return false;
+  size_t alnum = 0;
+  size_t alpha = 0;
+  size_t punctuation = 0;
+  for(char ch : value) {
+    const unsigned char byte = static_cast<unsigned char>(ch);
+    if(std::isalnum(byte))
+      alnum++;
+    if(std::isalpha(byte))
+      alpha++;
+    if(std::ispunct(byte))
+      punctuation++;
+  }
+  if(value.size() < 6 && alpha < 3)
+    return false;
+  if(value.size() <= 5 && punctuation > 1)
+    return false;
+  if(alnum == 0)
+    return false;
+  confidence = is_pascal ? 0.72 : 0.65;
+  if(value.size() >= 8)
+    confidence += 0.08;
+  if(value.size() >= 16)
+    confidence += 0.05;
+  if(punctuation == 0)
+    confidence += 0.04;
+  return true;
+}
+
 }
 
 std::string format_address(uint32_t addr) {
@@ -761,7 +792,9 @@ std::vector<StringRegion> scan_strings(
       } else {
         if(ascii_len >= min_length) {
           std::string value(reinterpret_cast<const char*>(data.data() + ascii_start), ascii_len);
-          result.push_back({static_cast<uint32_t>(ascii_start), value, ascii_len, false});
+          double confidence = 0.0;
+          if(plausible_rom_string(value, false, confidence))
+            result.push_back({static_cast<uint32_t>(ascii_start), value, ascii_len, false, confidence});
         }
         ascii_start = 0;
         ascii_len = 0;
@@ -769,7 +802,9 @@ std::vector<StringRegion> scan_strings(
     }
     if(ascii_len >= min_length) {
       std::string value(reinterpret_cast<const char*>(data.data() + ascii_start), ascii_len);
-      result.push_back({static_cast<uint32_t>(ascii_start), value, ascii_len, false});
+      double confidence = 0.0;
+      if(plausible_rom_string(value, false, confidence))
+        result.push_back({static_cast<uint32_t>(ascii_start), value, ascii_len, false, confidence});
     }
   }
 
@@ -790,7 +825,9 @@ std::vector<StringRegion> scan_strings(
       }
       if(all_printable && len >= min_length) {
         std::string value(reinterpret_cast<const char*>(data.data() + i + 1), len);
-        result.push_back({static_cast<uint32_t>(i), value, len, true});
+        double confidence = 0.0;
+        if(plausible_rom_string(value, true, confidence))
+          result.push_back({static_cast<uint32_t>(i), value, len, true, confidence});
         i += len;
       }
     }
@@ -874,6 +911,7 @@ void classify_rom_structure(
   std::unordered_map<uint32_t, size_t> jumps;
   std::unordered_map<uint32_t, std::set<uint32_t>> refs;
   std::map<uint32_t, std::string> nearest_labels;
+  std::vector<uint32_t> instruction_addresses;
   std::vector<Xref> xrefs;
   std::vector<TrapCall> traps;
 
@@ -894,6 +932,7 @@ void classify_rom_structure(
       std::string operands;
       if(parse_disassembly_text_line(line, address, opcode_bytes, mnemonic, operands)) {
         line_index++;
+        instruction_addresses.push_back(address);
         if(!current_label.empty())
           nearest_labels.emplace(address, current_label);
         if(mnemonic == "syscall") {
@@ -949,10 +988,14 @@ void classify_rom_structure(
       continue;
     FunctionCandidate candidate;
     candidate.address = address;
+    candidate.end_address = 0;
     candidate.calls = call_count;
     candidate.jumps = jump_count;
     candidate.references = ref_count;
+    candidate.instruction_count = 0;
     candidate.confidence = std::min(0.95, 0.30 + (score / 20.0));
+    candidate.boundary_status = "unknown";
+    candidate.evidence = "inbound references from linear disassembly";
     auto label_it = nearest_labels.upper_bound(address);
     if(label_it != nearest_labels.begin()) {
       --label_it;
@@ -969,6 +1012,32 @@ void classify_rom_structure(
                 return score_a > score_b;
               return a.address < b.address;
             });
+  std::vector<size_t> sorted_function_indexes(function_candidates.size());
+  for(size_t i = 0; i < sorted_function_indexes.size(); i++)
+    sorted_function_indexes[i] = i;
+  std::sort(sorted_function_indexes.begin(), sorted_function_indexes.end(),
+            [&function_candidates](size_t a, size_t b) {
+              return function_candidates[a].address < function_candidates[b].address;
+            });
+  std::sort(instruction_addresses.begin(), instruction_addresses.end());
+  instruction_addresses.erase(std::unique(instruction_addresses.begin(), instruction_addresses.end()), instruction_addresses.end());
+  for(size_t sorted_index = 0; sorted_index < sorted_function_indexes.size(); sorted_index++) {
+    FunctionCandidate& candidate = function_candidates[sorted_function_indexes[sorted_index]];
+    uint32_t next_start = end_address;
+    if(sorted_index + 1 < sorted_function_indexes.size())
+      next_start = function_candidates[sorted_function_indexes[sorted_index + 1]].address;
+    if(next_start <= candidate.address)
+      continue;
+    const auto begin = std::lower_bound(instruction_addresses.begin(), instruction_addresses.end(), candidate.address);
+    const auto end = std::lower_bound(instruction_addresses.begin(), instruction_addresses.end(), next_start);
+    candidate.instruction_count = static_cast<size_t>(std::distance(begin, end));
+    if(candidate.instruction_count > 0) {
+      candidate.end_address = next_start;
+      candidate.boundary_status = "bounded_by_next_candidate";
+      candidate.evidence += "; provisional end is next function candidate";
+      candidate.confidence = std::min(0.95, candidate.confidence + 0.05);
+    }
+  }
   analysis.function_candidates = std::move(function_candidates);
 
   for(size_t offset = 0; offset + 16 <= data.size();) {
@@ -989,9 +1058,16 @@ void classify_rom_structure(
       PointerTableRegion region;
       region.address = base_address + static_cast<uint32_t>(offset);
       region.entry_count = targets.size();
+      std::set<uint32_t> unique_targets(targets.begin(), targets.end());
+      if(unique_targets.size() < 2) {
+        offset += 2;
+        continue;
+      }
       if(targets.size() > 64)
         targets.resize(64);
       region.targets = std::move(targets);
+      region.confidence = std::min(0.90, 0.62 + (static_cast<double>(unique_targets.size()) / 64.0));
+      region.evidence = "aligned absolute ROM addresses; unique_targets=" + std::to_string(unique_targets.size());
       for(size_t i = 0; i < region.targets.size(); i++) {
         Xref xref;
         xref.from = region.address + static_cast<uint32_t>(i * 4u);
@@ -999,8 +1075,8 @@ void classify_rom_structure(
         xref.kind = "table";
         xref.mnemonic = "dc.l";
         xref.line = 0;
-        xref.confidence = xref_confidence_for_kind(xref.kind);
-        xref.source = "scanner:aligned-absolute-addresses";
+        xref.confidence = region.confidence;
+        xref.source = "scanner:aligned-absolute-addresses:unique-targets";
         xrefs.push_back(std::move(xref));
       }
       analysis.pointer_table_regions.push_back(std::move(region));
@@ -1152,7 +1228,7 @@ RomAnalysis scan_rom(
                      (static_cast<uint32_t>(scan_data[i + 1]) << 16) |
                      (static_cast<uint32_t>(scan_data[i + 2]) << 8) |
                      static_cast<uint32_t>(scan_data[i + 3]);
-      if(val >= options.start_address && val < options.start_address + scan_size) {
+      if(val >= options.start_address && val < options.start_address + scan_size && (val & 1u) == 0) {
         PointerTableEntry entry;
         entry.address = static_cast<uint32_t>(i);
         entry.target = val;
