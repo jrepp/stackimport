@@ -311,7 +311,21 @@ if(TARGET stackimport_framework)
 endif()
 
 if(STACKIMPORT_BUILD_TESTS)
-    add_executable(stackimport-tests TestsMain.cpp Tests.cpp)
+    add_executable(stackimport-tests
+        TestsMain.cpp
+        TestsShared.cpp
+        TestsApi.cpp
+        TestsBlockParser.cpp
+        TestsResourceTransforms.cpp
+        TestsResourceFork.cpp
+        TestsRomAnalysis.cpp
+        TestsQuickTime.cpp
+        TestsSound.cpp
+        TestsDisassembly.cpp
+        TestsStackFile.cpp
+        TestsPlatform.cpp
+        TestsAllocator.cpp
+    )
     target_link_libraries(stackimport-tests PRIVATE stackimport_static)
     if(STACKIMPORT_ENABLE_VENDOR)
         target_link_libraries(stackimport-tests PRIVATE vendor_mov2qt)
