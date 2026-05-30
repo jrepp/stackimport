@@ -22,6 +22,15 @@ void RunTests()
 	assert(slicedDisassembly.ok);
 	assert(slicedDisassembly.text.find("A9F0") != std::string::npos || slicedDisassembly.text.find("_SysBeep") != std::string::npos);
 
+	const uint8_t oversizedMacsbugSymbolBytes[] = {0x4E, 0x75, 0x81, 0x41, 0x7F, 0xFE};
+	const auto oversizedMacsbugSymbol = stackimport::DisassembleMac68kCodeResource(
+		std::span<const uint8_t>(oversizedMacsbugSymbolBytes, sizeof(oversizedMacsbugSymbolBytes)),
+		0,
+		sizeof(oversizedMacsbugSymbolBytes),
+		0);
+	assert(oversizedMacsbugSymbol.ok);
+	assert(!oversizedMacsbugSymbol.text.empty());
+
 	const auto badStart = stackimport::DisassembleMac68kCodeResource(code, 6, 0, 0);
 	assert(!badStart.ok);
 	const auto badSize = stackimport::DisassembleMac68kCodeResource(code, 4, 2, 0);

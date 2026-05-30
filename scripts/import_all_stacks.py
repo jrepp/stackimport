@@ -796,6 +796,72 @@ def is_archive(path: Path) -> bool:
     return lower.endswith(ARCHIVE_SUFFIXES)
 
 
+def extract_archive_by_index_fallback(source_path: Path, archive_extract_dir: Path, unar_path: str, extract_log: Path) -> bool:
+    lsar_path = shutil.which("lsar")
+    if lsar_path is None:
+        with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\nIndex fallback skipped: lsar is not available on PATH.\n")
+        return False
+
+    listing = subprocess.run(
+        [lsar_path, "-json", str(source_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+        log.write("\nIndex fallback lsar command: ")
+        log.write(subprocess.list2cmdline([lsar_path, "-json", str(source_path)]))
+        log.write("\n")
+        log.write(listing.stdout)
+    if listing.returncode != 0:
+        return False
+
+    try:
+        payload = json.loads(listing.stdout)
+    except json.JSONDecodeError:
+        with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\nIndex fallback failed: lsar did not emit valid JSON.\n")
+        return False
+
+    grouped_indexes: dict[str, list[str]] = {}
+    for item in payload.get("lsarContents", []):
+        if item.get("XADIsDirectory"):
+            continue
+        name = item.get("XADFileName")
+        index = item.get("XADIndex")
+        if not isinstance(name, str) or not isinstance(index, int):
+            continue
+        grouped_indexes.setdefault(name, []).append(str(index))
+
+    if not grouped_indexes:
+        with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\nIndex fallback found no file entries to extract.\n")
+        return False
+
+    fallback_root = archive_extract_dir / "__index_fallback"
+    fallback_root.mkdir(parents=True, exist_ok=True)
+    extracted_any = False
+    with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+        log.write("\nIndex fallback extracting file groups individually.\n")
+
+    for name, indexes in sorted(grouped_indexes.items()):
+        target_dir = fallback_root / filesystem_escape(name)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        command = [unar_path, "-indexes", "-no-directory", "-output-directory", str(target_dir), str(source_path), *indexes]
+        completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        with extract_log.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\nIndex fallback unar command: ")
+            log.write(subprocess.list2cmdline(command))
+            log.write("\n")
+            log.write(completed.stdout)
+        if completed.returncode == 0 and any(path.is_file() for path in target_dir.rglob("*")):
+            extracted_any = True
+
+    return extracted_any
+
+
 def count_matching(lines: list[str], pattern: str) -> int:
     return sum(1 for line in lines if pattern in line)
 
@@ -3397,19 +3463,30 @@ def main() -> int:
             completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
             extract_log.write_text(completed.stdout, encoding="utf-8", errors="replace")
             if completed.returncode != 0:
-                extract_failed += 1
-                update_source_status(conn, source_id, "extract_failed")
+                fallback_ok = extract_archive_by_index_fallback(source_path, archive_extract_dir, unar_path, extract_log)
+                if not fallback_ok:
+                    extract_failed += 1
+                    update_source_status(conn, source_id, "extract_failed")
+                    insert_format_gap(
+                        conn,
+                        args.run_id,
+                        "extract_failure",
+                        f"exit_code={completed.returncode}",
+                        rel_path,
+                        source_id=source_id,
+                        log_path=extract_log,
+                    )
+                    conn.commit()
+                    continue
                 insert_format_gap(
                     conn,
                     args.run_id,
-                    "extract_failure",
-                    f"exit_code={completed.returncode}",
+                    "extract_fallback",
+                    f"unar_exit_code={completed.returncode}; method=lsar_index_groups",
                     rel_path,
                     source_id=source_id,
                     log_path=extract_log,
                 )
-                conn.commit()
-                continue
 
             import_count = 0
             for extracted_path in iter_extracted_files(archive_extract_dir):

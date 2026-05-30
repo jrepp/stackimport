@@ -3317,6 +3317,10 @@ static DecodedSymbol try_decode_macsbug_symbol(StringReader& r) {
       if (num_constants & 1) {
         ++num_constants;
       }
+      if (num_constants > r.remaining()) {
+        r.go(start);
+        return {};
+      }
       return {symbol, num_constants};
     }
   }
