@@ -86,6 +86,12 @@ int cli_make_directory(const char* path, void*)
 #endif
 }
 
+struct FinderInfo {
+	std::string type;
+	std::string creator;
+};
+
+#if defined(__APPLE__)
 std::string fourcc_string(const char* bytes)
 {
 	std::string text;
@@ -97,11 +103,7 @@ std::string fourcc_string(const char* bytes)
 	}
 	return text;
 }
-
-struct FinderInfo {
-	std::string type;
-	std::string creator;
-};
+#endif
 
 FinderInfo read_finder_info(const fs::path& path)
 {
