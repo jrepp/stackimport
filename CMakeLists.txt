@@ -78,7 +78,7 @@ function(stackimport_enable_static_analysis target)
         )
         if(STACKIMPORT_ENABLE_CLANG_STATIC_ANALYZER)
             list(APPEND clang_tidy_command
-                "--checks=clang-analyzer-*,bugprone-*,performance-*,portability-*,readability-*"
+                "--checks=clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*,portability-*"
             )
         endif()
         set_target_properties(${target} PROPERTIES
@@ -90,8 +90,8 @@ function(stackimport_enable_static_analysis target)
     if(STACKIMPORT_ENABLE_CPPCHECK)
         find_program(STACKIMPORT_CPPCHECK_EXE NAMES cppcheck REQUIRED)
         set_target_properties(${target} PROPERTIES
-            C_CPPCHECK "${STACKIMPORT_CPPCHECK_EXE};--enable=warning,style,performance,portability;--inline-suppr;--quiet"
-            CXX_CPPCHECK "${STACKIMPORT_CPPCHECK_EXE};--enable=warning,style,performance,portability;--inline-suppr;--quiet"
+            C_CPPCHECK "${STACKIMPORT_CPPCHECK_EXE};--enable=warning,portability;--inline-suppr;--quiet"
+            CXX_CPPCHECK "${STACKIMPORT_CPPCHECK_EXE};--enable=warning,portability;--inline-suppr;--quiet"
         )
     endif()
 

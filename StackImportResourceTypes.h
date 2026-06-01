@@ -103,7 +103,7 @@ inline auto make_converted_resource_payload(
 	return payload;
 }
 
-inline auto emit_resource_payload(IResourceOutput& output, ResourcePayload payload) -> bool
+inline auto emit_resource_payload(IResourceOutput& output, const ResourcePayload& payload) -> bool
 {
 	ResourcePayload descriptor = payload;
 	descriptor.data.data = nullptr;
@@ -112,7 +112,7 @@ inline auto emit_resource_payload(IResourceOutput& output, ResourcePayload paylo
 	return output.on_resource_payload(payload);
 }
 
-inline auto emit_resource_payload(IResourceOutput* output, ResourcePayload payload) -> bool
+inline auto emit_resource_payload(IResourceOutput* output, const ResourcePayload& payload) -> bool
 {
 	if(output == nullptr)
 		return true;

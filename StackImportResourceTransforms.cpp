@@ -2931,7 +2931,9 @@ auto emit_snd_metadata_transform(
 		{
 			const uint16_t command_count = read_snd_u16(resource.data, command_count_offset);
 			JsonValue commands(rapidjson::kArrayType);
-			const size_t bounded_count = command_count < 32u ? command_count : 32u;
+			constexpr size_t kMaxSoundCommands = 32u;
+			const bool commands_truncated = command_count > kMaxSoundCommands;
+			const size_t bounded_count = commands_truncated ? kMaxSoundCommands : command_count;
 			for(size_t i = 0; i < bounded_count; i++)
 			{
 				const size_t offset = command_start + i * 8u;
@@ -2947,7 +2949,7 @@ auto emit_snd_metadata_transform(
 				commands.PushBack(item, allocator);
 			}
 			doc.AddMember("commands", commands, allocator);
-			if(command_count > bounded_count)
+			if(commands_truncated)
 				doc.AddMember("commandsTruncated", true, allocator);
 		}
 	}
@@ -3261,9 +3263,10 @@ auto emit_builtin_resource_transforms(
 
 	if(resource_type_is(resource, "SICN"))
 	{
-		if((resource.data.size % 32u) != 0)
+		constexpr size_t kSicnBytesPerIcon = 32u;
+		if((resource.data.size % kSicnBytesPerIcon) != 0)
 			return output.on_resource_error(ref, "SICN size is not a multiple of 32 bytes");
-		const size_t icon_count = resource.data.size / 32u;
+		const size_t icon_count = resource.data.size / kSicnBytesPerIcon;
 		for(size_t si = 0; si < icon_count; ++si)
 		{
 			ResourcePayload descriptor = make_converted_resource_payload(
@@ -3281,7 +3284,7 @@ auto emit_builtin_resource_transforms(
 
 			uint8_t rgba[16 * 16 * 4];
 			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
-			rsrcd::Bytes sicn = resource.data.slice(si * 32u, 32u);
+			rsrcd::Bytes sicn = resource.data.slice(si * kSicnBytesPerIcon, kSicnBytesPerIcon);
 			if(!rsrcd::img::decode_sicn(sicn, dst))
 				continue;
 			swap_bgra_to_rgba(rgba, 16u * 16u);

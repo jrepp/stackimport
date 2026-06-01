@@ -33,7 +33,7 @@ public:
 			stackimport_internal_note_allocation_failure();
 			return nullptr;
 		}
-		if(newPtr && originalPtr && originalSize > 0)
+		if(originalPtr && originalSize > 0)
 			std::memcpy(newPtr, originalPtr, std::min(originalSize, newSize));
 		Free(originalPtr);
 		return newPtr;

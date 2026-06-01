@@ -30,7 +30,9 @@ void xornstr(char * dest, const char * src, size_t n)
 {
 	for (size_t i = 0; i<n; i++)
 	{
-		dest[i] ^= src[i];
+		const auto lhs = static_cast<unsigned char>(dest[i]);
+		const auto rhs = static_cast<unsigned char>(src[i]);
+		dest[i] = static_cast<char>(lhs ^ rhs);
 	}
 }
 
