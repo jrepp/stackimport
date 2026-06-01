@@ -918,8 +918,8 @@ bool read_cinepak_vector(std::span<const uint8_t> data, size_t& pos, bool color,
 	vector.color = color;
 	if(color)
 	{
-		vector.u = static_cast<uint8_t>(128 + static_cast<int8_t>(data[pos + 4]));
-		vector.v = static_cast<uint8_t>(128 + static_cast<int8_t>(data[pos + 5]));
+		vector.u = data[pos + 4];
+		vector.v = data[pos + 5];
 	}
 	else
 	{
