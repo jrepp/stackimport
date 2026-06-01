@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define STACKIMPORT_API_VERSION 7u
+#define STACKIMPORT_API_VERSION 8u
 
 typedef struct stackimport_context stackimport_context;
 
@@ -180,6 +180,22 @@ typedef struct stackimport_import_options {
 	void* resource_user_data;
 } stackimport_import_options;
 
+typedef struct stackimport_resource_conversion_options {
+	uint32_t struct_size;
+	char type[4];
+	int32_t id;
+	uint32_t resource_flags;
+	uint32_t order;
+	const void* name;
+	size_t name_size;
+	const void* data;
+	size_t data_size;
+	uint32_t resource_payload_flags;
+	stackimport_resource_wants_fn resource_wants;
+	stackimport_resource_payload_fn resource_payload;
+	void* resource_user_data;
+} stackimport_resource_conversion_options;
+
 STACKIMPORT_API uint32_t STACKIMPORT_CALL stackimport_api_version(void);
 
 STACKIMPORT_API const char* STACKIMPORT_CALL stackimport_version_string(void);
@@ -193,6 +209,7 @@ STACKIMPORT_API void STACKIMPORT_CALL stackimport_allocator_init(stackimport_all
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_log_handler_init(stackimport_log_handler* handler);
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_platform_init(stackimport_platform* platform);
 STACKIMPORT_API void STACKIMPORT_CALL stackimport_import_options_init(stackimport_import_options* options);
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_resource_conversion_options_init(stackimport_resource_conversion_options* options);
 
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_size(void);
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_alignment(void);
@@ -234,6 +251,30 @@ STACKIMPORT_API void STACKIMPORT_CALL stackimport_context_destroy(stackimport_co
 STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	stackimport_context* context,
 	const stackimport_import_options* options);
+
+/*
+ * Convert a loose classic Mac resource payload without importing a stack.
+ * Provide a four-byte resource type such as "PICT", "snd ", "TEXT", "STR ",
+ * "ICON", "cicn", or another type supported by StackImport's built-in
+ * resource transforms. Native and converted payloads are delivered through the
+ * same callback model used by stackimport_import.
+ */
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_convert_resource(
+	const stackimport_resource_conversion_options* options);
+
+/*
+ * Standalone MacRoman-to-UTF-8 conversion for loose legacy text. Pass
+ * utf8_buffer = NULL and utf8_capacity = 0 to query the required UTF-8 byte
+ * size without writing output. Otherwise returns UTF-8 size on success and 0
+ * on failure. On failure, sets *out_error to a string that remains valid until
+ * the next call on the same thread.
+ */
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_mac_roman_to_utf8(
+	const void* mac_roman_data,
+	size_t mac_roman_size,
+	void* utf8_buffer,
+	size_t utf8_capacity,
+	const char** out_error);
 
 /*
  * Standalone snd-to-WAV conversion. Does not require a context or platform

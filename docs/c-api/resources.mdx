@@ -4,7 +4,7 @@ description: Stream native and converted resource payloads during import.
 ---
 
 Resource callbacks let embedders receive native or converted resource payloads
-during `stackimport_import`.
+during `stackimport_import` and from standalone loose-resource conversion.
 
 ```c
 options.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
@@ -18,3 +18,26 @@ non-zero on success. Pointers inside `stackimport_resource_payload` are valid
 only for the callback invocation.
 
 Payload formats are `NATIVE`, `RGBA32`, `JSON_UTF8`, `TEXT_UTF8`, and `BINARY`.
+
+Loose resource bytes can be converted without importing a stack:
+
+```c
+stackimport_resource_conversion_options conversion;
+stackimport_resource_conversion_options_init(&conversion);
+memcpy(conversion.type, "PICT", 4);
+conversion.data = pict_bytes;
+conversion.data_size = pict_size;
+conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+conversion.resource_payload = my_resource_payload;
+conversion.resource_user_data = user_data;
+
+stackimport_convert_resource(&conversion);
+```
+
+Use the classic Mac resource type when it is known from Finder metadata,
+extension mapping, or an archive catalog. Examples include `PICT`, `snd `,
+`TEXT`, `STR `, `ICON`, `ICN#`, `cicn`, and `CURS`.
+
+For loose MacRoman text that is not wrapped in a resource payload, call
+`stackimport_mac_roman_to_utf8`. Pass a null output buffer and zero capacity to
+query the required byte size, then call again with caller-owned storage.

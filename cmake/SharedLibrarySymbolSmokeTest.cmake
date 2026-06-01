@@ -24,6 +24,7 @@ set(required_symbols
     stackimport_log_handler_init
     stackimport_platform_init
     stackimport_import_options_init
+    stackimport_resource_conversion_options_init
     stackimport_context_size
     stackimport_context_alignment
     stackimport_context_abi_signature
@@ -36,6 +37,8 @@ set(required_symbols
     stackimport_context_create_with_log_handler
     stackimport_context_destroy
     stackimport_import
+    stackimport_convert_resource
+    stackimport_mac_roman_to_utf8
     stackimport_snd_to_wav
 )
 

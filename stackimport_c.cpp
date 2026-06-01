@@ -1,6 +1,8 @@
 #include "stackimport_c.h"
 
 #include "CStackFile.h"
+#include "StackImportResourceTransforms.h"
+#include "StackImportResourceTypes.h"
 #include "StackImportSoundConverter.h"
 #include "stackimport_logging.h"
 #include "stackimport_platform_internal.h"
@@ -17,6 +19,8 @@
 #include <direct.h>
 #include <malloc.h>
 #endif
+
+extern unsigned char sMacRomanToUTF8Table[128][5];
 
 struct stackimport_context {
 	uint32_t abi_signature;
@@ -217,34 +221,67 @@ stackimport_resource_payload api_resource_payload(const stackimport::ResourcePay
 class CApiResourceOutput final : public stackimport::IResourceOutput {
 public:
 	explicit CApiResourceOutput(const stackimport_import_options& options)
-		: options_(options)
+		: resource_payload_flags_(options.resource_payload_flags)
+		, resource_wants_(options.resource_wants)
+		, resource_payload_(options.resource_payload)
+		, resource_user_data_(options.resource_user_data)
+	{}
+
+	explicit CApiResourceOutput(const stackimport_resource_conversion_options& options)
+		: resource_payload_flags_(options.resource_payload_flags)
+		, resource_wants_(options.resource_wants)
+		, resource_payload_(options.resource_payload)
+		, resource_user_data_(options.resource_user_data)
 	{}
 
 	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
 	{
-		if(!options_.resource_payload)
+		if(!resource_payload_)
 			return false;
 		const bool converted = payload.format != stackimport::ResourcePayloadFormat::Native;
 		const uint32_t wantedFlag = converted ? STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED : STACKIMPORT_RESOURCE_PAYLOADS_NATIVE;
-		if((options_.resource_payload_flags & wantedFlag) == 0)
+		if((resource_payload_flags_ & wantedFlag) == 0)
 			return false;
-		if(!options_.resource_wants)
+		if(!resource_wants_)
 			return true;
 		const stackimport_resource_payload apiPayload = api_resource_payload(payload);
-		return options_.resource_wants(&apiPayload, options_.resource_user_data) != 0;
+		return resource_wants_(&apiPayload, resource_user_data_) != 0;
 	}
 
 	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override
 	{
-		if(!options_.resource_payload)
+		if(!resource_payload_)
 			return true;
 		const stackimport_resource_payload apiPayload = api_resource_payload(payload);
-		return options_.resource_payload(&apiPayload, payload.data.data, payload.data.size, options_.resource_user_data) != 0;
+		return resource_payload_(&apiPayload, payload.data.data, payload.data.size, resource_user_data_) != 0;
 	}
 
 private:
-	stackimport_import_options options_;
+	uint32_t resource_payload_flags_;
+	stackimport_resource_wants_fn resource_wants_;
+	stackimport_resource_payload_fn resource_payload_;
+	void* resource_user_data_;
 };
+
+std::string mac_roman_to_utf8_string(const uint8_t* data, size_t size)
+{
+	std::string result;
+	result.reserve(size);
+	for(size_t i = 0; i < size; i++)
+	{
+		const unsigned char ch = data[i];
+		if(ch >= 128)
+			result.append(reinterpret_cast<const char*>(sMacRomanToUTF8Table[ch - 128]));
+		else if(ch == 0x11)
+		{
+			static const unsigned char command_key[4] = {0xe2, 0x8c, 0x98, 0};
+			result.append(reinterpret_cast<const char*>(command_key));
+		}
+		else
+			result.push_back(static_cast<char>(ch));
+	}
+	return result;
+}
 
 }
 
@@ -322,6 +359,16 @@ STACKIMPORT_API void STACKIMPORT_CALL stackimport_import_options_init(stackimpor
 	*options = {};
 	options->struct_size = sizeof(stackimport_import_options);
 	options->resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_ALL;
+}
+
+STACKIMPORT_API void STACKIMPORT_CALL stackimport_resource_conversion_options_init(stackimport_resource_conversion_options* options)
+{
+	if(!options)
+		return;
+	*options = {};
+	options->struct_size = sizeof(stackimport_resource_conversion_options);
+	options->resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_ALL;
+	options->id = 0;
 }
 
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_context_size(void)
@@ -500,6 +547,90 @@ STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_import(
 	if(stackimport_internal_had_allocation_failure())
 		return STACKIMPORT_STATUS_ALLOCATION_FAILED;
 	return STACKIMPORT_STATUS_OK;
+}
+
+STACKIMPORT_API stackimport_status STACKIMPORT_CALL stackimport_convert_resource(
+	const stackimport_resource_conversion_options* options)
+{
+	if(!options ||
+		options->struct_size < sizeof(stackimport_resource_conversion_options) ||
+		!options->resource_payload ||
+		(!options->data && options->data_size != 0) ||
+		(!options->name && options->name_size != 0))
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+	if((options->resource_payload_flags & ~static_cast<uint32_t>(STACKIMPORT_RESOURCE_PAYLOADS_ALL)) != 0)
+		return STACKIMPORT_STATUS_UNSUPPORTED_OPTION;
+	if(options->type[0] == '\0' && options->type[1] == '\0' && options->type[2] == '\0' && options->type[3] == '\0')
+		return STACKIMPORT_STATUS_INVALID_ARGUMENT;
+
+	stackimport_internal_reset_allocation_failure();
+	CApiResourceOutput output(*options);
+	const auto* data = static_cast<const uint8_t*>(options->data);
+	const auto* name = static_cast<const uint8_t*>(options->name);
+	rsrcd::ResRef resource{};
+	resource.type = rsrcd::Bytes{reinterpret_cast<const uint8_t*>(options->type), 4};
+	resource.id = options->id;
+	resource.data = rsrcd::Bytes{data, options->data_size};
+	resource.name = rsrcd::Bytes{name, options->name_size};
+	resource.flags = static_cast<uint8_t>(options->resource_flags & 0xFFu);
+	resource.order = options->order;
+	const stackimport::ResourceRef ref = stackimport::resource_ref_from_resref(resource);
+
+	if((options->resource_payload_flags & STACKIMPORT_RESOURCE_PAYLOADS_NATIVE) != 0)
+	{
+		if(!stackimport::emit_resource_payload(output, stackimport::make_native_resource_payload(ref, resource.data)))
+			return STACKIMPORT_STATUS_IMPORT_FAILED;
+	}
+
+	if((options->resource_payload_flags & STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED) != 0)
+	{
+		if(!stackimport::emit_builtin_resource_transforms(resource, ref, output))
+			return STACKIMPORT_STATUS_IMPORT_FAILED;
+	}
+
+	if(stackimport_internal_had_allocation_failure())
+		return STACKIMPORT_STATUS_ALLOCATION_FAILED;
+	return STACKIMPORT_STATUS_OK;
+}
+
+STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_mac_roman_to_utf8(
+	const void* mac_roman_data,
+	size_t mac_roman_size,
+	void* utf8_buffer,
+	size_t utf8_capacity,
+	const char** out_error)
+{
+	if(out_error)
+		*out_error = nullptr;
+	if(!out_error || (!mac_roman_data && mac_roman_size != 0))
+	{
+		if(out_error)
+			*out_error = "invalid argument";
+		return 0;
+	}
+	const bool queryOnly = utf8_buffer == nullptr && utf8_capacity == 0;
+	if(!queryOnly && !utf8_buffer)
+	{
+		*out_error = "invalid output buffer";
+		return 0;
+	}
+
+	thread_local std::string utf8;
+	thread_local std::string error;
+	error.clear();
+	utf8.clear();
+	utf8 = mac_roman_to_utf8_string(static_cast<const uint8_t*>(mac_roman_data), mac_roman_size);
+
+	if(queryOnly)
+		return utf8.size();
+	if(utf8.size() > utf8_capacity)
+	{
+		*out_error = "output buffer too small";
+		return 0;
+	}
+	if(!utf8.empty())
+		std::memcpy(utf8_buffer, utf8.data(), utf8.size());
+	return utf8.size();
 }
 
 STACKIMPORT_API size_t STACKIMPORT_CALL stackimport_snd_to_wav(

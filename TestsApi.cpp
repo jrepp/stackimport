@@ -10,6 +10,37 @@
 
 namespace TestApi {
 
+struct ResourceConversionCapture {
+	int payloads = 0;
+	int native_payloads = 0;
+	int converted_payloads = 0;
+	uint32_t last_format = STACKIMPORT_RESOURCE_PAYLOAD_NATIVE;
+	uint32_t last_width = 0;
+	uint32_t last_height = 0;
+	std::string last_text;
+};
+
+int STACKIMPORT_CALL capture_converted_payloads(
+	const stackimport_resource_payload* payload,
+	const void* data,
+	size_t size,
+	void* user_data)
+{
+	assert(payload);
+	auto* capture = static_cast<ResourceConversionCapture*>(user_data);
+	capture->payloads++;
+	capture->last_format = payload->format;
+	capture->last_width = payload->width;
+	capture->last_height = payload->height;
+	if(payload->format == STACKIMPORT_RESOURCE_PAYLOAD_NATIVE)
+		capture->native_payloads++;
+	else
+		capture->converted_payloads++;
+	if(payload->format == STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8)
+		capture->last_text.assign(static_cast<const char*>(data), size);
+	return payload->payload_size == size ? 1 : 0;
+}
+
 void RunTests()
 {
 	assert(stackimport_context_size() <= 4096);
@@ -56,6 +87,52 @@ void RunTests()
 	options.flags = 1u << 31;
 	assert(stackimport_import(context, &options) == STACKIMPORT_STATUS_UNSUPPORTED_OPTION);
 	stackimport_context_destroy(context);
+
+	stackimport_resource_conversion_options conversion = {};
+	stackimport_resource_conversion_options_init(&conversion);
+	assert(conversion.resource_payload_flags == STACKIMPORT_RESOURCE_PAYLOADS_ALL);
+	std::memcpy(conversion.type, "TEXT", 4);
+	const std::vector<uint8_t> looseText = {'H', 0x8E, 'l', 'l', 'o'};
+	ResourceConversionCapture capture;
+	conversion.data = looseText.data();
+	conversion.data_size = looseText.size();
+	conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+	conversion.resource_payload = capture_converted_payloads;
+	conversion.resource_user_data = &capture;
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_OK);
+	assert(capture.payloads == 1);
+	assert(capture.converted_payloads == 1);
+	assert(capture.last_format == STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8);
+	assert(capture.last_text == "H\xC3\xA9llo");
+
+	const std::vector<uint8_t> iconPayload = TestShared::make_icon_payload();
+	ResourceConversionCapture iconCapture;
+	stackimport_resource_conversion_options iconConversion = {};
+	stackimport_resource_conversion_options_init(&iconConversion);
+	std::memcpy(iconConversion.type, "ICON", 4);
+	iconConversion.id = 128;
+	iconConversion.data = iconPayload.data();
+	iconConversion.data_size = iconPayload.size();
+	iconConversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+	iconConversion.resource_payload = capture_converted_payloads;
+	iconConversion.resource_user_data = &iconCapture;
+	assert(stackimport_convert_resource(&iconConversion) == STACKIMPORT_STATUS_OK);
+	assert(iconCapture.payloads == 1);
+	assert(iconCapture.last_format == STACKIMPORT_RESOURCE_PAYLOAD_RGBA32);
+	assert(iconCapture.last_width == 32);
+	assert(iconCapture.last_height == 32);
+
+	const uint8_t macRomanText[] = {'H', 0x8E, 'l', 'l', 'o'};
+	const char* conversionError = nullptr;
+	const size_t utf8Size = stackimport_mac_roman_to_utf8(macRomanText, sizeof(macRomanText), nullptr, 0, &conversionError);
+	assert(utf8Size == 6);
+	assert(conversionError == nullptr);
+	char utf8Buffer[8] = {};
+	assert(stackimport_mac_roman_to_utf8(macRomanText, sizeof(macRomanText), utf8Buffer, sizeof(utf8Buffer), &conversionError) == 6);
+	assert(conversionError == nullptr);
+	assert(std::string(utf8Buffer, 6) == "H\xC3\xA9llo");
+	assert(stackimport_mac_roman_to_utf8(macRomanText, sizeof(macRomanText), utf8Buffer, 3, &conversionError) == 0);
+	assert(std::strcmp(conversionError, "output buffer too small") == 0);
 }
 
 }
