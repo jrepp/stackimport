@@ -147,8 +147,8 @@ struct RomAnalysis {
   std::vector<Xref> xrefs;
   std::vector<TrapCall> traps;
   std::map<uint32_t, std::string> labels;
-  uint32_t entry_point;
-  size_t total_instructions;
+  uint32_t entry_point = 0;
+  size_t total_instructions = 0;
 };
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM

@@ -50,7 +50,7 @@ CBuf::CBuf( const CBuf& inTemplate, size_t startOffs, size_t amount )
 	else
 	{
 		alloc_buffer( amount );
-		if( amount > 0 )
+		if( amount > 0 && mShared->mBuffer )
 			::memcpy( mShared->mBuffer, inTemplate.buf(startOffs, amount), amount );
 	}
 }
@@ -167,11 +167,13 @@ void	CBuf::resize( size_t inSize )
 
 void	CBuf::memcpy( size_t toOffs, const char* fromPtr, size_t fromOffs, size_t amount )
 {
+	if( amount == 0 )
+		return;
 	if( !make_buffer_exclusive() )
 		return;
 	
 	char*		thePtr = mShared->mBuffer;
-	if( !fromPtr || toOffs > mShared->mSize || amount > (mShared->mSize -toOffs) )
+	if( !thePtr || !fromPtr || toOffs > mShared->mSize || amount > (mShared->mSize -toOffs) )
 		return;
 	
 	::memcpy( thePtr + toOffs, fromPtr +fromOffs, amount );
@@ -341,6 +343,8 @@ void	CBuf::tofile( const std::string& fpath )
 
 CBuf&	CBuf::operator = ( const CBuf& inTemplate )
 {
+	if( this == &inTemplate )
+		return *this;
 	if( mShared != inTemplate.mShared )
 	{
 		release_buffer();

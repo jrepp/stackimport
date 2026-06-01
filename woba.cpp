@@ -167,7 +167,6 @@ void woba_decode(picture & p, char * woba)
 		if( maskDataLength )
 		{
 			bx8 = maskBoundRectLeft & (~ 0x1F);	// Get high 11 bits (mask out low 5 bits).
-			bx = bx8 / 8;						// Bitshift by 3?
 			x = 0;
 			y = maskBoundRectTop;
 			rowwidth8 = ( (maskBoundRectRight & 0x1F)?((maskBoundRectRight | 0x1F)+1):maskBoundRectRight ) - (maskBoundRectLeft & (~ 0x1F));
@@ -309,7 +308,7 @@ void woba_decode(picture & p, char * woba)
 							x = 0;
 							while( repeat )
 							{
-								p.maskmemfill(0xFF, bx8, y, rowwidth);
+								p.maskmemfill(char_from_byte_value(0xFF), bx8, y, rowwidth);
 								y++;
 								repeat--;
 							}
@@ -337,7 +336,7 @@ void woba_decode(picture & p, char * woba)
 							x = 0;
 							while( repeat )
 							{
-								operand = patternbuffer[y & 7];
+								operand = static_cast<unsigned char>(patternbuffer[y & 7]);
 								#if DEBUGOUTPUT
 								WOBA_DEBUG("patt: " << __hex(operand));
 								#endif
@@ -453,7 +452,7 @@ void woba_decode(picture & p, char * woba)
 				buffer1.resize(size_from_nonnegative_int(rowwidth));
 				for( k = bx; x < rowwidth; k++, x++ )
 				{
-					buffer1[x] = 0xFF;	// was k as index.
+					buffer1[x] = char_from_byte_value(0xFF);	// was k as index.
 				}
 				for( k = maskBoundRectTop; k < maskBoundRectBottom; k++ )
 				{
@@ -467,7 +466,6 @@ void woba_decode(picture & p, char * woba)
 		if( pictureDataLength )
 		{
 			bx8 = pictureBoundRectLeft & (~ 0x1F);
-			bx = bx8/8;
 			x = 0;
 			y = pictureBoundRectTop;
 			rowwidth8 = ( (pictureBoundRectRight & 0x1F)?((pictureBoundRectRight | 0x1F)+1):pictureBoundRectRight ) - (pictureBoundRectLeft & (~ 0x1F));
@@ -604,7 +602,7 @@ void woba_decode(picture & p, char * woba)
 							x = 0;
 							while( repeat )
 							{
-								p.memfill( 0xFF, bx8, y, rowwidth );
+								p.memfill( char_from_byte_value(0xFF), bx8, y, rowwidth );
 								y++;
 								repeat--;
 							}
@@ -632,7 +630,7 @@ void woba_decode(picture & p, char * woba)
 							x = 0;
 							while( repeat )
 							{
-								operand = patternbuffer[y & 7];
+								operand = static_cast<unsigned char>(patternbuffer[y & 7]);
 								#if DEBUGOUTPUT
 								WOBA_DEBUG("patt: " << __hex(operand));
 								#endif

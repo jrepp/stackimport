@@ -290,6 +290,8 @@ unsigned int picture::coordbitmask( int x, int )
 				i=4*(1-(x%2));
 				m <<= i;
 				break;
+			default:
+				break;
 		}
 	}
 	return m;
@@ -401,7 +403,7 @@ void picture::buildmaskfromsurroundings()
 {
 	//debugprint();
 	
-	maskmemfill( 0xFF, 0, rowlength * height );		// All black.
+	maskmemfill( char_from_byte_value(0xFF), 0, rowlength * height );		// All black.
 	
 	//debugprint();
 	

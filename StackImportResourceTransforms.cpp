@@ -29,6 +29,12 @@ namespace stackimport {
 
 namespace {
 
+constexpr size_t kRgbaChannels = 4u;
+constexpr size_t kPatternPixels = 8u * 8u;
+constexpr size_t kCursorPixels = 16u * 16u;
+constexpr size_t kIconPixels = 32u * 32u;
+constexpr size_t kTiledPatternPixels = 64u * 64u;
+
 void swap_bgra_to_rgba(uint8_t* data, size_t pixel_count)
 {
 	for(size_t i = 0; i < pixel_count; ++i)
@@ -1257,8 +1263,9 @@ auto font_depth_name(uint16_t type_flags) -> const char*
 			return "4";
 		case 0x000Cu:
 			return "8";
+		default:
+			return "unknown";
 	}
-	return "unknown";
 }
 
 auto emit_font_transform(
@@ -2145,7 +2152,7 @@ auto decode_indexed_pixel_pattern_rgba(
 	{
 		width = 8;
 		height = 8;
-		if(rgba_size < 8u * 8u * 4u)
+		if(rgba_size < kPatternPixels * kRgbaChannels)
 			return rsrcd::Error::bounds();
 		decode_monochrome_pattern_rgba(pattern.monochrome_pattern, rgba);
 		return rsrcd::Result::ok();
@@ -2426,8 +2433,8 @@ auto emit_pixel_pattern_images(
 	const size_t pixel_bytes = static_cast<size_t>(width) * height * 4u;
 	uint8_t* color = static_cast<uint8_t*>(image_alloc.Malloc(pixel_bytes));
 	uint8_t* color_tiled = static_cast<uint8_t*>(image_alloc.Malloc(pixel_bytes * 64u));
-	uint8_t* mono = static_cast<uint8_t*>(image_alloc.Malloc(8u * 8u * 4u));
-	uint8_t* mono_tiled = static_cast<uint8_t*>(image_alloc.Malloc(64u * 64u * 4u));
+	uint8_t* mono = static_cast<uint8_t*>(image_alloc.Malloc(kPatternPixels * kRgbaChannels));
+	uint8_t* mono_tiled = static_cast<uint8_t*>(image_alloc.Malloc(kTiledPatternPixels * kRgbaChannels));
 	if(color == nullptr || color_tiled == nullptr || mono == nullptr || mono_tiled == nullptr)
 	{
 		StackImportRapidJsonAllocator::Free(color);
@@ -2707,7 +2714,7 @@ auto emit_crsr_transform(
 
 	StackImportRapidJsonAllocator image_alloc;
 	uint8_t* rgba = static_cast<uint8_t*>(image_alloc.Malloc(pixel_count * 4u));
-	uint8_t* bitmap = static_cast<uint8_t*>(image_alloc.Malloc(16u * 16u * 4u));
+	uint8_t* bitmap = static_cast<uint8_t*>(image_alloc.Malloc(kCursorPixels * kRgbaChannels));
 	if(rgba == nullptr || bitmap == nullptr)
 	{
 		StackImportRapidJsonAllocator::Free(rgba);
@@ -2722,9 +2729,9 @@ auto emit_crsr_transform(
 		StackImportRapidJsonAllocator::Free(bitmap);
 		return output.on_resource_error(ref, decode_result.message());
 	}
-	rsrcd::MutableBytes bitmap_dst{bitmap, 16u * 16u * 4u};
+	rsrcd::MutableBytes bitmap_dst{bitmap, kCursorPixels * kRgbaChannels};
 	rsrcd::img::decode_1bit(cursor.bitmap, cursor.mask, 16, 16, bitmap_dst);
-	swap_bgra_to_rgba(bitmap, 16u * 16u);
+	swap_bgra_to_rgba(bitmap, kCursorPixels);
 
 	image_descriptor.variant_index = 0;
 	image_descriptor.width = static_cast<uint32_t>(width);
@@ -2740,9 +2747,9 @@ auto emit_crsr_transform(
 		bitmap_descriptor.variant_index = 1;
 		bitmap_descriptor.width = 16;
 		bitmap_descriptor.height = 16;
-		bitmap_descriptor.row_bytes = 16 * 4;
+		bitmap_descriptor.row_bytes = 16u * kRgbaChannels;
 		bitmap_descriptor.description = "decoded monochrome color cursor bitmap";
-		bitmap_descriptor.data = rsrcd::Bytes{bitmap, 16u * 16u * 4u};
+		bitmap_descriptor.data = rsrcd::Bytes{bitmap, kCursorPixels * kRgbaChannels};
 		emitted = output.on_resource_payload(bitmap_descriptor);
 	}
 	StackImportRapidJsonAllocator::Free(rgba);
@@ -3089,12 +3096,12 @@ auto emit_curs_transform(
 	ResourcePayload image_descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::Rgba32,
-		rsrcd::Bytes{nullptr, 16u * 16u * 4u},
+		rsrcd::Bytes{nullptr, kCursorPixels * kRgbaChannels},
 		"image/x-rgba32",
 		"decoded 16x16 CURS pixels");
 	image_descriptor.width = 16;
 	image_descriptor.height = 16;
-	image_descriptor.row_bytes = 16 * 4;
+	image_descriptor.row_bytes = 16u * kRgbaChannels;
 	ResourcePayload json_descriptor = make_converted_resource_payload(
 		ref,
 		ResourcePayloadFormat::JsonUtf8,
@@ -3111,11 +3118,11 @@ auto emit_curs_transform(
 	int16_t hot_y = rsrcd::read_i16be(resource.data.data + 64);
 	if(wants_image)
 	{
-		uint8_t rgba[16 * 16 * 4];
+		uint8_t rgba[kCursorPixels * kRgbaChannels];
 		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 		if(!rsrcd::img::decode_curs(resource.data, dst, hot_x, hot_y))
 			return true;
-		swap_bgra_to_rgba(rgba, 16u * 16u);
+		swap_bgra_to_rgba(rgba, kCursorPixels);
 		image_descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 		image_descriptor.hotspot_x = hot_x;
 		image_descriptor.hotspot_y = hot_y;
@@ -3161,20 +3168,20 @@ auto emit_builtin_resource_transforms(
 		ResourcePayload descriptor = make_converted_resource_payload(
 			ref,
 			ResourcePayloadFormat::Rgba32,
-			rsrcd::Bytes{nullptr, 32u * 32u * 4u},
+			rsrcd::Bytes{nullptr, kIconPixels * kRgbaChannels},
 			"image/x-rgba32",
 			icon_offset == 0 ? "decoded 32x32 ICON pixels" : "decoded wrapped 32x32 ICON pixels");
 		descriptor.width = 32;
 		descriptor.height = 32;
-		descriptor.row_bytes = 32 * 4;
+		descriptor.row_bytes = 32u * kRgbaChannels;
 		if(!output.wants_resource_payload(descriptor))
 			return true;
 
-		uint8_t rgba[32 * 32 * 4];
+		uint8_t rgba[kIconPixels * kRgbaChannels];
 		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 		if(!rsrcd::img::decode_icon_bw(icon_data, dst))
 			return true;
-		swap_bgra_to_rgba(rgba, 32u * 32u);
+		swap_bgra_to_rgba(rgba, kIconPixels);
 		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 		return output.on_resource_payload(descriptor);
 	}
@@ -3184,20 +3191,20 @@ auto emit_builtin_resource_transforms(
 		ResourcePayload descriptor = make_converted_resource_payload(
 			ref,
 			ResourcePayloadFormat::Rgba32,
-			rsrcd::Bytes{nullptr, 32u * 32u * 4u},
+			rsrcd::Bytes{nullptr, kIconPixels * kRgbaChannels},
 			"image/x-rgba32",
 			"decoded 32x32 ICN# pixels");
 		descriptor.width = 32;
 		descriptor.height = 32;
-		descriptor.row_bytes = 32 * 4;
+		descriptor.row_bytes = 32u * kRgbaChannels;
 		if(!output.wants_resource_payload(descriptor))
 			return true;
 
-		uint8_t rgba[32 * 32 * 4];
+		uint8_t rgba[kIconPixels * kRgbaChannels];
 		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 		if(!rsrcd::img::decode_icn_bw(resource.data, dst))
 			return true;
-		swap_bgra_to_rgba(rgba, 32u * 32u);
+		swap_bgra_to_rgba(rgba, kIconPixels);
 		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 		return output.on_resource_payload(descriptor);
 	}
@@ -3217,21 +3224,21 @@ auto emit_builtin_resource_transforms(
 			ResourcePayload descriptor = make_converted_resource_payload(
 				ref,
 				ResourcePayloadFormat::Rgba32,
-				rsrcd::Bytes{nullptr, 8u * 8u * 4u},
+				rsrcd::Bytes{nullptr, kPatternPixels * kRgbaChannels},
 				"image/x-rgba32",
 				"decoded 8x8 PAT# pattern pixels");
 			descriptor.variant_index = static_cast<uint32_t>(pi);
 			descriptor.width = 8;
 			descriptor.height = 8;
-			descriptor.row_bytes = 8 * 4;
+			descriptor.row_bytes = 8u * kRgbaChannels;
 			if(!output.wants_resource_payload(descriptor))
 				continue;
 
-			uint8_t rgba[8 * 8 * 4];
+			uint8_t rgba[kPatternPixels * kRgbaChannels];
 			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 			if(!rsrcd::img::decode_pat(pat, dst))
 				continue;
-			swap_bgra_to_rgba(rgba, 8u * 8u);
+			swap_bgra_to_rgba(rgba, kPatternPixels);
 			descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 			if(!output.on_resource_payload(descriptor))
 				return false;
@@ -3243,20 +3250,20 @@ auto emit_builtin_resource_transforms(
 		ResourcePayload descriptor = make_converted_resource_payload(
 			ref,
 			ResourcePayloadFormat::Rgba32,
-			rsrcd::Bytes{nullptr, 8u * 8u * 4u},
+			rsrcd::Bytes{nullptr, kPatternPixels * kRgbaChannels},
 			"image/x-rgba32",
 			"decoded 8x8 PAT pattern pixels");
 		descriptor.width = 8;
 		descriptor.height = 8;
-		descriptor.row_bytes = 8 * 4;
+		descriptor.row_bytes = 8u * kRgbaChannels;
 		if(!output.wants_resource_payload(descriptor))
 			return true;
 
-		uint8_t rgba[8 * 8 * 4];
+		uint8_t rgba[kPatternPixels * kRgbaChannels];
 		rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 		if(!rsrcd::img::decode_pat(resource.data, dst))
 			return true;
-		swap_bgra_to_rgba(rgba, 8u * 8u);
+		swap_bgra_to_rgba(rgba, kPatternPixels);
 		descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 		return output.on_resource_payload(descriptor);
 	}
@@ -3272,22 +3279,22 @@ auto emit_builtin_resource_transforms(
 			ResourcePayload descriptor = make_converted_resource_payload(
 				ref,
 				ResourcePayloadFormat::Rgba32,
-				rsrcd::Bytes{nullptr, 16u * 16u * 4u},
+				rsrcd::Bytes{nullptr, kCursorPixels * kRgbaChannels},
 				"image/x-rgba32",
 				"decoded 16x16 SICN pixels");
 			descriptor.variant_index = static_cast<uint32_t>(si);
 			descriptor.width = 16;
 			descriptor.height = 16;
-			descriptor.row_bytes = 16 * 4;
+			descriptor.row_bytes = 16u * kRgbaChannels;
 			if(!output.wants_resource_payload(descriptor))
 				continue;
 
-			uint8_t rgba[16 * 16 * 4];
+			uint8_t rgba[kCursorPixels * kRgbaChannels];
 			rsrcd::MutableBytes dst{rgba, sizeof(rgba)};
 			rsrcd::Bytes sicn = resource.data.slice(si * kSicnBytesPerIcon, kSicnBytesPerIcon);
 			if(!rsrcd::img::decode_sicn(sicn, dst))
 				continue;
-			swap_bgra_to_rgba(rgba, 16u * 16u);
+			swap_bgra_to_rgba(rgba, kCursorPixels);
 			descriptor.data = rsrcd::Bytes{rgba, sizeof(rgba)};
 			if(!output.on_resource_payload(descriptor))
 				return false;

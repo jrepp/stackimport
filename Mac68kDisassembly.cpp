@@ -42,7 +42,7 @@ void append_byte_line(std::string& text, uint32_t address, uint8_t byte)
 
 #if defined(STACKIMPORT_HAS_RESOURCE_DASM) && STACKIMPORT_HAS_RESOURCE_DASM
 
-std::string trim_copy(std::string text)
+std::string trim_copy(const std::string& text)
 {
 	const std::string whitespace = " \t\r\n";
 	const size_t start = text.find_first_not_of(whitespace);

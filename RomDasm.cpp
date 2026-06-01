@@ -37,7 +37,7 @@ bool parse_address_prefix(const std::string& line, uint32_t& address) {
   return true;
 }
 
-std::string trim_text(std::string text) {
+std::string trim_text(const std::string& text) {
   const std::string whitespace = " \t\r\n";
   const size_t start = text.find_first_not_of(whitespace);
   if(start == std::string::npos)
@@ -529,8 +529,8 @@ void parse_rom_kurt_resources(
   }
   if(analysis.resources.size() > first_resource_index) {
     const size_t count = analysis.resources.size() - first_resource_index;
-    uint32_t start = analysis.resources[first_resource_index].data_address;
-    uint32_t end = analysis.resources[first_resource_index].data_address;
+    uint32_t start = analysis.resources[first_resource_index].map_address;
+    uint32_t end = analysis.resources[first_resource_index].address;
     for(size_t i = first_resource_index; i < analysis.resources.size(); i++) {
       start = std::min(start, analysis.resources[i].map_address);
       end = std::max(end, analysis.resources[i].address + static_cast<uint32_t>(analysis.resources[i].length));
@@ -659,9 +659,8 @@ RomInfo analyze_rom_header(std::span<const uint8_t> data, uint32_t base_address)
   info.crc32 = compute_crc32(data);
   info.sha256 = compute_sha256(data);
   if(data.size() >= 32) {
-    if(data[0] == 0x4E && data[1] == 0xF9 && data[2] == 0x00 && data[3] == 0x20)
-      info.machine_family = "68K";
-    else if(detect_rom_type(data))
+    const bool has_68k_reset_jump = data[0] == 0x4E && data[1] == 0xF9 && data[2] == 0x00 && data[3] == 0x20;
+    if(has_68k_reset_jump || detect_rom_type(data))
       info.machine_family = "68K";
   }
   if(data.size() >= 4) {

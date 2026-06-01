@@ -210,6 +210,17 @@ bool starts_with_case_insensitive(const std::string& text, const char* prefix)
 	return lowerText.rfind(lowerPrefix, 0) == 0;
 }
 
+struct ClassicMacFileInfo
+{
+	std::string finderType;
+	std::string creator;
+	std::string classification;
+	std::string dataForkSha256;
+	std::string resourceForkSha256;
+	uint64_t resourceForkBytes = 0;
+};
+
+#if defined(__APPLE__)
 std::string fourcc_string(const char* bytes)
 {
 	std::string text;
@@ -221,16 +232,7 @@ std::string fourcc_string(const char* bytes)
 	}
 	return text;
 }
-
-struct ClassicMacFileInfo
-{
-	std::string finderType;
-	std::string creator;
-	std::string classification;
-	std::string dataForkSha256;
-	std::string resourceForkSha256;
-	uint64_t resourceForkBytes = 0;
-};
+#endif
 
 std::string sha256_for_path(const std::string& path)
 {
@@ -547,6 +549,8 @@ void	NumVersionToStr( const unsigned char numVersion[4], char outStr[16] )
 		case 0x80:
 			theCh = 'v';
 			break;
+		default:
+			break;
 	}
 	
 	// NumVersion is Binary-coded decimal, i.e. 0x10 is displayed as 10, not 16 decimal:
@@ -812,7 +816,8 @@ bool	CStackFile::LoadStackBlock( int32_t stackID, CBuf& blockData )
 
 	char			pattern[8] = { 0 };
 	size_t			offs = 692;
-	if( blockData.hasdata( offs, 40 * 8 ) )
+	constexpr size_t kPatternBytes = 40u * 8u;
+	if( blockData.hasdata( offs, kPatternBytes ) )
 	{
 		for( int n = 0; n < 40; n++ )
 		{
@@ -1244,6 +1249,7 @@ bool	CStackFile::LoadReportTemplateBlock( int32_t blockID, CBuf& blockData )
 			case 1: units = "millimeters"; break;
 			case 2: units = "inches"; break;
 			case 3: units = "points"; break;
+			default: break;
 		}
 		document.AddMember("units", json_string(units, allocator), allocator);
 		document.AddMember("margins", json_rect(ReadBEInt16( blockData, 8 ), ReadBEInt16( blockData, 6 ), ReadBEInt16( blockData, 12 ), ReadBEInt16( blockData, 10 ), allocator), allocator);
@@ -1367,7 +1373,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 	if( bitmapID != 0 )
 	{
 		char bitmapFile[256] = { 0 };
-		snprintf( bitmapFile, sizeof(bitmapFile), "BMAP_%u.pbm", bitmapID );
+		snprintf( bitmapFile, sizeof(bitmapFile), "BMAP_%d.pbm", bitmapID );
 		document.AddMember("bitmapId", bitmapID, allocator);
 		document.AddMember("bitmap", json_string(bitmapFile, allocator), allocator);
 	}
@@ -1451,7 +1457,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			ReadBEInt16(blockData, currOffsIntoData +12),
 			ReadBEInt16(blockData, currOffsIntoData +10), allocator), allocator);
 		int16_t	moreFlags = ReadBEInt16(blockData, currOffsIntoData +14);
-		int8_t	styleFromLowNibble = moreFlags & 15;
+		int8_t	styleFromLowNibble = static_cast<int8_t>(moreFlags & 15);
 		const char*	styleStr = "unknown";
 		if( isButton )
 		{
@@ -1468,6 +1474,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 				case 9: styleStr = "default"; break;
 				case 10: styleStr = "oval"; break;
 				case 11: styleStr = "popup"; break;
+				default: break;
 			}
 		}
 		else
@@ -1479,11 +1486,12 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 				case 2: styleStr = "rectangle"; break;
 				case 4: styleStr = "shadow"; break;
 				case 7: styleStr = "scrolling"; break;
+				default: break;
 			}
 		}
 		part.AddMember("style", json_string(styleStr, allocator), allocator);
 		moreFlags = moreFlags >> 8;
-		int8_t	family = moreFlags & 15;
+		int8_t	family = static_cast<int8_t>(moreFlags & 15);
 		if( isButton )
 		{
 			part.AddMember("showName", (moreFlags & (1 << 7)) != 0, allocator);
@@ -1526,6 +1534,7 @@ bool	CStackFile::LoadLayerBlock( const char* vBlockType, int32_t blockID, CBuf& 
 			case 1: textAlignStr = "center"; break;
 			case -1: textAlignStr = "right"; break;
 			case -2: textAlignStr = "forceLeft"; break;
+			default: break;
 		}
 		part.AddMember("textAlign", json_string(textAlignStr, allocator), allocator);
 		int16_t	textFontID = ReadBEInt16(blockData, currOffsIntoData +22);
@@ -2029,7 +2038,9 @@ bool	CStackFile::WriteScriptIndex() const
 				const std::string referenceKind = inferred_reference_kind(lowerLine, lowerLiteral);
 				if(!referenceKind.empty())
 				{
-					const std::string referenceKey = referenceKind + "\n" + literal;
+					std::string referenceKey = referenceKind;
+					referenceKey.push_back('\n');
+					referenceKey += literal;
 					if(seenReferences.insert(referenceKey).second)
 					{
 						JsonValue reference(rapidjson::kObjectType);
@@ -2422,7 +2433,7 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 						&& static_cast<size_t>(pictureDataLength) <= blockData.size() - 52 - static_cast<size_t>(maskDataLength);
 					if( validWobaHeader )
 					{
-						snprintf( fname, sizeof(fname), "BMAP_%u.pbm", blockID );
+						snprintf( fname, sizeof(fname), "BMAP_%d.pbm", blockID );
 						
 						picture		thePicture;
 						woba_decode( thePicture, blockData.buf() );
@@ -2432,13 +2443,13 @@ bool	CStackFile::LoadFile( const std::string& fpath, const std::string& outputPa
 					else
 					{
 						stackimport_emit_diagnosticf( "Warning: 'BMAP' #%d has unsupported WOBA header; writing raw data instead.\n", blockID );
-						snprintf( fname, sizeof(fname), "BMAP_%u.raw", blockID );
+						snprintf( fname, sizeof(fname), "BMAP_%d.raw", blockID );
 						blockData.tofile( OutputPath(fname) );
 					}
 				}
 				else
 				{
-					snprintf( fname, sizeof(fname), "BMAP_%u.raw", blockID );
+					snprintf( fname, sizeof(fname), "BMAP_%d.raw", blockID );
 					blockData.tofile( OutputPath(fname) );
 				}
 				
