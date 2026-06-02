@@ -24,8 +24,8 @@ int main()
 {
 	stackimport_logging_init();
 
-	TestApi::RunTests();
 	TestBlockParser::RunTests();
+	TestApi::RunTests();
 	TestResourceTransforms::RunTests();
 	TestResourceFork::RunTests();
 	TestRomAnalysis::RunTests();
