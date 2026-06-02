@@ -308,6 +308,8 @@ int run_selected_mode(const Options& options)
 			return run_rom_mode(options);
 		case Mode::Import:
 			return run_import_mode(options);
+		case Mode::Convert:
+			return run_convert_mode(options);
 	}
 	return 5;
 }

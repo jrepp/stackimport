@@ -39,6 +39,9 @@ struct ParsedFlags {
 	bool emit_json = false;
 	bool emit_assets = false;
 	bool emit_resource_index = false;
+	std::string resource_type;
+	int32_t resource_id = 0;
+	bool resource_converted = true;
 };
 
 void add_stack_flags(CLI::App& app, ParsedFlags& flags)
@@ -72,6 +75,13 @@ void add_rom_options(CLI::App& app, ParsedFlags& flags)
 	app.add_flag("--emit-json", flags.emit_json, "Emit machine-readable JSON analysis output");
 	app.add_flag("--emit-assets", flags.emit_assets, "Emit converted or preserved asset outputs when supported");
 	app.add_flag("--emit-resource-index", flags.emit_resource_index, "Emit a portable ROM resource index for converter lookups");
+}
+
+void add_convert_options(CLI::App& app, ParsedFlags& flags)
+{
+	app.add_option("-t,--type", flags.resource_type, "Four-byte resource type such as PICT, snd , ICON, cicn");
+	app.add_option("-i,--id", flags.resource_id, "Numeric resource ID");
+	app.add_flag("--native", flags.resource_converted, "Output native format instead of converted");
 }
 
 bool parse_rom_base(const std::string& text, uint32_t& out)
@@ -124,9 +134,11 @@ int finalize_options(
 	const ParsedFlags& importFlags,
 	const ParsedFlags& scanFlags,
 	const ParsedFlags& romFlags,
+	const ParsedFlags& convertFlags,
 	const CLI::App* importCommand,
 	const CLI::App* scanCommand,
 	const CLI::App* romCommand,
+	const CLI::App* convertCommand,
 	Options& options)
 {
 	const ParsedFlags* selected = &root;
@@ -144,6 +156,11 @@ int finalize_options(
 	{
 		options.mode = Mode::Rom;
 		selected = &romFlags;
+	}
+	else if(*convertCommand)
+	{
+		options.mode = Mode::Convert;
+		selected = &convertFlags;
 	}
 	else if(root.legacy_scan)
 	{
@@ -177,6 +194,17 @@ int finalize_options(
 		stackimport_quill_diagnosticf("Error: QuickTime import options require import mode.\n");
 		return 3;
 	}
+	if(options.mode == Mode::Convert)
+	{
+		if(root.resource_type.empty())
+		{
+			stackimport_quill_diagnosticf("Error: --type is required for convert mode.\n");
+			return 3;
+		}
+		options.resource_type = root.resource_type;
+		options.resource_id = convertFlags.resource_id;
+		options.resource_converted = convertFlags.resource_id == 0 ? true : convertFlags.resource_converted;
+	}
 
 	const std::string romBaseText = selected->rom_base.empty() ? root.rom_base : selected->rom_base;
 	if(!parse_rom_base(romBaseText, options.rom_base_address))
@@ -202,6 +230,7 @@ int parse_arguments(int argc, char* const argv[], Options& options)
 	ParsedFlags importFlags;
 	ParsedFlags scanFlags;
 	ParsedFlags romFlags;
+	ParsedFlags convertFlags;
 
 	CLI::App app{"Read HyperCard stacks and analyze classic Mac ROM images."};
 	app.option_defaults()->always_capture_default();
@@ -237,6 +266,11 @@ int parse_arguments(int argc, char* const argv[], Options& options)
 	add_rom_options(*romCommand, romFlags);
 	romCommand->add_option("input", romFlags.input_path, "Input ROM path")->required();
 
+	CLI::App* convertCommand = app.add_subcommand("convert", "Convert a loose resource file to modern format");
+	add_output_option(*convertCommand, convertFlags);
+	add_convert_options(*convertCommand, convertFlags);
+	convertCommand->add_option("input", convertFlags.input_path, "Input resource file path")->required();
+
 	try
 	{
 		app.parse(argc, argv);
@@ -256,9 +290,11 @@ int parse_arguments(int argc, char* const argv[], Options& options)
 		importFlags,
 		scanFlags,
 		romFlags,
+		convertFlags,
 		importCommand,
 		scanCommand,
 		romCommand,
+		convertCommand,
 		options);
 }
 

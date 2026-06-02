@@ -291,6 +291,7 @@ endif()
 add_executable(stackimport
     main.cpp
     StackImportCliCommon.cpp
+    StackImportCliConvertMode.cpp
     StackImportCliImportMode.cpp
     StackImportCliOptions.cpp
     StackImportCliRomMode.cpp

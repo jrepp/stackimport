@@ -13,6 +13,7 @@ enum class Mode {
 	Import,
 	Scan,
 	Rom,
+	Convert,
 };
 
 struct Options {
@@ -32,6 +33,9 @@ struct Options {
 	bool emit_resource_index = false;
 	bool exit_after_parse = false;
 	uint32_t rom_base_address = 0;
+	std::string resource_type;
+	int32_t resource_id = 0;
+	bool resource_converted = true;
 };
 
 const char* syntax_string();
@@ -40,6 +44,7 @@ int parse_arguments(int argc, char* const argv[], Options& options);
 int run_scan_mode(const Options& options);
 int run_rom_mode(const Options& options);
 int run_import_mode(const Options& options);
+int run_convert_mode(const Options& options);
 int run_selected_mode(const Options& options);
 
 std::string absolute_path(const char* path);
