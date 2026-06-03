@@ -106,12 +106,16 @@ void RunTests()
 	assert(cinepakFrame.width == 4);
 	assert(cinepakFrame.height == 4);
 	assert(cinepakFrame.rgba.size() == 64);
-	// TODO: cinepak decode produces incorrect output (pre-existing bug)
-	// assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[1] == 80);
+	assert(cinepakFrame.rgba[2] == 80);
+	assert(cinepakFrame.rgba[3] == 255);
 	const std::vector<uint8_t> cinepakInterSkipFixture = TestShared::make_cinepak_inter_skip_fixture();
 	assert(stackimport::mov2qt::decode_cinepak_frame(std::span<const uint8_t>(cinepakInterSkipFixture.data(), cinepakInterSkipFixture.size()), cinepakFrame, cinepakError, &cinepakState));
-	// TODO: cinepak decode produces incorrect output (pre-existing bug)
-	// assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[0] == 80);
+	assert(cinepakFrame.rgba[1] == 80);
+	assert(cinepakFrame.rgba[2] == 80);
+	assert(cinepakFrame.rgba[3] == 255);
 
 	const std::vector<uint8_t> qtrleFixture = {
 		0x00, 0x00, 0x00, 0x1A,
