@@ -80,19 +80,49 @@ void test_resource_image_transforms()
 		assert(cursOutput.last_json.find("\"hotspotX\": 3") != std::string::npos);
 		assert(cursOutput.last_json.find("\"hotspotY\": 2") != std::string::npos);
 	}
+	{
+		TestShared::CountingResourceOutput sicnOutput = TestShared::parse_single_resource("SICN", 14, {0x80});
+		assert(sicnOutput.rgba_count == 0);
+		assert(sicnOutput.error_count == 1);
+		assert(sicnOutput.last_error == "SICN size is not a multiple of 32 bytes");
+	}
+	{
+		TestShared::CountingResourceOutput icl4Output = TestShared::parse_single_resource("icl4", 15, {0x00});
+		assert(icl4Output.rgba_count == 0);
+		assert(icl4Output.error_count == 1);
+		assert(icl4Output.last_error == "incorrect 4-bit icon data size");
+	}
 }
 
 void test_resource_text_transforms()
 {
 	TestShared::assert_text_resource_equals("STR ", 12, {5, 'H', 0x8E, 'l', 'l', 'o'}, "H\xC3\xA9llo");
+	{
+		TestShared::CountingResourceOutput strOutput = TestShared::parse_single_resource("STR ", 13, {5, 'H', 'e'});
+		assert(strOutput.text_count == 0);
+		assert(strOutput.error_count == 1);
+		assert(strOutput.last_error == "unexpected end");
+	}
 
 	std::vector<uint8_t> stringListPayload;
 	TestShared::append_u16be(stringListPayload, 2);
 	stringListPayload.insert(stringListPayload.end(), {3, 'O', 'n', 'e'});
 	stringListPayload.insert(stringListPayload.end(), {3, 'T', 'w', 'o'});
 	TestShared::assert_json_resource_contains("STR#", 44, stringListPayload, {"\"One\"", "\"Two\""});
+	{
+		TestShared::CountingResourceOutput strListOutput = TestShared::parse_single_resource("STR#", 45, {0, 2, 3, 'O', 'n', 'e'});
+		assert(strListOutput.json_count == 0);
+		assert(strListOutput.error_count == 1);
+		assert(strListOutput.last_error == "unexpected end");
+	}
 
 	TestShared::assert_json_resource_contains("TwCS", 1, {0, 1, 0, 5, 'T', 'w', 'C', 'S', '!'}, {"\"TwCS!\""});
+	{
+		TestShared::CountingResourceOutput twcsOutput = TestShared::parse_single_resource("TwCS", 2, {0, 1, 1, 1, 0});
+		assert(twcsOutput.json_count == 0);
+		assert(twcsOutput.error_count == 1);
+		assert(twcsOutput.last_error == "encrypted TwCS string unsupported");
+	}
 
 	std::vector<uint8_t> txstPayload;
 	txstPayload.push_back(0x03);

@@ -231,6 +231,13 @@ auto CountingResourceOutput::on_resource_payload(const stackimport::ResourcePayl
 	return true;
 }
 
+auto CountingResourceOutput::on_resource_error(const stackimport::ResourceRef&, const char* msg) -> bool
+{
+	error_count++;
+	last_error = msg ? msg : "";
+	return true;
+}
+
 void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t map_off, uint32_t data_len, uint32_t map_len)
 {
 	rsrcd::write_u32be(fork + 0, data_off);

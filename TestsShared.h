@@ -105,17 +105,20 @@ class CountingResourceOutput final : public stackimport::IResourceOutput {
 public:
 	auto wants_resource_payload(const stackimport::ResourcePayload& payload) -> bool override;
 	auto on_resource_payload(const stackimport::ResourcePayload& payload) -> bool override;
+	auto on_resource_error(const stackimport::ResourceRef&, const char* msg) -> bool override;
 
 	int wants_count = 0;
 	int native_count = 0;
 	int rgba_count = 0;
 	int json_count = 0;
 	int text_count = 0;
+	int error_count = 0;
 	uint32_t last_width = 0;
 	uint32_t last_height = 0;
 	size_t last_payload_size = 0;
 	std::string last_json;
 	std::string last_text;
+	std::string last_error;
 };
 
 extern void write_basic_resource_fork_header(uint8_t* fork, uint32_t data_off, uint32_t map_off, uint32_t data_len, uint32_t map_len);
