@@ -42,6 +42,7 @@ struct ParsedFlags {
 	std::string resource_type;
 	int32_t resource_id = 0;
 	bool resource_converted = true;
+	bool resource_native = false;
 };
 
 void add_stack_flags(CLI::App& app, ParsedFlags& flags)
@@ -81,7 +82,7 @@ void add_convert_options(CLI::App& app, ParsedFlags& flags)
 {
 	app.add_option("-t,--type", flags.resource_type, "Four-byte resource type such as PICT, snd , ICON, cicn");
 	app.add_option("-i,--id", flags.resource_id, "Numeric resource ID");
-	app.add_flag("--native", flags.resource_converted, "Output native format instead of converted");
+	app.add_flag("--native", flags.resource_native, "Output native format instead of converted");
 }
 
 bool parse_rom_base(const std::string& text, uint32_t& out)
@@ -196,14 +197,14 @@ int finalize_options(
 	}
 	if(options.mode == Mode::Convert)
 	{
-		if(root.resource_type.empty())
+		if(selected->resource_type.empty())
 		{
 			stackimport_quill_diagnosticf("Error: --type is required for convert mode.\n");
 			return 3;
 		}
-		options.resource_type = root.resource_type;
+		options.resource_type = selected->resource_type;
 		options.resource_id = convertFlags.resource_id;
-		options.resource_converted = convertFlags.resource_id == 0 ? true : convertFlags.resource_converted;
+		options.resource_converted = !convertFlags.resource_native;
 	}
 
 	const std::string romBaseText = selected->rom_base.empty() ? root.rom_base : selected->rom_base;

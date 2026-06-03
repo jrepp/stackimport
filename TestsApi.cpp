@@ -41,6 +41,17 @@ int STACKIMPORT_CALL capture_converted_payloads(
 	return payload->payload_size == size ? 1 : 0;
 }
 
+int STACKIMPORT_CALL reject_resource_payload(
+	const stackimport_resource_payload* payload,
+	void* user_data)
+{
+	assert(payload);
+	auto* capture = static_cast<ResourceConversionCapture*>(user_data);
+	capture->payloads++;
+	capture->last_format = payload->format;
+	return 0;
+}
+
 void RunTests()
 {
 	assert(stackimport_context_size() <= 4096);
@@ -104,6 +115,31 @@ void RunTests()
 	assert(capture.converted_payloads == 1);
 	assert(capture.last_format == STACKIMPORT_RESOURCE_PAYLOAD_TEXT_UTF8);
 	assert(capture.last_text == "H\xC3\xA9llo");
+	ResourceConversionCapture nativeCapture;
+	conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_NATIVE;
+	conversion.resource_user_data = &nativeCapture;
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_OK);
+	assert(nativeCapture.payloads == 1);
+	assert(nativeCapture.native_payloads == 1);
+	assert(nativeCapture.converted_payloads == 0);
+	assert(nativeCapture.last_format == STACKIMPORT_RESOURCE_PAYLOAD_NATIVE);
+	ResourceConversionCapture rejectedCapture;
+	conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+	conversion.resource_wants = reject_resource_payload;
+	conversion.resource_user_data = &rejectedCapture;
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_OK);
+	assert(rejectedCapture.payloads == 1);
+	assert(rejectedCapture.converted_payloads == 0);
+	conversion.resource_wants = nullptr;
+	conversion.resource_user_data = &capture;
+	conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_ALL + 1u;
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_UNSUPPORTED_OPTION);
+	conversion.resource_payload_flags = STACKIMPORT_RESOURCE_PAYLOADS_CONVERTED;
+	conversion.resource_payload = nullptr;
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_INVALID_ARGUMENT);
+	conversion.resource_payload = capture_converted_payloads;
+	conversion.struct_size = offsetof(stackimport_resource_conversion_options, resource_payload);
+	assert(stackimport_convert_resource(&conversion) == STACKIMPORT_STATUS_INVALID_ARGUMENT);
 
 	const std::vector<uint8_t> iconPayload = TestShared::make_icon_payload();
 	ResourceConversionCapture iconCapture;

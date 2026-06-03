@@ -487,6 +487,13 @@ endif()
 
 if(STACKIMPORT_BUILD_TESTS)
     add_test(NAME stackimport-tests COMMAND stackimport-tests)
+    add_test(
+        NAME stackimport-cli-convert-acceptance
+        COMMAND "${CMAKE_COMMAND}"
+            "-DSTACKIMPORT_CLI=$<TARGET_FILE:stackimport>"
+            "-DSTACKIMPORT_TEST_DIR=${CMAKE_BINARY_DIR}/cli-convert-acceptance"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CliConvertAcceptanceTest.cmake"
+    )
     find_program(STACKIMPORT_PKG_CONFIG_EXE NAMES pkg-config)
     if(STACKIMPORT_PKG_CONFIG_EXE AND NOT WIN32)
         add_test(
