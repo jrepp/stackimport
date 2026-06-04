@@ -2,8 +2,11 @@
 
 #include "stackimport_logging.h"
 
-#include <fstream>
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <string>
+#include <vector>
 
 namespace stackimport::cli {
 
